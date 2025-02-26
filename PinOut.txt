@@ -1,0 +1,8 @@
+Mittlerer Button (MB)   10
+Rechter Button (RB)     11
+HX711_dout              12
+HX711_sck               13
+Relay Muehle            16
+Rotary DT (oder SCK)    17
+Rotary SW               18
+Rotary SCK (oder DT)    21

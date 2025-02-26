@@ -1,0 +1,164 @@
+void RefreshFooter0()
+{
+  /*tft.setTextColor(TFT_BLACK);
+        tft.setCursor (12, 5);
+        tft.print("Original ADAfruit font!");
+
+        // The new larger fonts do not use the .setCursor call, coords are embedded
+        tft.setTextColor(TFT_BLACK, TFT_BLACK); // Do not plot the background colour
+
+        // Overlay the black text on top of the rainbow plot (the advantage of not drawing the backgorund colour!)
+        tft.drawCentreString("Font size 2", 80, 14, 2); // Draw text centre at position 80, 12 using font 2
+
+        //tft.drawCentreString("Font size 2",81,12,2); // Draw text centre at position 80, 12 using font 2
+
+        tft.drawCentreString("Font size 4", 80, 30, 4); // Draw text centre at position 80, 24 using font 4
+
+        tft.drawCentreString("12.34", 80, 54, 6); // Draw text centre at position 80, 24 using font 6
+
+        tft.drawCentreString("12.34 is in font size 6", 80, 92, 2); // Draw text centre at position 80, 90 using font 2
+
+        // Note the x position is the top left of the font!
+        */
+  
+  tft.drawLine(1, 98, 160, 98, TFT_GREEN);
+  tft.setCursor (24, 112);
+  tft.print("Set             Grind");
+  tft.setCursor(0, 120);
+  tft.print("     ");
+  tft.write(0X19);
+  tft.print("                ");
+  tft.write(0X19);
+}
+void RefreshFooter1()
+{
+  tft.drawLine(1, 98, 160, 98, TFT_GREEN);
+  tft.setCursor(24, 112);
+  tft.print("Set   Menu up        ");
+  tft.setCursor(0, 120);
+  tft.print("     ");
+  tft.write(0X19);
+  tft.print("        ");
+  tft.write(0X19);
+  tft.print("        ");
+}
+
+void RefreshTFTDisplay()
+{
+  //tft.fillScreen(ST7735_BLACK);
+  // Header
+  
+
+  tft.setTextSize(1);
+  tft.setCursor(24, 1);
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.print(headerOfPageID[pageID]);
+  tft.drawLine(1, 14, 160, 14, TFT_GREEN);
+
+  // MenuEntries der Seite
+  tft.setCursor(24, 20);
+  tft.print(menuItemsOfPage[pageID][0]);
+  tft.setCursor(24, 36);
+  tft.print(menuItemsOfPage[pageID][1]);
+  tft.setCursor(24, 52);
+  tft.print(menuItemsOfPage[pageID][2]);
+  tft.setCursor(24, 68);
+  tft.print(menuItemsOfPage[pageID][3]);
+  tft.setCursor(24, 84);
+  if (actualWeightdDisplayed[pageID] == 0)
+  {
+    tft.print("");
+  }
+  if (actualWeightdDisplayed[pageID] == 1)
+  {
+    tft.print("Ist:  x.x g");
+  }
+  // Footer
+  if (footerOfPageID[pageID] == 0)
+  {
+    RefreshFooter0();
+  }
+  if (footerOfPageID[pageID] == 1)
+  {
+    RefreshFooter1();
+  }
+
+  //Cursor Position
+  if (menuItemPos == 0)                    // Über Encoder ist Menüpunkt 0 ausgewählt
+  {
+    Serial.println("Cursor Position = 0");
+    tft.setCursor(6, 20);
+    tft.setTextColor(TFT_WHITE, TFT_GREEN);
+    tft.print(" ");
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.write(0x10);
+    //Rest schwarz
+    tft.setCursor(6, 36);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.print("  ");
+    tft.setCursor(6, 52);
+    tft.print("  ");
+    tft.setCursor(6, 68);
+    tft.print("  ");
+  }
+  else if (menuItemPos == 1)                 // Über Encoder ist Menüpunkt 1 ausgewählt
+  {
+    Serial.println("Cursor Position = 1");
+    tft.setCursor(6, 36);
+    tft.setTextColor(TFT_WHITE, TFT_GREEN);
+    tft.print(" ");
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.write(0x10);
+    //Rest schwarz
+    tft.setCursor(6, 20);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.print("  ");
+    tft.setCursor(6, 52);
+    tft.print("  ");
+    tft.setCursor(6, 68);
+    tft.print("  ");
+  }
+  else if (menuItemPos == 2)                 // Über Encoder ist Menüpunkt 2 ausgewählt
+  {
+    Serial.println("Cursor Position = 2");
+    tft.setCursor(6, 52);
+    tft.setTextColor(TFT_WHITE, TFT_GREEN);
+    tft.print(" ");
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.write(0x10);
+    //Rest schwarz
+    tft.setCursor(6, 20);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.print("  ");
+    tft.setCursor(6, 36);
+    tft.print("  ");
+    tft.setCursor(6, 68);
+    tft.print("  ");
+  }
+  else if (menuItemPos == 3)                 // Über Encoder ist Menüpunkt3 ausgewählt
+  {
+    Serial.println("Cursor Position = 3");
+    tft.setCursor(6, 68);
+    tft.setTextColor(TFT_WHITE, TFT_GREEN);
+    tft.print(" ");
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.write(0x10);
+    //Rest schwarz
+    tft.setCursor(6, 20);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.print("  ");
+    tft.setCursor(6, 36);
+    tft.print("  ");
+    tft.setCursor(6, 52);
+    tft.print("  ");
+  }
+}
+
+
+void RefreshTFTSetWeightST()
+{
+  tft.setCursor(60, 68);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.print(setWeightSTAsString);
+}
