@@ -36,6 +36,7 @@
 #include <ElegantOTA.h>
 #include <SPIFFS.h>
 #include "time.h"
+#include "wifi_secrets.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -114,13 +115,6 @@ const unsigned char PROGMEM wlanconnected16x16 [38] = {
 0B00000000,0B00000000
 };
 
-// WiFi credentials
-const char *WIFI_SSID = "REMOVED_WIFI_SSID";
-const char *WIFI_PASS = "REMOVED_WIFI_PASS";
-
-//const char *WIFI_SSID = "REMOVED_WIFI_SSID";
-//const char *WIFI_PASS = "REMOVED_WIFI_PASS";
-
 // for Preferences.h
 #define RW_MODE false
 #define RO_MODE true
@@ -194,7 +188,7 @@ const String headerOfPageID[] =
 { "Single-Dose-Waage        ",   // 0
   "Einstellungen             ",  // 1
   "Siebtraeger               ",  // 2
-  "Stoppuhr                   ", // 3
+  "Stoppuhr                 ", // 3
   "Soll einstellen            ",   // 4
   "Gefaess messen 1/4       " ,  // 5
   "Kalibrieren 1/3          ",   // 6
@@ -219,15 +213,15 @@ const String headerOfPageID[] =
 
 String menuItemsOfPage[24][4] =
 {  // Menu 0                      Menu 1                                 Menu 2                           Menu 3                               Page ID
-  {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                  ",     "Soll:              "},                   //0
+  {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                ",       "Soll:              "},                   //0
   {"Gefaess messen         ",    "Kalibrieren               ",          "Autodetect            "        , "Pflege/Daten       "},               //1
   {"Bodenloser ST         ",     "1er-Siebtraeger         ",            "2er-Siebtraeger",                "Custom-ST          "},               //2
   {"                           ","                           ",         "                           ",    "                           "},       //3
-  {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                  ",     "Soll:              "},               //4
-  {"Gefaess 1                ",  "Gefaess 2                         ",  "Gefaess 3                   ", "Gefaess 4                   "},        //5
+  {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                ",       "Soll:              "},               //4
+  {"Gefaess 1                ",  "Gefaess 2                         ",  "Gefaess 3              ",        "Gefaess 4            "},        //5
   {"Tarieren                 ",  "                              ",      "                              ", "                            "},      //6
   {"An                        ",  "Aus                         ",       "                              ", "                            "},      //7
-  {"Reinigung Muehle    ",       "Reinigung Kaffeem.        ",          "Filterwechsel         ",         "Daten                      "},       //8
+  {"Reinigung Muehle    ",       "Reinigung Kaffeem.        ",          "Filterwechsel         ",         "Daten                  "},       //8
   {gefaess[selectedGefaess],     "Tarieren                   ",         "                              ", "                            "},      //9
   {"Gewicht aufl.       ",       "Gewicht:      ",                      "                              ", "                            "},      //10
   {menuentryTageReinigung   ,    "Reset                       ",        "                              ", "                            "},      //11
