@@ -497,13 +497,7 @@ void initSPIFFS() {
 void initWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  delay(200);
-  //Serial.printf("Trying to connect [%s] ", WiFi.macAddress().c_str());
-  //while (WiFi.status() != WL_CONNECTED) {
-  //    debugln(".");
-  //    delay(500);
-  //}
-  Serial.printf(" %s\n", WiFi.localIP().toString().c_str());
+  debugln("WiFi connect started");
 }
 
 void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info){
@@ -642,7 +636,7 @@ void RedrawTFTStopWatch(){
   else if (stopWatchRunning == 1){
 	  elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
   }
-  stopWatchZehntel = elapsedTimeStopWatch % 10;
+  stopWatchZehntel = (elapsedTimeStopWatch / 100) % 10;
   stopWatchSS = (elapsedTimeStopWatch/1000) % 60;
   stopWatchMM = (elapsedTimeStopWatch/(1000*60)) % 60;
   stopWatchHH = (elapsedTimeStopWatch/(1000*60*60));
@@ -686,7 +680,7 @@ if (stopWatchRunning == 0){
 else if (stopWatchRunning == 1){
 	elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
 }
-stopWatchZehntel = elapsedTimeStopWatch % 10;
+stopWatchZehntel = (elapsedTimeStopWatch / 100) % 10;
 stopWatchSS = (elapsedTimeStopWatch/1000) % 60;
 stopWatchMM = (elapsedTimeStopWatch/(1000*60)) % 60;
 stopWatchHH = (elapsedTimeStopWatch/(1000*60*60));
@@ -2591,6 +2585,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
         }
         if (stopWatchRunning == 0){
           stopTimeStopWatch = millis();
+          elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
         }
         //RefreshTFTStopWatch();
         }
@@ -2690,6 +2685,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
            stopTimeStopWatch = millis();
            startTimeStopWatch = stopTimeStopWatch;
            oldElapsedTimeStopWatch = 0;
+           elapsedTimeStopWatch = 0;
            RedrawTFTStopWatch();
      }
     //#######################################
@@ -3381,8 +3377,7 @@ void setup()
   LoadCell.setCalFactor(calFactor);
   loadCellInitializing = false;
 
-  WiFi.disconnect(true);
-  delay(1000);
+  WiFi.disconnect(true, true);
   WiFi.onEvent(WiFiStationConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
   WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
