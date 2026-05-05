@@ -43,3 +43,5 @@ src/secrets.h
 # Temporary / test files
 # ==============================
 test/
+# Local history-cleanup helper
+replacements.txt
