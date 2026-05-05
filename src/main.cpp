@@ -469,6 +469,11 @@ int oldStopWatchMM = 100;
 int oldStopWatchHH = 100;
 //String stopWatchAsString;
 
+const unsigned long MS_PER_TENTH = 100UL;
+const unsigned long MS_PER_SEC = 1000UL;
+const unsigned long MS_PER_MIN = 60UL * MS_PER_SEC;
+const unsigned long MS_PER_HOUR = 60UL * MS_PER_MIN;
+
 
 Preferences preferences;
 
@@ -628,18 +633,33 @@ void printLocalTime()
 //##############################################################
 // Funktionen Display
 //##############################################################
+
+void updateStopWatch()
+{
+  if (stopWatchRunning == 0) {
+    elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
+  } else {
+    elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
+  }
+}
+
+void updateStopWatchParts()
+{
+  stopWatchZehntel = (elapsedTimeStopWatch / MS_PER_TENTH) % 10;
+  stopWatchSS = (elapsedTimeStopWatch / MS_PER_SEC) % 60;
+  stopWatchMM = (elapsedTimeStopWatch / MS_PER_MIN) % 60;
+  stopWatchHH = (elapsedTimeStopWatch / MS_PER_HOUR);
+}
+
+void updateStopWatchForDisplay()
+{
+  updateStopWatch();
+  updateStopWatchParts();
+}
+
 // Einträge Datum, Sekunden, Minuten und Stunden werden komplett neu gezeichnet 
 void RedrawTFTStopWatch(){
-  if (stopWatchRunning == 0){
-	elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
-  }
-  else if (stopWatchRunning == 1){
-	  elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
-  }
-  stopWatchZehntel = (elapsedTimeStopWatch / 100) % 10;
-  stopWatchSS = (elapsedTimeStopWatch/1000) % 60;
-  stopWatchMM = (elapsedTimeStopWatch/(1000*60)) % 60;
-  stopWatchHH = (elapsedTimeStopWatch/(1000*60*60));
+  updateStopWatchForDisplay();
   /*char stopWatchZehntelChar[4];
   char stopWatchSSChar[4];
   char stopWatchMMChar[4];
@@ -674,16 +694,7 @@ void RedrawTFTStopWatch(){
 
 void RefreshTFTStopWatch(){
 	
-if (stopWatchRunning == 0){
-	elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
-}
-else if (stopWatchRunning == 1){
-	elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
-}
-stopWatchZehntel = (elapsedTimeStopWatch / 100) % 10;
-stopWatchSS = (elapsedTimeStopWatch/1000) % 60;
-stopWatchMM = (elapsedTimeStopWatch/(1000*60)) % 60;
-stopWatchHH = (elapsedTimeStopWatch/(1000*60*60));
+updateStopWatchForDisplay();
 /*String stopWatchZehntelString = String(stopWatchZehntel);
 String stopWatchSSString = String(stopWatchSS) + ".";
 String stopWatchMMString = String(stopWatchMM) + ":";
