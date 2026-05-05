@@ -28,8 +28,16 @@ Thumbs.db
 # ==============================
 # Secrets / Credentials
 # ==============================
+# Lokale Zugangsdaten niemals committen
 wifi_secrets.h
 secrets.h
+include/wifi_secrets.h
+include/secrets.h
+src/wifi_secrets.h
+src/secrets.h
+
+# Beispiel-Dateien bleiben erlaubt
+!include/wifi_secrets_example.h
 
 # ==============================
 # Temporary / test files
