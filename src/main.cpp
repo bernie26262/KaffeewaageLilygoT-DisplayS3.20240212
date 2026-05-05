@@ -615,7 +615,7 @@ void initWebServer() {
 
 void printLocalTime()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -771,7 +771,7 @@ void EraseTFTStopWatch(){
 
 void RedrawTFTTimeToCleanMuehle()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -828,7 +828,7 @@ void RedrawTFTTimeToCleanMuehle()
 
 void RedrawTFTTimeToCleanKaffeem()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -883,7 +883,7 @@ void RedrawTFTTimeToCleanKaffeem()
 
 void RedrawTFTTimeToChangeFilter()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -939,7 +939,7 @@ void RedrawTFTTimeToChangeFilter()
 
 void RefreshTFTTimeToCleanMuehle()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -1043,7 +1043,7 @@ void RefreshTFTTimeToCleanMuehle()
 
 void RefreshTFTTimeToCleanKaffeem()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -1146,7 +1146,7 @@ void RefreshTFTTimeToCleanKaffeem()
 
 void RefreshTFTTimeToChangeFilter()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -1253,7 +1253,7 @@ void RefreshTFTTimeToChangeFilter()
 
 void RedrawTFTTime()
 {
-  if(!getLocalTime(&timeinfo)){
+  if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -1292,7 +1292,7 @@ void RefreshTFTTime()
   {
     if (dateTimeDisplayed[pageID]==1)
     {
-    if(!getLocalTime(&timeinfo)){
+    if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
   }
@@ -3026,7 +3026,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     callFunctionOfPage[8] = 0;
     /*if (menuItemPos == 0)
     {
-      if(!getLocalTime(&timeinfo))
+      if(!getLocalTime(&timeinfo, 0))
     {
     debugln("Failed to obtain time");
     return;
@@ -3049,7 +3049,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     }
     if (menuItemPos == 1)
     {
-      if(!getLocalTime(&timeinfo))
+      if(!getLocalTime(&timeinfo, 0))
     {
     debugln("Failed to obtain time");
     return;
@@ -3071,7 +3071,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     }
     if (menuItemPos == 2)
     {
-      if(!getLocalTime(&timeinfo))
+      if(!getLocalTime(&timeinfo, 0))
     {
     debugln("Failed to obtain time");
     return;
@@ -3119,7 +3119,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     //RedrawTFTTimeToCleanMuehle();
     callFunctionOfPage[17] = 0;
-    if(!getLocalTime(&timeinfo))
+    if(!getLocalTime(&timeinfo, 0))
     {
     debugln("Failed to obtain time");
     return;
@@ -3150,7 +3150,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     //RedrawTFTTimeToCleanKaffeem();
     callFunctionOfPage[18] = 0;
-    if(!getLocalTime(&timeinfo))
+    if(!getLocalTime(&timeinfo, 0))
     {
     debugln("Failed to obtain time");
     return;
@@ -3171,7 +3171,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     //RedrawTFTTimeToChangeFilter();
     callFunctionOfPage[19] = 0;
-    if(!getLocalTime(&timeinfo))
+    if(!getLocalTime(&timeinfo, 0))
     {
     debugln("Failed to obtain time");
     return;
@@ -3487,33 +3487,37 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
 //##############################################
 // Warnungen
 //##############################################
- if(!getLocalTime(&timeinfo)){
-    debugln("Failed to obtain time");
-    return;
+ bool timeAvailableForWarnings = getLocalTime(&timeinfo, 0);
+ if(!timeAvailableForWarnings){
+    debugln("Time not available yet");
   }
- if (time(&now) - lastTimeMuehlenReinigungNTP > delayTimeMuehlenReinigung)
+ if (timeAvailableForWarnings)
   {
-    displayMuehleReinigen = 1;
-  }
- if (time(&now) - lastTimeMuehlenReinigungNTP <= delayTimeMuehlenReinigung)
-  {
-    displayMuehleReinigen = 0;
-  } 
- if (time(&now) - lastTimeKaffeemReinigungNTP > delayTimeKaffeemReinigung)
-  {
-    displayKaffeemReinigen = 1;
-  }
- if (time(&now) - lastTimeKaffeemReinigungNTP <= delayTimeKaffeemReinigung)
-  {
-    displayKaffeemReinigen = 0;
-  }
- if (time(&now) - lastTimeFilterWechselNTP > delayTimeFilterWechsel)
-  {
-    displayFilterwechseln = 1;
-  }
- if (time(&now) - lastTimeFilterWechselNTP <= delayTimeFilterWechsel)
-  {
-    displayFilterwechseln = 0;
+    epocheTimeStamp = time(&now);
+    if (time(&now) - lastTimeMuehlenReinigungNTP > delayTimeMuehlenReinigung)
+    {
+      displayMuehleReinigen = 1;
+    }
+    if (time(&now) - lastTimeMuehlenReinigungNTP <= delayTimeMuehlenReinigung)
+    {
+      displayMuehleReinigen = 0;
+    }
+    if (time(&now) - lastTimeKaffeemReinigungNTP > delayTimeKaffeemReinigung)
+    {
+      displayKaffeemReinigen = 1;
+    }
+    if (time(&now) - lastTimeKaffeemReinigungNTP <= delayTimeKaffeemReinigung)
+    {
+      displayKaffeemReinigen = 0;
+    }
+    if (time(&now) - lastTimeFilterWechselNTP > delayTimeFilterWechsel)
+    {
+      displayFilterwechseln = 1;
+    }
+    if (time(&now) - lastTimeFilterWechselNTP <= delayTimeFilterWechsel)
+    {
+      displayFilterwechseln = 0;
+    }
   }
   anzahlWarnungen = 0;
   if (displayMuehleReinigen == 1) anzahlWarnungen++;
