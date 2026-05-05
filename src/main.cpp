@@ -2051,24 +2051,14 @@ void doTara(){
 
 void CalibrateSetWeight()
 {
-  boolean _resume = false;
-  while (_resume == false) 
-  {
-    LoadCell.update();
-    _resume = true;
-  }
+  LoadCell.update();
 }
   
 
 void CalibrateFactor()
 {
-  boolean _resume = false;
-  while (_resume == false)
-  {
-  LoadCell.refreshDataSet(); //refresh the dataset to be sure that the known mass is measured correctly
+    LoadCell.refreshDataSet(); //refresh the dataset to be sure that the known mass is measured correctly
   calFactor = LoadCell.getNewCalibration(setWeightCalibration); //get the new calibration value
-  _resume = true;
-  }
 }
 
 void DisplayOnOff()
