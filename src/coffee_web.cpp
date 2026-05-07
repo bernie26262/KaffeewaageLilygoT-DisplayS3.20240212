@@ -31,6 +31,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .maintenance-item { margin: 4px 0; }
     .maintenance-item.ok { color: #166534; }
     .maintenance-item.due { color: #b91c1c; font-weight: 750; }
+    .autodetect-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #f3f4f6; }
+    .autodetect-toggle { width: auto; min-width: 0; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; font-size: .9rem; background: #e5e7eb; color: #374151; }
+    .autodetect-toggle.on { background: #dcfce7; color: #166534; }
+    .autodetect-toggle.off { background: #e5e7eb; color: #6b7280; }
+    .autodetect-led { width: 11px; height: 11px; border-radius: 50%; background: #9ca3af; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+    .autodetect-led.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.18), 0 0 10px rgba(34,197,94,.65); }
     .weight { font-size: 4rem; line-height: 1; font-weight: 750; letter-spacing: -0.06em; margin: 12px 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
     .weight .unit { font-size: 2rem; letter-spacing: 0; margin-left: 6px; }
     .weight-footer { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
@@ -80,6 +86,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <div id="dashboardPage" class="page">
   <section class="card">
+    <div class="autodetect-row small">
+      <span>Autodetect</span>
+      <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
+        <span id="autodetectLed" class="autodetect-led"></span>
+        <span id="autodetectStatus">---</span>
+      </button>
+    </div>
     <div class="label">Gewicht</div>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
     <div class="weight-footer">
@@ -439,6 +452,15 @@ function render(s) {
   }
   el('status').textContent = s.status?.label || String(s.status?.mode ?? '---');
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
+  const autodetectOn = !!s.selection?.autodetect;
+  const autodetectToggle = el('autodetectToggle');
+  const autodetectLed = el('autodetectLed');
+  el('autodetectStatus').textContent = autodetectOn ? 'an' : 'aus';
+  autodetectToggle.classList.toggle('on', autodetectOn);
+  autodetectToggle.classList.toggle('off', !autodetectOn);
+  autodetectToggle.setAttribute('aria-pressed', autodetectOn ? 'true' : 'false');
+  autodetectToggle.title = autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten';
+  autodetectLed.classList.toggle('on', autodetectOn);
   syncStopwatchTimer(s.stopwatch);
   renderStopwatch();
   el('shotsTotal').textContent = s.stats?.shots?.total ?? 0;
@@ -523,6 +545,10 @@ function sendTargetWeight() {
 el('targetSave').addEventListener('click', sendTargetWeight);
 el('openSettings').addEventListener('click', () => showSettings(true));
 el('backDashboard').addEventListener('click', () => showSettings(false));
+el('autodetectToggle').addEventListener('click', () => {
+  const autodetectOn = !!lastState?.selection?.autodetect;
+  sendCommand(autodetectOn ? 'autodetect_off' : 'autodetect_on', autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
+});
 el('resetMachine').addEventListener('click', () => openConfirmOverlay(
   'Kaffeemaschinenreinigung reset?',
   'Dadurch werden Zeitpunkt und Zähler seit der letzten Kaffeemaschinenreinigung zurückgesetzt.',

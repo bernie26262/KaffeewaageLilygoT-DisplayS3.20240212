@@ -869,6 +869,26 @@ static bool setSelectedSiebtraegerWeightFromWeb(float weight_g)
   return true;
 }
 
+static void setAutodetectCore(bool enabled)
+{
+  autoDetect = enabled;
+  measurementAutoDetectReady = enabled;
+  statusReadyToSave = 0;
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putBool("savedAutoDetect", autoDetect);
+  preferences.end();
+
+  debug("autodetect = ");
+  debugln(autoDetect);
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+    RefreshFooter();
+  }
+}
+
 void updateStopWatch();
 void updateStopWatchParts();
 void RedrawTFTStopWatch();
@@ -1005,6 +1025,18 @@ static bool handleCoffeeWebCommand(const char* cmd)
 
   if (strcmp(cmd, "stopwatch_reset") == 0) {
     resetStopwatchCore();
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "autodetect_on") == 0) {
+    setAutodetectCore(true);
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "autodetect_off") == 0) {
+    setAutodetectCore(false);
     broadcastWebStateFromGlobals();
     return true;
   }
