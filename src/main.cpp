@@ -37,6 +37,8 @@
 #include <SPIFFS.h>
 #include "time.h"
 #include "wifi_secrets.h"
+#include "app_state.h"
+#include "coffee_web.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -167,6 +169,10 @@ HX711_ADC LoadCell(HX711_dout, HX711_sck);
 
 AsyncWebServer server(HTTP_PORT);
 //AsyncWebSocket ws("/ws");
+
+AppState appState;
+static unsigned long lastWebStateBroadcastMs = 0;
+static const unsigned long WEB_STATE_BROADCAST_INTERVAL_MS = 200;
 
 
 
@@ -365,12 +371,16 @@ float groundWeightForever = 0;
 float groundWeightForeverDisplayed = 0;
 float groundWeightSinceClean = 0;
 float groundWeightSinceCleanDisplayed = 0;
+float groundWeightSinceMachineClean = 0;
+float groundWeightSinceFilterChange = 0;
 unsigned long lastTimeGrindingMeasurement = 0; 
 bool ifPathGrindingMeasurement = 0;
 int delayTimeGrindingMeasurement = 450;
 
 uint32_t shotCounterForever = 0;
 uint32_t shotCounterSinceClean = 0;
+uint32_t shotCounterSinceMachineClean = 0;
+uint32_t shotCounterSinceFilterChange = 0;
 uint32_t lastTimeMuehlenReinigungNTP = 0;
 uint32_t lastTimeKaffeemReinigungNTP = 0;
 uint32_t lastTimeFilterWechselNTP    = 0;
@@ -602,13 +612,151 @@ String processor(const String &var) {
 }
 */
 
+static void updateCoffeeAppStateFromGlobals()
+{
+  appState.weight.actual_g = actualWeight;
+  appState.weight.set_g = setWeightST[selectedST];
+  appState.weight.stable = true; // TODO: later map from real scale stability detection
+
+  appState.status.save_ready = statusReadyToSave;
+  if (statusReadyToSave) {
+    appState.status.mode = APP_STATUS_SAVE_READY;
+  } else if (stopWatchRunning) {
+    appState.status.mode = APP_STATUS_MEASURING;
+  } else if (appState.weight.stable) {
+    appState.status.mode = APP_STATUS_STABLE;
+  } else {
+    appState.status.mode = APP_STATUS_IDLE;
+  }
+
+  appState.stopwatch.ms = elapsedTimeStopWatch;
+  appState.stopwatch.running = stopWatchRunning;
+
+  appState.selection.siebtraeger = selectedST;
+  appState.selection.gefaess = selectedGefaess;
+  appState.selection.autodetect = autoDetect;
+
+  appState.stats.ground.total_g = groundWeightForever;
+  appState.stats.ground.since_grinder_clean_g = groundWeightSinceClean;
+  appState.stats.ground.since_machine_clean_g = groundWeightSinceMachineClean;
+  appState.stats.ground.since_filter_change_g = groundWeightSinceFilterChange;
+
+  appState.stats.shots.total = shotCounterForever;
+  appState.stats.shots.since_grinder_clean = shotCounterSinceClean;
+  appState.stats.shots.since_machine_clean = shotCounterSinceMachineClean;
+  appState.stats.shots.since_filter_change = shotCounterSinceFilterChange;
+
+  time_t currentEpoch = time(nullptr);
+  appState.time.valid = currentEpoch > 1600000000;
+  appState.time.epoch = appState.time.valid ? static_cast<uint32_t>(currentEpoch) : 0;
+
+  appState.system.wifi_connected = WiFi.status() == WL_CONNECTED;
+  appState.system.ip = appState.system.wifi_connected ? WiFi.localIP().toString() : String();
+  appState.system.uptime_ms = millis();
+}
+
+void RefreshFooter();
+
+static float getLastDoseWeight()
+{
+  const float dose = stopWeightGrinding - startWeightGrinding;
+  return dose > 0.0f ? dose : 0.0f;
+}
+
+static void persistCoffeeStats()
+{
+  preferences.putFloat("grndWghtFrvr", groundWeightForever);
+  preferences.putFloat("grndWghtCln", groundWeightSinceClean);
+  preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
+  preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
+
+  preferences.putULong("shotsFrvr", shotCounterForever);
+  preferences.putULong("shotsCln", shotCounterSinceClean);
+  preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
+  preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
+}
+
+static void addCoffeeStatsDose(float dose_g)
+{
+  if (dose_g <= 0.0f) {
+    return;
+  }
+
+  groundWeightForever += dose_g;
+  groundWeightSinceClean += dose_g;
+  groundWeightSinceMachineClean += dose_g;
+  groundWeightSinceFilterChange += dose_g;
+
+  shotCounterForever++;
+  shotCounterSinceClean++;
+  shotCounterSinceMachineClean++;
+  shotCounterSinceFilterChange++;
+}
+
+static bool selectSiebtraegerFromWeb(byte index)
+{
+  if (index >= 4) {
+    return false;
+  }
+
+  selectedST = index;
+  menuItemsOfPage[0][1] = siebtraeger[selectedST];
+  menuItemsOfPage[4][1] = siebtraeger[selectedST];
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putShort("savedSelST", selectedST);
+  preferences.end();
+
+  updateCoffeeAppStateFromGlobals();
+  coffeeWebBroadcastState(appState);
+  return true;
+}
+
+static bool handleCoffeeWebCommand(const char* cmd)
+{
+  if (!cmd) {
+    return false;
+  }
+
+  if (strncmp(cmd, "select_siebtraeger_", 19) == 0) {
+    const int index = atoi(cmd + 19);
+    return selectSiebtraegerFromWeb(static_cast<byte>(index));
+  }
+
+  if (strcmp(cmd, "save_dose") != 0) {
+    return false;
+  }
+
+  if (!statusReadyToSave) {
+    return false;
+  }
+
+  stopWeightGrinding = actualWeight;
+  addCoffeeStatsDose(getLastDoseWeight());
+
+  preferences.begin("savedValues", RW_MODE);
+  persistCoffeeStats();
+  preferences.end();
+
+  statusReadyToSave = 0;
+  statusSwitchSaveWeightFell = 0;
+  statusSwitchSaveWeightRose = 0;
+  RefreshFooter();
+
+  updateCoffeeAppStateFromGlobals();
+  coffeeWebBroadcastState(appState);
+  return true;
+}
+
 void onRootRequest(AsyncWebServerRequest *request) {
-  request->send(200, "text/plain", "Single-Dose-Kaffeewaage V3.0"); // request->send(SPIFFS, "/index.html", "text/html", false, processor);
+  coffeeWebHandleRoot(request);
 }
 
 void initWebServer() {
     server.on("/", onRootRequest);
     server.serveStatic("/", SPIFFS, "/");
+    coffeeWebSetCommandHandler(handleCoffeeWebCommand);
+    coffeeWebBegin(server);
     ElegantOTA.begin(&server); // Start ElegantOTA
     ElegantOTA.setAuth("admin", "admin"); // Set Authentication Credentials
     server.begin();
@@ -2022,15 +2170,9 @@ if (buttonReleasedbuttonRight == 1)
 
 if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
      stopWeightGrinding = actualWeight;
-     groundWeightForever = groundWeightForever + stopWeightGrinding - startWeightGrinding;
-     groundWeightSinceClean = groundWeightSinceClean + stopWeightGrinding - startWeightGrinding;
-     preferences.begin("savedValues", RW_MODE);// Preferences: groundWeight
-     preferences.putULong ("grndWghtFrvr", groundWeightForever);
-     preferences.putULong ("grndWghtCln", groundWeightSinceClean);// in Preferences speichern
-     shotCounterForever++;
-     shotCounterSinceClean++;
-     preferences.putULong ("shotsFrvr", shotCounterForever);
-     preferences.putULong ("shotsCln", shotCounterSinceClean);
+     addCoffeeStatsDose(getLastDoseWeight());
+     preferences.begin("savedValues", RW_MODE);// Preferences: Stats
+     persistCoffeeStats();
      preferences.end();
      statusReadyToSave = 0;
      RefreshFooter();
@@ -3133,7 +3275,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     //groundWeightForever = 0;                                    // für Rücksetzen aller Werte
     //shotCounterForever = 0;                                     // für Rücksetzen aller Werte
     preferences.begin("savedValues", RW_MODE);
-    preferences.putULong("grndWghtCln", groundWeightSinceClean);
+    preferences.putFloat("grndWghtCln", groundWeightSinceClean);
     preferences.putULong("shotsCln", shotCounterSinceClean);
     //preferences.putULong("grndWghtFrvr", groundWeightForever);  // für Rücksetzen aller Werte
     //preferences.putULong("shotsFrvr", shotCounterForever);      // für Rücksetzen aller Werte
@@ -3159,8 +3301,12 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     lastTimeKaffeemReinigungNTP = time(&now);
     debug("Timestamp Kaffeemaschinenreinigung: ");
     debugln(lastTimeKaffeemReinigungNTP);
+    groundWeightSinceMachineClean = 0;
+    shotCounterSinceMachineClean = 0;
     preferences.begin("savedValues", RW_MODE);
     preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
+    preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
+    preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
     preferences.end();
     olddisplayKaffeemReinigen = 0;
     callOfFunctionTerminated = 1;
@@ -3180,8 +3326,12 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     lastTimeFilterWechselNTP = time(&now);
     debug("Timestamp Filterwechsel: ");
     debugln(lastTimeFilterWechselNTP);
+    groundWeightSinceFilterChange = 0;
+    shotCounterSinceFilterChange = 0;
     preferences.begin("savedValues", RW_MODE);
     preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
+    preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
+    preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
     preferences.end();
     olddisplayFilterwechseln = 0;
     callOfFunctionTerminated = 1;
@@ -3275,10 +3425,14 @@ void setup()
       preferences.putShort("savedSelGef", selectedGefaess);
       preferences.putBool ("savedAutoDetect", autoDetect);
       preferences.putFloat("savedCalWeight", setWeightCalibration);
-      preferences.putULong("grndWghtFrvr", groundWeightForever);
-      preferences.putULong("grndWghtCln", groundWeightSinceClean);
+      preferences.putFloat("grndWghtFrvr", groundWeightForever);
+      preferences.putFloat("grndWghtCln", groundWeightSinceClean);
+      preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
+      preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
       preferences.putULong("shotsFrvr", shotCounterForever);
       preferences.putULong("shotsCln", shotCounterSinceClean);
+      preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
+      preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
       preferences.putULong("lstMhlRngng", lastTimeMuehlenReinigungNTP);
       preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
       preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
@@ -3305,10 +3459,15 @@ void setup()
    selectedGefaess             = preferences.getShort("savedSelGef");
    autoDetect                  = preferences.getBool("savedAutoDetect");
    setWeightCalibration        = preferences.getFloat("savedCalWeight");
-   groundWeightForever         = preferences.getULong("grndWghtFrvr", 0);
-   groundWeightSinceClean      = preferences.getULong("grndWghtCln", 0);
+   groundWeightForever         = preferences.getFloat("grndWghtFrvr", preferences.getULong("grndWghtFrvr", 0));
+   groundWeightSinceClean      = preferences.getFloat("grndWghtCln", preferences.getULong("grndWghtCln", 0));
+   groundWeightSinceMachineClean = preferences.getFloat("grndWghtKffm", 0.0f);
+   groundWeightSinceFilterChange = preferences.getFloat("grndWghtFlt", 0.0f);
    shotCounterForever          = preferences.getULong("shotsFrvr", 0); 
    shotCounterSinceClean       = preferences.getULong("shotsCln", 0);
+   shotCounterSinceMachineClean = preferences.getULong("shotsKffm", 0);
+   shotCounterSinceFilterChange = preferences.getULong("shotsFlt", 0);
+   bool statsV2Initialised      = preferences.getBool("statsV2Init", false);
    lastTimeMuehlenReinigungNTP = preferences.getULong("lstMhlRngng", 0);
    lastTimeKaffeemReinigungNTP = preferences.getULong("lstKffmRngng", 0);
    lastTimeFilterWechselNTP    = preferences.getULong("lstFltwchsl", 0);
@@ -3319,6 +3478,24 @@ void setup()
    debugln(tpInit);
   // All done. Last run state (or the factory default) is now restored.
    preferences.end();                                      // Close our preferences namespace.
+
+   // Migration for stats fields added after the original counter system:
+   // Do not initialise machine/filter counters from total counters. If a previous
+   // firmware build already stored that wrong fallback, correct it once here.
+   if (!statsV2Initialised) {
+    groundWeightSinceMachineClean = 0.0f;
+    groundWeightSinceFilterChange = 0.0f;
+    shotCounterSinceMachineClean = 0;
+    shotCounterSinceFilterChange = 0;
+
+    preferences.begin("savedValues", RW_MODE);
+    preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
+    preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
+    preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
+    preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
+    preferences.putBool("statsV2Init", true);
+    preferences.end();
+   }
 
    /*if (grindLatency>2 || grindLatency<0)
    {
@@ -3407,10 +3584,17 @@ void setup()
 
 void loop(void)
 { 
+  coffeeWebLoop();
   //ws.cleanupClients();
   rotaryMenu();
   LoadCell.update();
   actualWeight = LoadCell.getData();
+  updateCoffeeAppStateFromGlobals();
+  if (millis() - lastWebStateBroadcastMs >= WEB_STATE_BROADCAST_INTERVAL_MS)
+  {
+    lastWebStateBroadcastMs = millis();
+    coffeeWebBroadcastState(appState);
+  }
   
   
   //if (LoadCell.update()) newLoadCellDataReady = true;
