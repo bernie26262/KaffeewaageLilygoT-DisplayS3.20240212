@@ -612,6 +612,16 @@ String processor(const String &var) {
 }
 */
 
+static int32_t secondsUntilMaintenanceDue(uint32_t lastDoneEpoch, uint32_t intervalSeconds, time_t nowEpoch)
+{
+  int64_t dueEpoch = static_cast<int64_t>(lastDoneEpoch) + static_cast<int64_t>(intervalSeconds);
+  int64_t seconds = dueEpoch - static_cast<int64_t>(nowEpoch);
+
+  if (seconds > 2147483647LL) return 2147483647L;
+  if (seconds < -2147483647LL) return -2147483647L;
+  return static_cast<int32_t>(seconds);
+}
+
 static void updateCoffeeAppStateFromGlobals()
 {
   appState.weight.actual_g = actualWeight;
@@ -646,13 +656,18 @@ static void updateCoffeeAppStateFromGlobals()
   appState.stats.shots.since_machine_clean = shotCounterSinceMachineClean;
   appState.stats.shots.since_filter_change = shotCounterSinceFilterChange;
 
+  time_t currentEpoch = time(nullptr);
+  bool timeValid = currentEpoch > 1600000000;
+
   appState.maintenance.grinder_clean_due = displayMuehleReinigen;
   appState.maintenance.machine_clean_due = displayKaffeemReinigen;
   appState.maintenance.filter_change_due = displayFilterwechseln;
+  appState.maintenance.grinder_seconds_to_due = timeValid ? secondsUntilMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, currentEpoch) : 0;
+  appState.maintenance.machine_seconds_to_due = timeValid ? secondsUntilMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, currentEpoch) : 0;
+  appState.maintenance.filter_seconds_to_due = timeValid ? secondsUntilMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, currentEpoch) : 0;
   appState.maintenance.due_count = anzahlWarnungen;
 
-  time_t currentEpoch = time(nullptr);
-  appState.time.valid = currentEpoch > 1600000000;
+  appState.time.valid = timeValid;
   appState.time.epoch = appState.time.valid ? static_cast<uint32_t>(currentEpoch) : 0;
 
   appState.system.wifi_connected = WiFi.status() == WL_CONNECTED;
@@ -703,6 +718,102 @@ static void addCoffeeStatsDose(float dose_g)
   shotCounterSinceClean++;
   shotCounterSinceMachineClean++;
   shotCounterSinceFilterChange++;
+}
+
+static bool resetMuehlenReinigungCore()
+{
+  if (!getLocalTime(&timeinfo, 0)) {
+    debugln("Failed to obtain time");
+    return false;
+  }
+
+  lastTimeMuehlenReinigungNTP = time(&now);
+  debug("Timestamp Mühlenreinigung: ");
+  debugln(lastTimeMuehlenReinigungNTP);
+  groundWeightSinceClean = 0;
+  shotCounterSinceClean = 0;
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putFloat("grndWghtCln", groundWeightSinceClean);
+  preferences.putULong("shotsCln", shotCounterSinceClean);
+  preferences.putULong("lstMhlRngng", lastTimeMuehlenReinigungNTP);
+  preferences.end();
+
+  displayMuehleReinigen = 0;
+  olddisplayMuehleReinigen = 0;
+  return true;
+}
+
+static bool resetKaffeemReinigungCore()
+{
+  if (!getLocalTime(&timeinfo, 0)) {
+    debugln("Failed to obtain time");
+    return false;
+  }
+
+  lastTimeKaffeemReinigungNTP = time(&now);
+  debug("Timestamp Kaffeemaschinenreinigung: ");
+  debugln(lastTimeKaffeemReinigungNTP);
+  groundWeightSinceMachineClean = 0;
+  shotCounterSinceMachineClean = 0;
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
+  preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
+  preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
+  preferences.end();
+
+  displayKaffeemReinigen = 0;
+  olddisplayKaffeemReinigen = 0;
+  return true;
+}
+
+static bool resetFilterWechselCore()
+{
+  if (!getLocalTime(&timeinfo, 0)) {
+    debugln("Failed to obtain time");
+    return false;
+  }
+
+  lastTimeFilterWechselNTP = time(&now);
+  debug("Timestamp Filterwechsel: ");
+  debugln(lastTimeFilterWechselNTP);
+  groundWeightSinceFilterChange = 0;
+  shotCounterSinceFilterChange = 0;
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
+  preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
+  preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
+  preferences.end();
+
+  displayFilterwechseln = 0;
+  olddisplayFilterwechseln = 0;
+  return true;
+}
+
+static bool debugForceMaintenanceDue(uint32_t& lastTime, unsigned long delaySeconds, const char* prefKey)
+{
+  if (!getLocalTime(&timeinfo, 0)) {
+    debugln("Failed to obtain time");
+    return false;
+  }
+
+  const time_t currentEpoch = time(&now);
+  lastTime = static_cast<uint32_t>(currentEpoch - static_cast<time_t>(delaySeconds) - 60);
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putULong(prefKey, lastTime);
+  preferences.end();
+
+  updateCoffeeAppStateFromGlobals();
+  return true;
+}
+
+static void broadcastWebStateFromGlobals()
+{
+  updateCoffeeAppStateFromGlobals();
+  coffeeWebBroadcastState(appState);
 }
 
 static bool selectSiebtraegerFromWeb(byte index)
@@ -781,8 +892,67 @@ static bool handleCoffeeWebCommand(const char* cmd)
       RefreshFooter();
     }
 
-    updateCoffeeAppStateFromGlobals();
-    coffeeWebBroadcastState(appState);
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "maintenance_reset_grinder") == 0) {
+    if (!resetMuehlenReinigungCore()) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "maintenance_reset_machine") == 0) {
+    if (!resetKaffeemReinigungCore()) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "maintenance_reset_filter") == 0) {
+    if (!resetFilterWechselCore()) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "debug_maintenance_grinder_due") == 0) {
+    if (!debugForceMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, "lstMhlRngng")) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "debug_maintenance_machine_due") == 0) {
+    if (!debugForceMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, "lstKffmRngng")) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "debug_maintenance_filter_due") == 0) {
+    if (!debugForceMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, "lstFltwchsl")) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "debug_maintenance_all_due") == 0) {
+    bool ok = true;
+    ok = debugForceMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, "lstMhlRngng") && ok;
+    ok = debugForceMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, "lstKffmRngng") && ok;
+    ok = debugForceMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, "lstFltwchsl") && ok;
+    if (!ok) {
+      return false;
+    }
+    broadcastWebStateFromGlobals();
     return true;
   }
 
@@ -806,8 +976,7 @@ static bool handleCoffeeWebCommand(const char* cmd)
   statusSwitchSaveWeightRose = 0;
   RefreshFooter();
 
-  updateCoffeeAppStateFromGlobals();
-  coffeeWebBroadcastState(appState);
+  broadcastWebStateFromGlobals();
   return true;
 }
 
@@ -3325,28 +3494,10 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     //RedrawTFTTimeToCleanMuehle();
     callFunctionOfPage[17] = 0;
-    if(!getLocalTime(&timeinfo, 0))
+    if (!resetMuehlenReinigungCore())
     {
-    debugln("Failed to obtain time");
-    return;
+      return;
     }
-    lastTimeMuehlenReinigungNTP = time(&now);
-    debug("Timestamp Mühlenreinigung: ");
-    debugln(lastTimeMuehlenReinigungNTP);
-    groundWeightSinceClean = 0;
-    shotCounterSinceClean = 0;
-    //groundWeightForever = 0;                                    // für Rücksetzen aller Werte
-    //shotCounterForever = 0;                                     // für Rücksetzen aller Werte
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putFloat("grndWghtCln", groundWeightSinceClean);
-    preferences.putULong("shotsCln", shotCounterSinceClean);
-    //preferences.putULong("grndWghtFrvr", groundWeightForever);  // für Rücksetzen aller Werte
-    //preferences.putULong("shotsFrvr", shotCounterForever);      // für Rücksetzen aller Werte
-
-    preferences.putULong("lstMhlRngng", lastTimeMuehlenReinigungNTP);
-
-    preferences.end();
-    olddisplayMuehleReinigen = 0;
     callOfFunctionTerminated = 1;
   }
 
@@ -3356,22 +3507,10 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     //RedrawTFTTimeToCleanKaffeem();
     callFunctionOfPage[18] = 0;
-    if(!getLocalTime(&timeinfo, 0))
+    if (!resetKaffeemReinigungCore())
     {
-    debugln("Failed to obtain time");
-    return;
+      return;
     }
-    lastTimeKaffeemReinigungNTP = time(&now);
-    debug("Timestamp Kaffeemaschinenreinigung: ");
-    debugln(lastTimeKaffeemReinigungNTP);
-    groundWeightSinceMachineClean = 0;
-    shotCounterSinceMachineClean = 0;
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
-    preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
-    preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
-    preferences.end();
-    olddisplayKaffeemReinigen = 0;
     callOfFunctionTerminated = 1;
   }
 
@@ -3381,22 +3520,10 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     //RedrawTFTTimeToChangeFilter();
     callFunctionOfPage[19] = 0;
-    if(!getLocalTime(&timeinfo, 0))
+    if (!resetFilterWechselCore())
     {
-    debugln("Failed to obtain time");
-    return;
+      return;
     }
-    lastTimeFilterWechselNTP = time(&now);
-    debug("Timestamp Filterwechsel: ");
-    debugln(lastTimeFilterWechselNTP);
-    groundWeightSinceFilterChange = 0;
-    shotCounterSinceFilterChange = 0;
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
-    preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
-    preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
-    preferences.end();
-    olddisplayFilterwechseln = 0;
     callOfFunctionTerminated = 1;
   }
 

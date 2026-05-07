@@ -20,6 +20,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .pill { padding: 6px 10px; border-radius: 999px; background: #e5e7eb; font-size: .9rem; }
     .pill.ok { background: #dcfce7; }
     .maintenance { display: none; border-left: 6px solid #16a34a; }
+    .maintenance-alert { order: -1; }
     .maintenance.show { display: block; }
     .maintenance.ok { border-left-color: #16a34a; background: #f0fdf4; }
     .maintenance.warn { border-left-color: #dc2626; background: #fef2f2; }
@@ -27,6 +28,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .maintenance.ok .maintenance-title { color: #166534; }
     .maintenance.warn .maintenance-title { color: #b91c1c; }
     .maintenance-list { margin: 0; padding-left: 18px; }
+    .maintenance-item { margin: 4px 0; }
+    .maintenance-item.ok { color: #166534; }
+    .maintenance-item.due { color: #b91c1c; font-weight: 750; }
     .weight { font-size: 4rem; line-height: 1; font-weight: 750; letter-spacing: -0.06em; margin: 12px 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
     .weight .unit { font-size: 2rem; letter-spacing: 0; margin-left: 6px; }
     .weight-footer { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
@@ -53,7 +57,18 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .stat-row span:last-child { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
     .ip-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
-    @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .weight { font-size: 3.4rem; } button.compact, .button-row { width: 100%; } }
+    .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
+    .page { display: grid; gap: 14px; }
+    .page.hidden { display: none; }
+    .nav-button { width: auto; min-width: 150px; padding: 10px 14px; font-size: .95rem; }
+    .modal-backdrop { position: fixed; inset: 0; display: none; place-items: center; padding: 18px; background: rgba(17, 24, 39, .55); z-index: 1000; }
+    .modal-backdrop.show { display: grid; }
+    .modal { width: min(420px, 100%); background: #fff; border-radius: 20px; padding: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.28); }
+    .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 8px; }
+    .modal-text { color: #4b5563; margin-bottom: 16px; }
+    .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .danger { background: #dc2626; }
+    @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .weight { font-size: 3.4rem; } button.compact, .button-row, .nav-button { width: 100%; } .modal-actions { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -63,6 +78,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <span id="ws" class="pill">WS getrennt</span>
   </section>
 
+  <div id="dashboardPage" class="page">
   <section class="card">
     <div class="label">Gewicht</div>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
@@ -88,7 +104,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </div>
   </section>
 
-  <section id="maintenanceCard" class="card maintenance ok">
+  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
     <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
     <ul class="maintenance-list" id="maintenanceList"></ul>
   </section>
@@ -129,13 +145,55 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <section class="card">
     <div class="stats-title">Einstellungen</div>
     <div class="settings-list small">
-      <div>Reinigung Kaffeemaschine zurücksetzen</div>
-      <div>Reinigung Mühle zurücksetzen</div>
-      <div>Filterwechsel zurücksetzen</div>
+      <div>Wartung zurücksetzen</div>
       <div>Waage kalibrieren</div>
       <div>Gefäße einmessen</div>
     </div>
+    <div class="button-row" style="margin-top: 12px;">
+      <button id="openSettings" class="nav-button secondary">Einstellungen öffnen</button>
+    </div>
   </section>
+  </div>
+
+  <div id="settingsPage" class="page hidden">
+  <section class="card">
+    <div class="stats-title">Einstellungen</div>
+    <div class="label">Wartung zurücksetzen</div>
+    <div class="settings-actions">
+      <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
+      <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
+      <button id="resetFilter" class="secondary">Filter gewechselt</button>
+    </div>
+    <div class="button-row" style="margin-top: 16px;">
+      <button id="backDashboard" class="nav-button">Zurück zum Dashboard</button>
+    </div>
+  </section>
+
+  <section id="maintenanceDetailCard" class="card maintenance ok show">
+    <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
+    <ul class="maintenance-list" id="maintenanceDetailList"></ul>
+  </section>
+
+  <section class="card">
+    <div class="stats-title">Später</div>
+    <div class="settings-list small">
+      <div>Waage kalibrieren</div>
+      <div>Gefäße einmessen</div>
+      <div>Siebträger-Gewichte verwalten</div>
+    </div>
+  </section>
+  </div>
+
+  <div id="confirmOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal">
+      <div class="modal-title" id="confirmTitle">Wartung reset?</div>
+      <div class="modal-text" id="confirmText">Bitte bestätigen.</div>
+      <div class="modal-actions">
+        <button id="confirmCancel" class="secondary">Abbrechen</button>
+        <button id="confirmOk" class="danger">Ok</button>
+      </div>
+    </div>
+  </div>
 
   <section class="card">
     <div class="label">Log</div>
@@ -146,7 +204,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 <script>
 let ws;
 let lastState = null;
+let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
 let targetWeightDirty = false;
+let pendingConfirm = null;
 const el = id => document.getElementById(id);
 const fmtG = v => {
   let n = Number(v || 0);
@@ -185,31 +245,165 @@ function addLog(msg) {
   el('log').textContent = `${now}  ${msg}`;
 }
 
+function showSettings(show) {
+  el('dashboardPage').classList.toggle('hidden', show);
+  el('settingsPage').classList.toggle('hidden', !show);
+}
+
+function openConfirmOverlay(title, text, cmd, logText) {
+  pendingConfirm = { cmd, logText };
+  el('confirmTitle').textContent = title;
+  el('confirmText').textContent = text;
+  el('confirmOverlay').classList.add('show');
+  el('confirmCancel').focus();
+}
+
+function closeConfirmOverlay() {
+  el('confirmOverlay').classList.remove('show');
+  pendingConfirm = null;
+}
+
+function confirmPendingAction() {
+  if (!pendingConfirm) return;
+  const action = pendingConfirm;
+  closeConfirmOverlay();
+  sendCommand(action.cmd, action.logText);
+}
+
+function sendCommand(cmd, logText) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    addLog('WebSocket nicht verbunden');
+    return;
+  }
+  ws.send(JSON.stringify({ cmd }));
+  addLog(logText || `${cmd} gesendet …`);
+}
+
+function fmtDuration(seconds) {
+  const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+
+  const dayLabel = days === 1 ? 'Tag' : 'Tagen';
+  const hourLabel = hours === 1 ? 'Stunde' : 'Stunden';
+  const minuteLabel = minutes === 1 ? 'Minute' : 'Minuten';
+  const secondLabel = secs === 1 ? 'Sekunde' : 'Sekunden';
+  return `${days} ${dayLabel}, ${hours} ${hourLabel}, ${minutes} ${minuteLabel}, ${secs} ${secondLabel}`;
+}
+
+function maintenanceLine(label, secondsToDue) {
+  const seconds = Number(secondsToDue) || 0;
+  const due = seconds < 0;
+  const text = due
+    ? `${label}: seit ${fmtDuration(seconds)} fällig`
+    : `${label}: fällig in ${fmtDuration(seconds)}`;
+  return { text, due };
+}
+
+function syncMaintenanceDueAt(key, secondsToDue) {
+  const seconds = Number(secondsToDue) || 0;
+  const candidateDueAtMs = Date.now() + seconds * 1000;
+  const currentDueAtMs = maintenanceDueAtMs[key] || 0;
+
+  // Neue ESP-States kommen nicht exakt im Sekundentakt. Kleine Abweichungen
+  // ignorieren wir, damit die Anzeige nicht springt. Echte Änderungen durch
+  // Reset-/Debug-Commands übernehmen wir sofort.
+  if (!currentDueAtMs || Math.abs(candidateDueAtMs - currentDueAtMs) > 5000) {
+    maintenanceDueAtMs[key] = candidateDueAtMs;
+  }
+}
+
+function syncMaintenanceTimers(m) {
+  if (!lastState?.time?.valid) {
+    maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
+    return;
+  }
+
+  syncMaintenanceDueAt('machine', m?.machine_seconds_to_due);
+  syncMaintenanceDueAt('grinder', m?.grinder_seconds_to_due);
+  syncMaintenanceDueAt('filter', m?.filter_seconds_to_due);
+}
+
+function adjustedMaintenanceSeconds(key, fallbackSecondsToDue) {
+  const dueAtMs = maintenanceDueAtMs[key] || 0;
+  if (!lastState?.time?.valid || !dueAtMs) {
+    return Number(fallbackSecondsToDue) || 0;
+  }
+
+  const diffMs = dueAtMs - Date.now();
+  if (diffMs >= 0) return Math.ceil(diffMs / 1000);
+  return Math.floor(diffMs / 1000);
+}
+
 function renderMaintenance(m) {
   const card = el('maintenanceCard');
   const title = el('maintenanceTitle');
   const list = el('maintenanceList');
-  const due = [];
-  if (m?.machine_clean_due) due.push('Reinigung Kaffeemaschine fällig');
-  if (m?.grinder_clean_due) due.push('Reinigung Mühle fällig');
-  if (m?.filter_change_due) due.push('Filterwechsel fällig');
+  const detailCard = el('maintenanceDetailCard');
+  const detailTitle = el('maintenanceDetailTitle');
+  const detailList = el('maintenanceDetailList');
 
-  card.classList.add('show');
-  card.classList.toggle('warn', due.length > 0);
-  card.classList.toggle('ok', due.length === 0);
+  if (!card || !title || !list) return;
 
-  if (due.length === 0) {
-    title.textContent = 'Wartung: ok';
-    list.innerHTML = '';
+  const lines = [
+    maintenanceLine('Kaffeemaschine reinigen', adjustedMaintenanceSeconds('machine', m?.machine_seconds_to_due)),
+    maintenanceLine('Mühle reinigen', adjustedMaintenanceSeconds('grinder', m?.grinder_seconds_to_due)),
+    maintenanceLine('Filter wechseln', adjustedMaintenanceSeconds('filter', m?.filter_seconds_to_due))
+  ];
+
+  // Clientseitig aus den aktuell laufenden Sekundenwerten ableiten.
+  // Dadurch erscheint der Warnhinweis auch dann sofort, wenn ein Countdown im geöffneten Browser auf 0 kippt.
+  const dueCount = lines.filter(line => line.due).length;
+
+  // Dashboard: nur anzeigen, wenn Wartung wirklich fällig ist.
+  card.classList.toggle('show', dueCount > 0);
+  card.classList.toggle('warn', dueCount > 0);
+  card.classList.toggle('ok', false);
+
+  if (!lastState?.time?.valid) {
+    if (dueCount > 0) {
+      title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
+      list.innerHTML = '<li class="maintenance-item due">Wartung erforderlich. Uhrzeit noch nicht synchronisiert.</li>';
+    } else {
+      title.textContent = 'Wartung: ok';
+      list.innerHTML = '';
+    }
+
+    if (detailCard && detailTitle && detailList) {
+      detailCard.classList.add('show');
+      detailCard.classList.toggle('warn', dueCount > 0);
+      detailCard.classList.toggle('ok', dueCount === 0);
+      detailTitle.textContent = 'Wartungszeiten';
+      detailList.innerHTML = '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>';
+    }
     return;
   }
 
-  title.textContent = due.length === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${due.length} Hinweise`;
-  list.innerHTML = due.map(text => `<li>${text}</li>`).join('');
+  title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
+  list.innerHTML = lines
+    .filter(line => line.due)
+    .map(line => `<li class="maintenance-item due">${line.text}</li>`)
+    .join('');
+
+  // Einstellungen: immer alle Details anzeigen.
+  if (detailCard && detailTitle && detailList) {
+    detailCard.classList.add('show');
+    detailCard.classList.toggle('warn', dueCount > 0);
+    detailCard.classList.toggle('ok', dueCount === 0);
+    detailTitle.textContent = dueCount === 0
+      ? 'Wartungszeiten'
+      : (dueCount === 1 ? 'Wartungszeiten: 1 Hinweis' : `Wartungszeiten: ${dueCount} Hinweise`);
+    detailList.innerHTML = lines
+      .map(line => `<li class="maintenance-item ${line.due ? 'due' : 'ok'}">${line.text}</li>`)
+      .join('');
+  }
 }
 
 function render(s) {
   lastState = s;
+  syncMaintenanceTimers(s.maintenance);
   el('actual').textContent = fmtG(s.weight?.actual_g);
   if (!targetWeightDirty && document.activeElement !== el('targetWeight')) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
@@ -247,25 +441,18 @@ function connect() {
 }
 
 el('save').addEventListener('click', () => {
-  if (ws && ws.readyState === WebSocket.OPEN && lastState?.status?.save_ready) {
-    ws.send(JSON.stringify({ cmd: 'save_dose' }));
-    addLog('Save gesendet …');
+  if (lastState?.status?.save_ready) {
+    sendCommand('save_dose', 'Save gesendet …');
   }
 });
 
 el('tare').addEventListener('click', () => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ cmd: 'tare' }));
-    addLog('Tara gesendet …');
-  }
+  sendCommand('tare', 'Tara gesendet …');
 });
 
 el('siebtraegerSelect').addEventListener('change', () => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    const idx = Number(el('siebtraegerSelect').value);
-    ws.send(JSON.stringify({ cmd: `select_siebtraeger_${idx}` }));
-    addLog(`Siebträger-Auswahl gesendet: ${idx}`);
-  }
+  const idx = Number(el('siebtraegerSelect').value);
+  sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
 });
 
 function sendTargetWeight() {
@@ -277,11 +464,46 @@ function sendTargetWeight() {
   }
   targetWeightDirty = false;
   el('targetWeight').value = value.toFixed(1);
-  ws.send(JSON.stringify({ cmd: `set_selected_siebtraeger_weight_${value.toFixed(1)}` }));
-  addLog(`Sollgewicht gesendet: ${value.toFixed(1)} g`);
+  sendCommand(`set_selected_siebtraeger_weight_${value.toFixed(1)}`, `Sollgewicht gesendet: ${value.toFixed(1)} g`);
 }
 
 el('targetSave').addEventListener('click', sendTargetWeight);
+el('openSettings').addEventListener('click', () => showSettings(true));
+el('backDashboard').addEventListener('click', () => showSettings(false));
+el('resetMachine').addEventListener('click', () => openConfirmOverlay(
+  'Kaffeemaschinenreinigung reset?',
+  'Dadurch werden Zeitpunkt und Zähler seit der letzten Kaffeemaschinenreinigung zurückgesetzt.',
+  'maintenance_reset_machine',
+  'Reset Kaffeemaschine gesendet …'
+));
+el('resetGrinder').addEventListener('click', () => openConfirmOverlay(
+  'Mühlenreinigung reset?',
+  'Dadurch werden Zeitpunkt und Zähler seit der letzten Mühlenreinigung zurückgesetzt.',
+  'maintenance_reset_grinder',
+  'Reset Mühle gesendet …'
+));
+el('resetFilter').addEventListener('click', () => openConfirmOverlay(
+  'Filterwechsel reset?',
+  'Dadurch werden Zeitpunkt und Zähler seit dem letzten Filterwechsel zurückgesetzt.',
+  'maintenance_reset_filter',
+  'Reset Filter gesendet …'
+));
+el('confirmCancel').addEventListener('click', closeConfirmOverlay);
+el('confirmOk').addEventListener('click', confirmPendingAction);
+el('confirmOverlay').addEventListener('click', e => {
+  if (e.target === el('confirmOverlay')) closeConfirmOverlay();
+});
+document.addEventListener('keydown', e => {
+  if (!el('confirmOverlay').classList.contains('show')) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeConfirmOverlay();
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmPendingAction();
+  }
+});
 el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
 el('targetWeight').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
@@ -289,6 +511,11 @@ el('targetWeight').addEventListener('keydown', e => {
     sendTargetWeight();
   }
 });
+
+setInterval(function maintenanceClientTick() {
+  if (!lastState) return;
+  renderMaintenance(lastState.maintenance);
+}, 1000);
 
 connect();
 </script>
@@ -395,6 +622,10 @@ void coffeeWebBegin(AsyncWebServer& server)
     }
   });
 
+  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(204);
+  });
+
   server.addHandler(&ws);
 }
 
@@ -410,7 +641,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<1280> doc;
+  StaticJsonDocument<1536> doc;
 
   doc["type"] = "state";
 
@@ -442,6 +673,9 @@ static String buildStateJson(const AppState& s)
   doc["maintenance"]["grinder_clean_due"] = s.maintenance.grinder_clean_due;
   doc["maintenance"]["machine_clean_due"] = s.maintenance.machine_clean_due;
   doc["maintenance"]["filter_change_due"] = s.maintenance.filter_change_due;
+  doc["maintenance"]["grinder_seconds_to_due"] = s.maintenance.grinder_seconds_to_due;
+  doc["maintenance"]["machine_seconds_to_due"] = s.maintenance.machine_seconds_to_due;
+  doc["maintenance"]["filter_seconds_to_due"] = s.maintenance.filter_seconds_to_due;
   doc["maintenance"]["due_count"] = s.maintenance.due_count;
 
   doc["time"]["valid"] = s.time.valid;
