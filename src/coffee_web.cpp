@@ -205,6 +205,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 let ws;
 let lastState = null;
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
+let stopwatchBaseClientMs = 0;
+let stopwatchBaseMs = 0;
+let stopwatchRunning = false;
 let targetWeightDirty = false;
 let pendingConfirm = null;
 const el = id => document.getElementById(id);
@@ -401,6 +404,32 @@ function renderMaintenance(m) {
   }
 }
 
+function syncStopwatchTimer(sw) {
+  const newMs = Math.max(0, Number(sw?.ms || 0));
+  const newRunning = !!sw?.running;
+  const nowMs = Date.now();
+
+  const currentMs = stopwatchRunning
+    ? stopwatchBaseMs + Math.max(0, nowMs - stopwatchBaseClientMs)
+    : stopwatchBaseMs;
+
+  if (newRunning !== stopwatchRunning || !stopwatchBaseClientMs || Math.abs(newMs - currentMs) > 1000 || !newRunning) {
+    stopwatchBaseClientMs = nowMs;
+    stopwatchBaseMs = newMs;
+    stopwatchRunning = newRunning;
+  }
+}
+
+function currentStopwatchMs() {
+  if (!stopwatchRunning) return stopwatchBaseMs;
+  return stopwatchBaseMs + Math.max(0, Date.now() - stopwatchBaseClientMs);
+}
+
+function renderStopwatch() {
+  el('stopwatch').textContent = fmtTime(currentStopwatchMs());
+  el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
+}
+
 function render(s) {
   lastState = s;
   syncMaintenanceTimers(s.maintenance);
@@ -410,7 +439,8 @@ function render(s) {
   }
   el('status').textContent = s.status?.label || String(s.status?.mode ?? '---');
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
-  el('stopwatch').textContent = fmtTime(s.stopwatch?.ms);
+  syncStopwatchTimer(s.stopwatch);
+  renderStopwatch();
   el('shotsTotal').textContent = s.stats?.shots?.total ?? 0;
   el('shotsMachine').textContent = s.stats?.shots?.since_machine_clean ?? 0;
   el('shotsGrinder').textContent = s.stats?.shots?.since_grinder_clean ?? 0;
@@ -423,14 +453,29 @@ function render(s) {
   el('uptime').textContent = fmtUptime(s.system?.uptime_ms);
   el('ip').textContent = s.system?.ip || location.hostname;
   el('save').disabled = !s.status?.save_ready;
+  el('swToggle').disabled = false;
+  el('swReset').disabled = false;
   renderMaintenance(s.maintenance);
 }
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
-  ws.onopen = () => { el('ws').textContent = 'WS verbunden'; el('ws').classList.add('ok'); addLog('WebSocket verbunden'); };
-  ws.onclose = () => { el('ws').textContent = 'WS getrennt'; el('ws').classList.remove('ok'); addLog('WebSocket getrennt, reconnect läuft …'); setTimeout(connect, 1500); };
+  ws.onopen = () => {
+    el('ws').textContent = 'WS verbunden';
+    el('ws').classList.add('ok');
+    el('swToggle').disabled = false;
+    el('swReset').disabled = false;
+    addLog('WebSocket verbunden');
+  };
+  ws.onclose = () => {
+    el('ws').textContent = 'WS getrennt';
+    el('ws').classList.remove('ok');
+    el('swToggle').disabled = true;
+    el('swReset').disabled = true;
+    addLog('WebSocket getrennt, reconnect läuft …');
+    setTimeout(connect, 1500);
+  };
   ws.onerror = () => { addLog('WebSocket-Fehler'); };
   ws.onmessage = e => {
     const data = JSON.parse(e.data);
@@ -448,6 +493,14 @@ el('save').addEventListener('click', () => {
 
 el('tare').addEventListener('click', () => {
   sendCommand('tare', 'Tara gesendet …');
+});
+
+el('swToggle').addEventListener('click', () => {
+  sendCommand('stopwatch_start_stop', stopwatchRunning ? 'Stoppuhr Stop gesendet …' : 'Stoppuhr Start gesendet …');
+});
+
+el('swReset').addEventListener('click', () => {
+  sendCommand('stopwatch_reset', 'Stoppuhr Reset gesendet …');
 });
 
 el('siebtraegerSelect').addEventListener('change', () => {
@@ -516,6 +569,10 @@ setInterval(function maintenanceClientTick() {
   if (!lastState) return;
   renderMaintenance(lastState.maintenance);
 }, 1000);
+
+setInterval(function stopwatchClientTick() {
+  renderStopwatch();
+}, 100);
 
 connect();
 </script>

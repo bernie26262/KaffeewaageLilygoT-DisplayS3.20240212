@@ -639,6 +639,11 @@ static void updateCoffeeAppStateFromGlobals()
     appState.status.mode = APP_STATUS_IDLE;
   }
 
+  if (stopWatchRunning) {
+    elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
+  } else {
+    elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
+  }
   appState.stopwatch.ms = elapsedTimeStopWatch;
   appState.stopwatch.running = stopWatchRunning;
 
@@ -864,6 +869,42 @@ static bool setSelectedSiebtraegerWeightFromWeb(float weight_g)
   return true;
 }
 
+void updateStopWatch();
+void updateStopWatchParts();
+void RedrawTFTStopWatch();
+
+static void toggleStopwatchCore()
+{
+  if (stopWatchRunning == 0) {
+    updateStopWatch();
+    stopWatchRunning = 1;
+    startTimeStopWatch = millis();
+    oldElapsedTimeStopWatch = elapsedTimeStopWatch;
+  } else {
+    stopTimeStopWatch = millis();
+    elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
+    stopWatchRunning = 0;
+  }
+
+  updateStopWatchParts();
+  if (displayOff == 0 && pageID == 3) {
+    RedrawTFTStopWatch();
+  }
+}
+
+static void resetStopwatchCore()
+{
+  stopTimeStopWatch = millis();
+  startTimeStopWatch = stopTimeStopWatch;
+  oldElapsedTimeStopWatch = 0;
+  elapsedTimeStopWatch = 0;
+  updateStopWatchParts();
+
+  if (displayOff == 0 && pageID == 3) {
+    RedrawTFTStopWatch();
+  }
+}
+
 static bool handleCoffeeWebCommand(const char* cmd)
 {
   if (!cmd) {
@@ -952,6 +993,18 @@ static bool handleCoffeeWebCommand(const char* cmd)
     if (!ok) {
       return false;
     }
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "stopwatch_start_stop") == 0) {
+    toggleStopwatchCore();
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+
+  if (strcmp(cmd, "stopwatch_reset") == 0) {
+    resetStopwatchCore();
     broadcastWebStateFromGlobals();
     return true;
   }
