@@ -646,6 +646,11 @@ static void updateCoffeeAppStateFromGlobals()
   appState.stats.shots.since_machine_clean = shotCounterSinceMachineClean;
   appState.stats.shots.since_filter_change = shotCounterSinceFilterChange;
 
+  appState.maintenance.grinder_clean_due = displayMuehleReinigen;
+  appState.maintenance.machine_clean_due = displayKaffeemReinigen;
+  appState.maintenance.filter_change_due = displayFilterwechseln;
+  appState.maintenance.due_count = anzahlWarnungen;
+
   time_t currentEpoch = time(nullptr);
   appState.time.valid = currentEpoch > 1600000000;
   appState.time.epoch = appState.time.valid ? static_cast<uint32_t>(currentEpoch) : 0;
@@ -656,6 +661,13 @@ static void updateCoffeeAppStateFromGlobals()
 }
 
 void RefreshFooter();
+void RefreshTFTSetWeightST();
+void RefreshTFTDisplay();
+void RefreshTFTCursor();
+void RefreshTFTTaraWait();
+void RefreshTFTTaraFinished();
+void doTara();
+void stringifySetWeight();
 
 static float getLastDoseWeight()
 {
@@ -703,9 +715,38 @@ static bool selectSiebtraegerFromWeb(byte index)
   menuItemsOfPage[0][1] = siebtraeger[selectedST];
   menuItemsOfPage[4][1] = siebtraeger[selectedST];
 
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
   preferences.begin("savedValues", RW_MODE);
   preferences.putShort("savedSelST", selectedST);
   preferences.end();
+
+  updateCoffeeAppStateFromGlobals();
+  coffeeWebBroadcastState(appState);
+  return true;
+}
+
+static bool setSelectedSiebtraegerWeightFromWeb(float weight_g)
+{
+  if (weight_g < minWeightST || weight_g > maxWeightST) {
+    return false;
+  }
+
+  setWeightST[selectedST] = weight_g;
+  oldsetWeightST[selectedST] = weight_g;
+  stringifySetWeight();
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putBytes("svdSetWeightST", setWeightST, sizeof(setWeightST));
+  preferences.end();
+
+  if (displayOff == 0) {
+    RefreshTFTSetWeightST();
+    RefreshFooter();
+  }
 
   updateCoffeeAppStateFromGlobals();
   coffeeWebBroadcastState(appState);
@@ -721,6 +762,28 @@ static bool handleCoffeeWebCommand(const char* cmd)
   if (strncmp(cmd, "select_siebtraeger_", 19) == 0) {
     const int index = atoi(cmd + 19);
     return selectSiebtraegerFromWeb(static_cast<byte>(index));
+  }
+
+  if (strncmp(cmd, "set_selected_siebtraeger_weight_", 32) == 0) {
+    const float weight_g = atof(cmd + 32);
+    return setSelectedSiebtraegerWeightFromWeb(weight_g);
+  }
+
+  if (strcmp(cmd, "tare") == 0) {
+    if (displayOff == 0) {
+      RefreshTFTTaraWait();
+    }
+
+    doTara();
+
+    if (displayOff == 0) {
+      RefreshTFTTaraFinished();
+      RefreshFooter();
+    }
+
+    updateCoffeeAppStateFromGlobals();
+    coffeeWebBroadcastState(appState);
+    return true;
   }
 
   if (strcmp(cmd, "save_dose") != 0) {

@@ -44,6 +44,13 @@ struct StatsState {
   StatsShots shots;
 };
 
+struct MaintenanceState {
+  bool grinder_clean_due = false;
+  bool machine_clean_due = false;
+  bool filter_change_due = false;
+  uint8_t due_count = 0;
+};
+
 struct TimeState {
   bool valid = false;
   uint32_t epoch = 0;
@@ -65,6 +72,7 @@ struct AppState {
   StopwatchState stopwatch;
   SelectionState selection;
   StatsState stats;
+  MaintenanceState maintenance;
   TimeState time;
   SystemState system;
   StatusState status;

@@ -19,6 +19,14 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     h1 { margin: 0; font-size: 1.35rem; }
     .pill { padding: 6px 10px; border-radius: 999px; background: #e5e7eb; font-size: .9rem; }
     .pill.ok { background: #dcfce7; }
+    .maintenance { display: none; border-left: 6px solid #16a34a; }
+    .maintenance.show { display: block; }
+    .maintenance.ok { border-left-color: #16a34a; background: #f0fdf4; }
+    .maintenance.warn { border-left-color: #dc2626; background: #fef2f2; }
+    .maintenance-title { font-size: 1.05rem; font-weight: 750; margin-bottom: 6px; }
+    .maintenance.ok .maintenance-title { color: #166534; }
+    .maintenance.warn .maintenance-title { color: #b91c1c; }
+    .maintenance-list { margin: 0; padding-left: 18px; }
     .weight { font-size: 4rem; line-height: 1; font-weight: 750; letter-spacing: -0.06em; margin: 12px 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
     .weight .unit { font-size: 2rem; letter-spacing: 0; margin-left: 6px; }
     .weight-footer { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
@@ -27,9 +35,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .label { color: #6b7280; font-size: .86rem; }
     .value { font-size: 1.25rem; font-weight: 650; margin-top: 4px; }
     button { width: 100%; border: 0; border-radius: 16px; padding: 16px; font-size: 1.15rem; font-weight: 750; background: #2563eb; color: white; cursor: pointer; }
-    button.compact { width: auto; min-width: 160px; padding: 13px 18px; }
+    button.compact { width: auto; min-width: 150px; padding: 13px 18px; }
+    button.secondary { background: #4b5563; }
+    .button-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     button:disabled { background: #9ca3af; cursor: not-allowed; }
-    select { border: 1px solid #d1d5db; border-radius: 10px; padding: 6px 9px; font: inherit; font-size: .9rem; background: white; color: #1f2937; }
+    select, input { border: 1px solid #d1d5db; border-radius: 10px; padding: 6px 9px; font: inherit; font-size: .9rem; background: white; color: #1f2937; }
+    input[type=number] { width: 86px; font-variant-numeric: tabular-nums; }
     .small { font-size: .9rem; color: #6b7280; }
     .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
     .log { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-size: .9rem; color: #374151; min-height: 1.2em; }
@@ -42,7 +53,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .stat-row span:last-child { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
     .ip-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
-    @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .weight { font-size: 3.4rem; } button.compact { width: 100%; } }
+    @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .weight { font-size: 3.4rem; } button.compact, .button-row { width: 100%; } }
   </style>
 </head>
 <body>
@@ -57,17 +68,29 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
     <div class="weight-footer">
       <div class="weight-info small">
-        Soll: <b><span id="set">--.-</span> g</b> · Status: <b><span id="status">---</span></b><br>
+        Status: <b><span id="status">---</span></b><br>
         Siebträger:
         <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
           <option value="0">Bodenloser ST</option>
           <option value="1">1er-Siebträger</option>
           <option value="2">2er-Siebträger</option>
           <option value="3">Custom-ST</option>
-        </select>
+        </select><br>
+        Sollgewicht:
+        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
+        g
+        <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem; margin-left: 6px;">Speichern</button>
       </div>
-      <button id="save" class="compact" disabled>Save Dose</button>
+      <div class="button-row">
+        <button id="tare" class="compact secondary">Tara</button>
+        <button id="save" class="compact" disabled>Save Dose</button>
+      </div>
     </div>
+  </section>
+
+  <section id="maintenanceCard" class="card maintenance ok">
+    <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
+    <ul class="maintenance-list" id="maintenanceList"></ul>
   </section>
 
   <section class="card">
@@ -123,6 +146,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 <script>
 let ws;
 let lastState = null;
+let targetWeightDirty = false;
 const el = id => document.getElementById(id);
 const fmtG = v => {
   let n = Number(v || 0);
@@ -161,10 +185,35 @@ function addLog(msg) {
   el('log').textContent = `${now}  ${msg}`;
 }
 
+function renderMaintenance(m) {
+  const card = el('maintenanceCard');
+  const title = el('maintenanceTitle');
+  const list = el('maintenanceList');
+  const due = [];
+  if (m?.machine_clean_due) due.push('Reinigung Kaffeemaschine fällig');
+  if (m?.grinder_clean_due) due.push('Reinigung Mühle fällig');
+  if (m?.filter_change_due) due.push('Filterwechsel fällig');
+
+  card.classList.add('show');
+  card.classList.toggle('warn', due.length > 0);
+  card.classList.toggle('ok', due.length === 0);
+
+  if (due.length === 0) {
+    title.textContent = 'Wartung: ok';
+    list.innerHTML = '';
+    return;
+  }
+
+  title.textContent = due.length === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${due.length} Hinweise`;
+  list.innerHTML = due.map(text => `<li>${text}</li>`).join('');
+}
+
 function render(s) {
   lastState = s;
   el('actual').textContent = fmtG(s.weight?.actual_g);
-  el('set').textContent = fmtG(s.weight?.set_g);
+  if (!targetWeightDirty && document.activeElement !== el('targetWeight')) {
+    el('targetWeight').value = fmtG(s.weight?.set_g);
+  }
   el('status').textContent = s.status?.label || String(s.status?.mode ?? '---');
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
   el('stopwatch').textContent = fmtTime(s.stopwatch?.ms);
@@ -180,6 +229,7 @@ function render(s) {
   el('uptime').textContent = fmtUptime(s.system?.uptime_ms);
   el('ip').textContent = s.system?.ip || location.hostname;
   el('save').disabled = !s.status?.save_ready;
+  renderMaintenance(s.maintenance);
 }
 
 function connect() {
@@ -203,11 +253,40 @@ el('save').addEventListener('click', () => {
   }
 });
 
+el('tare').addEventListener('click', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ cmd: 'tare' }));
+    addLog('Tara gesendet …');
+  }
+});
+
 el('siebtraegerSelect').addEventListener('change', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     const idx = Number(el('siebtraegerSelect').value);
     ws.send(JSON.stringify({ cmd: `select_siebtraeger_${idx}` }));
     addLog(`Siebträger-Auswahl gesendet: ${idx}`);
+  }
+});
+
+function sendTargetWeight() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const value = Number(el('targetWeight').value.replace(',', '.'));
+  if (!Number.isFinite(value) || value <= 0) {
+    addLog('Ungültiges Sollgewicht');
+    return;
+  }
+  targetWeightDirty = false;
+  el('targetWeight').value = value.toFixed(1);
+  ws.send(JSON.stringify({ cmd: `set_selected_siebtraeger_weight_${value.toFixed(1)}` }));
+  addLog(`Sollgewicht gesendet: ${value.toFixed(1)} g`);
+}
+
+el('targetSave').addEventListener('click', sendTargetWeight);
+el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
+el('targetWeight').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendTargetWeight();
   }
 });
 
@@ -331,7 +410,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<1024> doc;
+  StaticJsonDocument<1280> doc;
 
   doc["type"] = "state";
 
@@ -359,6 +438,11 @@ static String buildStateJson(const AppState& s)
   doc["stats"]["shots"]["since_grinder_clean"] = s.stats.shots.since_grinder_clean;
   doc["stats"]["shots"]["since_machine_clean"] = s.stats.shots.since_machine_clean;
   doc["stats"]["shots"]["since_filter_change"] = s.stats.shots.since_filter_change;
+
+  doc["maintenance"]["grinder_clean_due"] = s.maintenance.grinder_clean_due;
+  doc["maintenance"]["machine_clean_due"] = s.maintenance.machine_clean_due;
+  doc["maintenance"]["filter_change_due"] = s.maintenance.filter_change_due;
+  doc["maintenance"]["due_count"] = s.maintenance.due_count;
 
   doc["time"]["valid"] = s.time.valid;
   doc["time"]["epoch"] = s.time.epoch;
