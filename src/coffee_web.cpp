@@ -4,6 +4,13 @@
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
 
+// =============================================================================
+// Eingebettete WebUI
+// =============================================================================
+// Aktuell bewusst als PROGMEM-String eingebettet, damit Firmware und WebUI
+// immer zusammenpassen. Falls HTML/CSS/JS spaeter nach LittleFS wandern, sollte
+// die fachliche Logik trotzdem weiterhin im Core/AppState bleiben.
+
 static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 <html lang="de">
 <head>
@@ -11,6 +18,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Single-Dose-Kaffeewaage</title>
   <style>
+    /* ===== Basis / Layout ===== */
     :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: #f3f4f6; }
     body { margin: 0; padding: 18px; }
     main { max-width: 760px; margin: 0 auto; display: grid; gap: 14px; }
@@ -19,6 +27,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     h1 { margin: 0; font-size: 1.35rem; }
     .pill { padding: 6px 10px; border-radius: 999px; background: #e5e7eb; font-size: .9rem; }
     .pill.ok { background: #dcfce7; }
+    /* ===== Wartung ===== */
     .maintenance { display: none; border-left: 6px solid #16a34a; }
     .maintenance-alert { order: -1; }
     .maintenance.show { display: block; }
@@ -31,6 +40,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .maintenance-item { margin: 4px 0; }
     .maintenance-item.ok { color: #166534; }
     .maintenance-item.due { color: #b91c1c; font-weight: 750; }
+    /* ===== Autodetect / Gewichtskarte ===== */
     .autodetect-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #f3f4f6; }
     .autodetect-toggle { width: auto; min-width: 0; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; font-size: .9rem; background: #e5e7eb; color: #374151; }
     .autodetect-toggle.on { background: #dcfce7; color: #166534; }
@@ -54,6 +64,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     input[type=number] { width: 86px; font-variant-numeric: tabular-nums; }
     .small { font-size: .9rem; color: #6b7280; }
     .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    /* ===== Status / Statistik / Settings ===== */
     .log { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; font-size: .9rem; color: #374151; min-height: 1.2em; }
     .log:empty { display: none; }
     .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
@@ -73,6 +84,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .page { display: grid; gap: 14px; }
     .page.hidden { display: none; }
     .nav-button { width: auto; min-width: 150px; padding: 10px 14px; font-size: .95rem; }
+    /* ===== Overlay / Wizard ===== */
     .modal-backdrop { position: fixed; inset: 0; display: none; place-items: center; padding: 18px; background: rgba(17, 24, 39, .55); z-index: 1000; }
     .modal-backdrop.show { display: grid; }
     .modal { width: min(420px, 100%); background: #fff; border-radius: 20px; padding: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.28); }
@@ -240,6 +252,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 </main>
 
 <script>
+// ===== WebSocket / globaler UI-State =====
 let ws;
 let lastState = null;
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
@@ -251,6 +264,25 @@ let pendingConfirm = null;
 let wizard = { type: null, step: 0 };
 let wizardEndSent = true;
 const el = id => document.getElementById(id);
+const setText = (id, value) => { el(id).textContent = value; };
+const GEFAESS_COUNT = 4;
+const GEFAESS_INDEXES = Array.from({ length: GEFAESS_COUNT }, (_, index) => index);
+const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3', 'Gefäß 4'];
+const CMD = Object.freeze({
+  saveDose: 'save_dose',
+  tare: 'tare',
+  stopwatchStartStop: 'stopwatch_start_stop',
+  stopwatchReset: 'stopwatch_reset',
+  autodetectOn: 'autodetect_on',
+  autodetectOff: 'autodetect_off',
+  wizardEnd: 'web_wizard_end',
+  wizardTare: 'web_wizard_tare',
+  scaleCalibrationApply: 'scale_calibration_apply',
+  measureGefaessSave: 'measure_gefaess_save',
+  maintenanceResetMachine: 'maintenance_reset_machine',
+  maintenanceResetGrinder: 'maintenance_reset_grinder',
+  maintenanceResetFilter: 'maintenance_reset_filter'
+});
 const fmtG = v => {
   let n = Number(v || 0);
   if (n > -0.05 && n < 0.05) n = 0;
@@ -283,6 +315,7 @@ const fmtUptime = ms => {
   return `${m} min ${s} s`;
 };
 
+// ===== Navigation / Log =====
 function addLog(msg) {
   const now = new Date().toLocaleTimeString();
   el('log').textContent = `${now}  ${msg}`;
@@ -293,6 +326,7 @@ function showSettings(show) {
   el('settingsPage').classList.toggle('hidden', !show);
 }
 
+// ===== Bestaetigungs-Overlay =====
 function openConfirmOverlay(title, text, cmd, logText) {
   pendingConfirm = { cmd, logText };
   el('confirmTitle').textContent = title;
@@ -313,8 +347,13 @@ function confirmPendingAction() {
   sendCommand(action.cmd, action.logText);
 }
 
+// ===== WebSocket-Kommandos =====
+function isWebSocketReady() {
+  return !!ws && ws.readyState === WebSocket.OPEN;
+}
+
 function sendCommand(cmd, logText) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!isWebSocketReady()) {
     addLog('WebSocket nicht verbunden');
     return;
   }
@@ -330,9 +369,10 @@ function sendCommandAndThen(cmd, logText, nextStep) {
   }
 }
 
+// ===== Wizard-Overlay =====
 function finishWizardOverlay() {
   if (!wizardEndSent) {
-    sendCommand('web_wizard_end', 'Assistent beendet, Autodetect wiederherstellen …');
+    sendCommand(CMD.wizardEnd, 'Assistent beendet, Autodetect wiederherstellen …');
     wizardEndSent = true;
   }
 }
@@ -374,7 +414,7 @@ function renderCalibrationWizard() {
       '<div class="wizard-note">Die aktuelle Anzeige sollte danach nahe 0,0 g stehen.</div>',
       [
         wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
-        wizardButton('Tarieren', '', () => sendCommandAndThen('web_wizard_tare', 'Kalibrierung: Tara gesendet …', 1))
+        wizardButton('Tarieren', '', () => sendCommandAndThen(CMD.wizardTare, 'Kalibrierung: Tara gesendet …', 1))
       ]
     );
     return;
@@ -407,7 +447,7 @@ function renderCalibrationWizard() {
       '<div class="wizard-note">Danach wird der Kalibrierfaktor berechnet und gespeichert.</div>',
       [
         wizardButton('Zurück', 'secondary', () => { wizard.step = 1; renderWizard(); }),
-        wizardButton('Kalibrieren', '', () => sendCommandAndThen('scale_calibration_apply', 'Kalibrierung gesendet …', 3))
+        wizardButton('Kalibrieren', '', () => sendCommandAndThen(CMD.scaleCalibrationApply, 'Kalibrierung gesendet …', 3))
       ]
     );
     return;
@@ -424,14 +464,13 @@ function renderCalibrationWizard() {
 }
 
 function gefaessName(index) {
-  const names = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3', 'Gefäß 4'];
-  return names[index] || `Gefäß ${index + 1}`;
+  return GEFAESS_NAMES[index] || `Gefäß ${index + 1}`;
 }
 
 function renderMeasureGefaessWizard() {
   if (wizard.step === 0) {
     const current = Number(lastState?.selection?.gefaess ?? 0);
-    const options = [0, 1, 2, 3].map(i => `<option value="${i}" ${i === current ? 'selected' : ''}>${gefaessName(i)}</option>`).join('');
+    const options = GEFAESS_INDEXES.map(i => `<option value="${i}" ${i === current ? 'selected' : ''}>${gefaessName(i)}</option>`).join('');
     setWizardContent(
       'Gefäße einmessen: Auswahl',
       'Bitte auswählen, welches Gefäß eingemessen werden soll.',
@@ -454,7 +493,7 @@ function renderMeasureGefaessWizard() {
       '<div class="wizard-note">Danach das ausgewählte Gefäß auflegen.</div>',
       [
         wizardButton('Zurück', 'secondary', () => { wizard.step = 0; renderWizard(); }),
-        wizardButton('Tarieren', '', () => sendCommandAndThen('web_wizard_tare', 'Gefäß einmessen: Tara gesendet …', 2))
+        wizardButton('Tarieren', '', () => sendCommandAndThen(CMD.wizardTare, 'Gefäß einmessen: Tara gesendet …', 2))
       ]
     );
     return;
@@ -468,7 +507,7 @@ function renderMeasureGefaessWizard() {
       `<div class="wizard-note">Aktuelles Gewicht: <b id="gefaessLiveWeight">${fmtG(lastState?.weight?.actual_g)} g</b></div>`,
       [
         wizardButton('Zurück', 'secondary', () => { wizard.step = 1; renderWizard(); }),
-        wizardButton('Gewicht speichern', '', () => sendCommandAndThen('measure_gefaess_save', 'Gefäßgewicht speichern gesendet …', 3))
+        wizardButton('Gewicht speichern', '', () => sendCommandAndThen(CMD.measureGefaessSave, 'Gefäßgewicht speichern gesendet …', 3))
       ]
     );
     return;
@@ -516,6 +555,7 @@ function openMeasureGefaessWizard() {
   openWizard('gefaess');
 }
 
+// ===== Wartung =====
 function fmtDuration(seconds) {
   const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
   const days = Math.floor(total / 86400);
@@ -638,6 +678,7 @@ function renderMaintenance(m) {
   }
 }
 
+// ===== Stoppuhr =====
 function syncStopwatchTimer(sw) {
   const newMs = Math.max(0, Number(sw?.ms || 0));
   const newRunning = !!sw?.running;
@@ -664,12 +705,13 @@ function renderStopwatch() {
   el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
 }
 
+// ===== Settings / Gefaesse =====
 function renderGefaessSettings(s) {
   const list = el('gefaessList');
   if (!list) return;
 
   const weights = s?.gefaesse?.weights_g || [];
-  list.innerHTML = [0, 1, 2, 3].map(index => {
+  list.innerHTML = GEFAESS_INDEXES.map(index => {
     const weight = Number(weights[index] || 0);
     const measured = weight > 0.05;
     const label = `Gefäß ${index + 1}`;
@@ -683,20 +725,23 @@ function renderGefaessSettings(s) {
   }).join('');
 }
 
-function render(s) {
-  lastState = s;
-  syncMaintenanceTimers(s.maintenance);
-  el('actual').textContent = fmtG(s.weight?.actual_g);
+// ===== State-Rendering =====
+function renderWeightAndSelection(s) {
+  setText('actual', fmtG(s.weight?.actual_g));
   if (!targetWeightDirty && document.activeElement !== el('targetWeight')) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
   }
-  el('status').textContent = s.status?.label || String(s.status?.mode ?? '---');
+  setText('status', s.status?.label || String(s.status?.mode ?? '---'));
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
+}
+
+function renderAutodetect(s) {
   const autodetectOn = !!s.selection?.autodetect;
   const autodetectPaused = !!s.system?.autodetect_paused;
   const autodetectToggle = el('autodetectToggle');
   const autodetectLed = el('autodetectLed');
-  el('autodetectStatus').textContent = autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus');
+
+  setText('autodetectStatus', autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus'));
   autodetectToggle.classList.toggle('on', autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('off', !autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('paused', autodetectPaused);
@@ -704,29 +749,47 @@ function render(s) {
   autodetectToggle.disabled = autodetectPaused;
   autodetectToggle.title = autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten');
   autodetectLed.classList.toggle('on', autodetectOn && !autodetectPaused);
-  syncStopwatchTimer(s.stopwatch);
-  renderStopwatch();
-  el('shotsTotal').textContent = s.stats?.shots?.total ?? 0;
-  el('shotsMachine').textContent = s.stats?.shots?.since_machine_clean ?? 0;
-  el('shotsGrinder').textContent = s.stats?.shots?.since_grinder_clean ?? 0;
-  el('shotsFilter').textContent = s.stats?.shots?.since_filter_change ?? 0;
-  el('groundTotalKg').textContent = fmtKg(s.stats?.ground?.total_g);
-  el('groundMachineG').textContent = fmtWholeG(s.stats?.ground?.since_machine_clean_g);
-  el('groundGrinderG').textContent = fmtWholeG(s.stats?.ground?.since_grinder_clean_g);
-  el('groundFilterG').textContent = fmtWholeG(s.stats?.ground?.since_filter_change_g);
-  el('datetime').textContent = fmtDateTime(s.time?.epoch, s.time?.valid);
-  el('uptime').textContent = fmtUptime(s.system?.uptime_ms);
-  el('ip').textContent = s.system?.ip || location.hostname;
+}
+
+function renderStatsAndSystem(s) {
+  setText('shotsTotal', s.stats?.shots?.total ?? 0);
+  setText('shotsMachine', s.stats?.shots?.since_machine_clean ?? 0);
+  setText('shotsGrinder', s.stats?.shots?.since_grinder_clean ?? 0);
+  setText('shotsFilter', s.stats?.shots?.since_filter_change ?? 0);
+  setText('groundTotalKg', fmtKg(s.stats?.ground?.total_g));
+  setText('groundMachineG', fmtWholeG(s.stats?.ground?.since_machine_clean_g));
+  setText('groundGrinderG', fmtWholeG(s.stats?.ground?.since_grinder_clean_g));
+  setText('groundFilterG', fmtWholeG(s.stats?.ground?.since_filter_change_g));
+  setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));
+  setText('uptime', fmtUptime(s.system?.uptime_ms));
+  setText('ip', s.system?.ip || location.hostname);
+}
+
+function renderActionAvailability(s) {
   el('save').disabled = !s.status?.save_ready;
   el('swToggle').disabled = false;
   el('swReset').disabled = false;
+}
+
+function render(s) {
+  lastState = s;
+  syncMaintenanceTimers(s.maintenance);
+
+  renderWeightAndSelection(s);
+  renderAutodetect(s);
+  syncStopwatchTimer(s.stopwatch);
+  renderStopwatch();
+  renderStatsAndSystem(s);
+  renderActionAvailability(s);
   renderMaintenance(s.maintenance);
   renderGefaessSettings(s);
+
   if (el('wizardOverlay').classList.contains('show')) {
     updateWizardLiveFields();
   }
 }
 
+// ===== WebSocket-Verbindung =====
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -756,20 +819,20 @@ function connect() {
 
 el('save').addEventListener('click', () => {
   if (lastState?.status?.save_ready) {
-    sendCommand('save_dose', 'Save gesendet …');
+    sendCommand(CMD.saveDose, 'Save gesendet …');
   }
 });
 
 el('tare').addEventListener('click', () => {
-  sendCommand('tare', 'Tara gesendet …');
+  sendCommand(CMD.tare, 'Tara gesendet …');
 });
 
 el('swToggle').addEventListener('click', () => {
-  sendCommand('stopwatch_start_stop', stopwatchRunning ? 'Stoppuhr Stop gesendet …' : 'Stoppuhr Start gesendet …');
+  sendCommand(CMD.stopwatchStartStop, stopwatchRunning ? 'Stoppuhr Stop gesendet …' : 'Stoppuhr Start gesendet …');
 });
 
 el('swReset').addEventListener('click', () => {
-  sendCommand('stopwatch_reset', 'Stoppuhr Reset gesendet …');
+  sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …');
 });
 
 el('siebtraegerSelect').addEventListener('change', () => {
@@ -777,8 +840,9 @@ el('siebtraegerSelect').addEventListener('change', () => {
   sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
 });
 
+// ===== Event-Handler =====
 function sendTargetWeight() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!isWebSocketReady()) return;
   const value = Number(el('targetWeight').value.replace(',', '.'));
   if (!Number.isFinite(value) || value <= 0) {
     addLog('Ungültiges Sollgewicht');
@@ -796,24 +860,24 @@ el('openCalibrate').addEventListener('click', openCalibrationWizard);
 el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
 el('autodetectToggle').addEventListener('click', () => {
   const autodetectOn = !!lastState?.selection?.autodetect;
-  sendCommand(autodetectOn ? 'autodetect_off' : 'autodetect_on', autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
+  sendCommand(autodetectOn ? CMD.autodetectOff : CMD.autodetectOn, autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
 });
 el('resetMachine').addEventListener('click', () => openConfirmOverlay(
   'Kaffeemaschinenreinigung reset?',
   'Dadurch werden Zeitpunkt und Zähler seit der letzten Kaffeemaschinenreinigung zurückgesetzt.',
-  'maintenance_reset_machine',
+  CMD.maintenanceResetMachine,
   'Reset Kaffeemaschine gesendet …'
 ));
 el('resetGrinder').addEventListener('click', () => openConfirmOverlay(
   'Mühlenreinigung reset?',
   'Dadurch werden Zeitpunkt und Zähler seit der letzten Mühlenreinigung zurückgesetzt.',
-  'maintenance_reset_grinder',
+  CMD.maintenanceResetGrinder,
   'Reset Mühle gesendet …'
 ));
 el('resetFilter').addEventListener('click', () => openConfirmOverlay(
   'Filterwechsel reset?',
   'Dadurch werden Zeitpunkt und Zähler seit dem letzten Filterwechsel zurückgesetzt.',
-  'maintenance_reset_filter',
+  CMD.maintenanceResetFilter,
   'Reset Filter gesendet …'
 ));
 el('gefaessList').addEventListener('click', e => {
@@ -876,13 +940,17 @@ setInterval(function stopwatchClientTick() {
 connect();
 
 window.addEventListener('beforeunload', () => {
-  if (ws && ws.readyState === WebSocket.OPEN && !wizardEndSent) {
-    ws.send(JSON.stringify({ cmd: 'web_wizard_end' }));
+  if (isWebSocketReady() && !wizardEndSent) {
+    ws.send(JSON.stringify({ cmd: CMD.wizardEnd }));
   }
 });
 </script>
 </body>
 </html>)rawliteral";
+
+// =============================================================================
+// C++: HTTP / WebSocket / State-Serialisierung
+// =============================================================================
 
 static const char* appStatusLabel(AppStatusMode mode)
 {
@@ -903,6 +971,10 @@ void coffeeWebHandleRoot(AsyncWebServerRequest* request)
   request->send_P(200, "text/html", INDEX_HTML);
 }
 
+
+// -----------------------------------------------------------------------------
+// WebSocket-Antworten und Eingangsverarbeitung
+// -----------------------------------------------------------------------------
 
 static void sendWsError(AsyncWebSocketClient* client, const char* cmd, const char* message)
 {
@@ -961,6 +1033,10 @@ static void handleWsText(AsyncWebSocketClient* client, const uint8_t* data, size
   sendWsError(client, cmd, "command_failed");
 }
 
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
+
 void coffeeWebBegin(AsyncWebServer& server)
 {
   ws.onEvent([](AsyncWebSocket *server,
@@ -1000,6 +1076,10 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 {
   commandHandler = handler;
 }
+
+// -----------------------------------------------------------------------------
+// AppState -> WebSocket-State JSON
+// -----------------------------------------------------------------------------
 
 static String buildStateJson(const AppState& s)
 {

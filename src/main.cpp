@@ -1108,12 +1108,20 @@ static void resetStopwatchCore()
   }
 }
 
+// =============================================================================
+// WebUI command router
+// =============================================================================
+// Die WebUI soll keine fachliche Logik duplizieren. Sie sendet nur Kommandos;
+// die Auswertung bleibt hier im Core-Kontext und aktualisiert anschliessend den
+// gemeinsamen AppState fuer WebUI und HMI.
+
 static bool handleCoffeeWebCommand(const char* cmd)
 {
   if (!cmd) {
     return false;
   }
 
+  // Auswahl / Konfiguration
   if (strncmp(cmd, "select_siebtraeger_", 19) == 0) {
     const int index = atoi(cmd + 19);
     return selectSiebtraegerFromWeb(static_cast<byte>(index));
@@ -1136,6 +1144,7 @@ static bool handleCoffeeWebCommand(const char* cmd)
     return selectGefaessFromWeb(static_cast<byte>(index));
   }
 
+  // Tara / Wizard
   const bool webWizardTare = strcmp(cmd, "web_wizard_tare") == 0;
   if (webWizardTare || strcmp(cmd, "tare") == 0) {
     if (webWizardTare) {
@@ -1181,6 +1190,7 @@ static bool handleCoffeeWebCommand(const char* cmd)
     return deleteGefaessWeightFromWeb(static_cast<byte>(index));
   }
 
+  // Wartung
   if (strcmp(cmd, "maintenance_reset_grinder") == 0) {
     if (!resetMuehlenReinigungCore()) {
       return false;
@@ -1205,6 +1215,8 @@ static bool handleCoffeeWebCommand(const char* cmd)
     return true;
   }
 
+#if WEBUI_DEBUG_COMMANDS
+  // Debug-Kommandos fuer Wartungstests ohne echte Intervall-Aenderung.
   if (strcmp(cmd, "debug_maintenance_grinder_due") == 0) {
     if (!debugForceMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, "lstMhlRngng")) {
       return false;
@@ -1240,7 +1252,9 @@ static bool handleCoffeeWebCommand(const char* cmd)
     broadcastWebStateFromGlobals();
     return true;
   }
+#endif
 
+  // Stoppuhr / Autodetect / Dose speichern
   if (strcmp(cmd, "stopwatch_start_stop") == 0) {
     toggleStopwatchCore();
     broadcastWebStateFromGlobals();
