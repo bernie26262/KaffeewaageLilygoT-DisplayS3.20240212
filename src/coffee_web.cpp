@@ -35,6 +35,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .autodetect-toggle { width: auto; min-width: 0; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; font-size: .9rem; background: #e5e7eb; color: #374151; }
     .autodetect-toggle.on { background: #dcfce7; color: #166534; }
     .autodetect-toggle.off { background: #e5e7eb; color: #6b7280; }
+    .autodetect-toggle.paused { background: #fef3c7; color: #92400e; }
     .autodetect-led { width: 11px; height: 11px; border-radius: 50%; background: #9ca3af; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
     .autodetect-led.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.18), 0 0 10px rgba(34,197,94,.65); }
     .weight { font-size: 4rem; line-height: 1; font-weight: 750; letter-spacing: -0.06em; margin: 12px 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -64,6 +65,11 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .ip-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
     .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
+    .gefaess-list { display: grid; gap: 8px; margin-top: 10px; }
+    .gefaess-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #f3f4f6; }
+    .gefaess-row:last-child { border-bottom: 0; }
+    .gefaess-weight { font-weight: 700; }
+    .gefaess-missing { color: #6b7280; }
     .page { display: grid; gap: 14px; }
     .page.hidden { display: none; }
     .nav-button { width: auto; min-width: 150px; padding: 10px 14px; font-size: .95rem; }
@@ -73,6 +79,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 8px; }
     .modal-text { color: #4b5563; margin-bottom: 16px; }
     .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .wizard-field { display: grid; gap: 6px; margin: 12px 0; }
+    .wizard-field input, .wizard-field select { width: 100%; box-sizing: border-box; padding: 11px 12px; font-size: 1rem; }
+    .wizard-note { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 12px; margin: 12px 0; font-size: .92rem; color: #374151; }
+    .wizard-note.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
     .danger { background: #dc2626; }
     @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .weight { font-size: 3.4rem; } button.compact, .button-row, .nav-button { width: 100%; } .modal-actions { grid-template-columns: 1fr; } }
   </style>
@@ -169,32 +179,38 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="settingsPage" class="page hidden">
-  <section class="card">
-    <div class="stats-title">Einstellungen</div>
-    <div class="label">Wartung zurücksetzen</div>
+  <section id="maintenanceDetailCard" class="card maintenance ok show">
+    <div class="stats-title">Wartung</div>
+    <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
+    <ul class="maintenance-list" id="maintenanceDetailList"></ul>
+    <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
     <div class="settings-actions">
       <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
       <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
       <button id="resetFilter" class="secondary">Filter gewechselt</button>
     </div>
-    <div class="button-row" style="margin-top: 16px;">
-      <button id="backDashboard" class="nav-button">Zurück zum Dashboard</button>
-    </div>
-  </section>
-
-  <section id="maintenanceDetailCard" class="card maintenance ok show">
-    <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
-    <ul class="maintenance-list" id="maintenanceDetailList"></ul>
   </section>
 
   <section class="card">
-    <div class="stats-title">Später</div>
-    <div class="settings-list small">
-      <div>Waage kalibrieren</div>
-      <div>Gefäße einmessen</div>
-      <div>Siebträger-Gewichte verwalten</div>
+    <div class="stats-title">Waage kalibrieren</div>
+    <div class="small">Geführter Assistent zum Tarieren, Eingeben des Kalibriergewichts und Speichern des Kalibrierfaktors.</div>
+    <div class="settings-actions" style="margin-top: 12px;">
+      <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
     </div>
   </section>
+
+  <section class="card">
+    <div class="stats-title">Gefäße einmessen</div>
+    <div class="small">Gespeicherte Gefäßgewichte für Autodetect.</div>
+    <div id="gefaessList" class="gefaess-list"></div>
+    <div class="settings-actions" style="margin-top: 12px;">
+      <button id="openMeasureGefaess" class="secondary">Gefäß einmessen</button>
+    </div>
+  </section>
+
+  <div class="button-row">
+    <button id="backDashboard" class="nav-button">Zurück zum Dashboard</button>
+  </div>
   </div>
 
   <div id="confirmOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
@@ -205,6 +221,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="confirmCancel" class="secondary">Abbrechen</button>
         <button id="confirmOk" class="danger">Ok</button>
       </div>
+    </div>
+  </div>
+
+  <div id="wizardOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+    <div class="modal">
+      <div class="modal-title" id="wizardTitle">Assistent</div>
+      <div class="modal-text" id="wizardText">Bitte folgen.</div>
+      <div id="wizardBody"></div>
+      <div class="modal-actions" id="wizardActions"></div>
     </div>
   </div>
 
@@ -223,6 +248,8 @@ let stopwatchBaseMs = 0;
 let stopwatchRunning = false;
 let targetWeightDirty = false;
 let pendingConfirm = null;
+let wizard = { type: null, step: 0 };
+let wizardEndSent = true;
 const el = id => document.getElementById(id);
 const fmtG = v => {
   let n = Number(v || 0);
@@ -293,6 +320,200 @@ function sendCommand(cmd, logText) {
   }
   ws.send(JSON.stringify({ cmd }));
   addLog(logText || `${cmd} gesendet …`);
+}
+
+function sendCommandAndThen(cmd, logText, nextStep) {
+  sendCommand(cmd, logText);
+  if (typeof nextStep === 'number') {
+    wizard.step = nextStep;
+    renderWizard();
+  }
+}
+
+function finishWizardOverlay() {
+  if (!wizardEndSent) {
+    sendCommand('web_wizard_end', 'Assistent beendet, Autodetect wiederherstellen …');
+    wizardEndSent = true;
+  }
+}
+
+function closeWizardOverlay() {
+  finishWizardOverlay();
+  el('wizardOverlay').classList.remove('show');
+  wizard = { type: null, step: 0 };
+}
+
+function wizardButton(label, className, onClick) {
+  const btn = document.createElement('button');
+  btn.textContent = label;
+  if (className) btn.className = className;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function wizardPausedNote() {
+  return lastState?.system?.autodetect_paused
+    ? '<div class="wizard-note warn">Autodetect ist während dieses Assistenten pausiert, damit keine Messung automatisch tariert wird.</div>'
+    : '';
+}
+
+function setWizardContent(title, text, bodyHtml, actions) {
+  el('wizardTitle').textContent = title;
+  el('wizardText').textContent = text;
+  el('wizardBody').innerHTML = (bodyHtml || '') + wizardPausedNote();
+  const actionBox = el('wizardActions');
+  actionBox.innerHTML = '';
+  actions.forEach(action => actionBox.appendChild(action));
+}
+
+function renderCalibrationWizard() {
+  if (wizard.step === 0) {
+    setWizardContent(
+      'Waage kalibrieren: Tarieren',
+      'Bitte die Waage vollständig leeren und dann tarieren.',
+      '<div class="wizard-note">Die aktuelle Anzeige sollte danach nahe 0,0 g stehen.</div>',
+      [
+        wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+        wizardButton('Tarieren', '', () => sendCommandAndThen('web_wizard_tare', 'Kalibrierung: Tara gesendet …', 1))
+      ]
+    );
+    return;
+  }
+
+  if (wizard.step === 1) {
+    const current = Number(lastState?.calibration?.set_weight_g || 200).toFixed(1);
+    setWizardContent(
+      'Waage kalibrieren: Gewicht einstellen',
+      'Bitte das Kalibriergewicht auflegen und den bekannten Gewichtswert eintragen.',
+      `<label class="wizard-field"><span>Kalibriergewicht in g</span><input id="calibrationWeightInput" type="text" inputmode="decimal" value="${current}"></label>`,
+      [
+        wizardButton('Zurück', 'secondary', () => { wizard.step = 0; renderWizard(); }),
+        wizardButton('Weiter', '', () => {
+          const value = Number(el('calibrationWeightInput').value.replace(',', '.'));
+          if (!Number.isFinite(value) || value <= 0) { addLog('Ungültiges Kalibriergewicht'); return; }
+          sendCommandAndThen(`scale_calibration_set_weight_${value.toFixed(1)}`, `Kalibriergewicht gesendet: ${value.toFixed(1)} g`, 2);
+        })
+      ]
+    );
+    el('calibrationWeightInput').focus();
+    return;
+  }
+
+  if (wizard.step === 2) {
+    const current = Number(lastState?.calibration?.set_weight_g || 0).toFixed(1);
+    setWizardContent(
+      'Waage kalibrieren: Kalibrieren',
+      `Bitte warten, bis das Gewicht ruhig steht. Eingestelltes Kalibriergewicht: ${current} g.`,
+      '<div class="wizard-note">Danach wird der Kalibrierfaktor berechnet und gespeichert.</div>',
+      [
+        wizardButton('Zurück', 'secondary', () => { wizard.step = 1; renderWizard(); }),
+        wizardButton('Kalibrieren', '', () => sendCommandAndThen('scale_calibration_apply', 'Kalibrierung gesendet …', 3))
+      ]
+    );
+    return;
+  }
+
+  const factor = Number(lastState?.calibration?.factor || 0).toFixed(4);
+  const known = Number(lastState?.calibration?.set_weight_g || 0).toFixed(1);
+  setWizardContent(
+    'Waage kalibrieren: OK',
+    'Die Kalibrierung wurde gespeichert.',
+    `<div class="wizard-note">Kalibriergewicht: ${known} g<br>Kalibrierfaktor: ${factor}</div>`,
+    [wizardButton('Fertig', '', closeWizardOverlay)]
+  );
+}
+
+function gefaessName(index) {
+  const names = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3', 'Gefäß 4'];
+  return names[index] || `Gefäß ${index + 1}`;
+}
+
+function renderMeasureGefaessWizard() {
+  if (wizard.step === 0) {
+    const current = Number(lastState?.selection?.gefaess ?? 0);
+    const options = [0, 1, 2, 3].map(i => `<option value="${i}" ${i === current ? 'selected' : ''}>${gefaessName(i)}</option>`).join('');
+    setWizardContent(
+      'Gefäße einmessen: Auswahl',
+      'Bitte auswählen, welches Gefäß eingemessen werden soll.',
+      `<label class="wizard-field"><span>Gefäß</span><select id="gefaessWizardSelect">${options}</select></label>`,
+      [
+        wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+        wizardButton('Weiter', '', () => {
+          const idx = Number(el('gefaessWizardSelect').value);
+          sendCommandAndThen(`select_gefaess_${idx}`, `${gefaessName(idx)} ausgewählt …`, 1);
+        })
+      ]
+    );
+    return;
+  }
+
+  if (wizard.step === 1) {
+    setWizardContent(
+      'Gefäße einmessen: Tarieren',
+      'Bitte die Waage vollständig leeren und dann tarieren.',
+      '<div class="wizard-note">Danach das ausgewählte Gefäß auflegen.</div>',
+      [
+        wizardButton('Zurück', 'secondary', () => { wizard.step = 0; renderWizard(); }),
+        wizardButton('Tarieren', '', () => sendCommandAndThen('web_wizard_tare', 'Gefäß einmessen: Tara gesendet …', 2))
+      ]
+    );
+    return;
+  }
+
+  if (wizard.step === 2) {
+    const idx = Number(lastState?.selection?.gefaess ?? 0);
+    setWizardContent(
+      'Gefäße einmessen: Gefäß auflegen',
+      `Bitte ${gefaessName(idx)} auflegen und warten, bis das Gewicht ruhig steht.`,
+      `<div class="wizard-note">Aktuelles Gewicht: <b id="gefaessLiveWeight">${fmtG(lastState?.weight?.actual_g)} g</b></div>`,
+      [
+        wizardButton('Zurück', 'secondary', () => { wizard.step = 1; renderWizard(); }),
+        wizardButton('Gewicht speichern', '', () => sendCommandAndThen('measure_gefaess_save', 'Gefäßgewicht speichern gesendet …', 3))
+      ]
+    );
+    return;
+  }
+
+  const idx = Number(lastState?.selection?.gefaess ?? 0);
+  const weights = lastState?.gefaesse?.weights_g || [];
+  const weight = Number(weights[idx] || lastState?.weight?.actual_g || 0).toFixed(1);
+  setWizardContent(
+    'Gefäße einmessen: OK',
+    `${gefaessName(idx)} wurde gespeichert.`,
+    `<div class="wizard-note">Gespeichertes Gewicht: ${weight} g</div>`,
+    [
+      wizardButton('Weiteres Gefäß', 'secondary', () => { wizard.step = 0; renderWizard(); }),
+      wizardButton('Fertig', '', closeWizardOverlay)
+    ]
+  );
+}
+
+function renderWizard() {
+  if (wizard.type === 'calibration') renderCalibrationWizard();
+  if (wizard.type === 'gefaess') renderMeasureGefaessWizard();
+}
+
+function updateWizardLiveFields() {
+  const weightEl = el('gefaessLiveWeight');
+  if (weightEl) {
+    weightEl.textContent = `${fmtG(lastState?.weight?.actual_g)} g`;
+  }
+}
+
+function openWizard(type) {
+  wizard = { type, step: 0 };
+  wizardEndSent = false;
+  sendCommand('web_wizard_begin', 'Assistent gestartet, Autodetect pausieren …');
+  el('wizardOverlay').classList.add('show');
+  renderWizard();
+}
+
+function openCalibrationWizard() {
+  openWizard('calibration');
+}
+
+function openMeasureGefaessWizard() {
+  openWizard('gefaess');
 }
 
 function fmtDuration(seconds) {
@@ -443,6 +664,25 @@ function renderStopwatch() {
   el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
 }
 
+function renderGefaessSettings(s) {
+  const list = el('gefaessList');
+  if (!list) return;
+
+  const weights = s?.gefaesse?.weights_g || [];
+  list.innerHTML = [0, 1, 2, 3].map(index => {
+    const weight = Number(weights[index] || 0);
+    const measured = weight > 0.05;
+    const label = `Gefäß ${index + 1}`;
+    const value = measured
+      ? `<span class="gefaess-weight">${fmtG(weight)} g</span>`
+      : '<span class="gefaess-missing">nicht eingemessen</span>';
+    const button = measured
+      ? `<button class="compact danger delete-gefaess" data-gefaess-index="${index}">löschen</button>`
+      : '<button class="compact secondary" disabled>löschen</button>';
+    return `<div class="gefaess-row"><div><b>${label}:</b> ${value}</div>${button}</div>`;
+  }).join('');
+}
+
 function render(s) {
   lastState = s;
   syncMaintenanceTimers(s.maintenance);
@@ -453,14 +693,17 @@ function render(s) {
   el('status').textContent = s.status?.label || String(s.status?.mode ?? '---');
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
   const autodetectOn = !!s.selection?.autodetect;
+  const autodetectPaused = !!s.system?.autodetect_paused;
   const autodetectToggle = el('autodetectToggle');
   const autodetectLed = el('autodetectLed');
-  el('autodetectStatus').textContent = autodetectOn ? 'an' : 'aus';
-  autodetectToggle.classList.toggle('on', autodetectOn);
-  autodetectToggle.classList.toggle('off', !autodetectOn);
+  el('autodetectStatus').textContent = autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus');
+  autodetectToggle.classList.toggle('on', autodetectOn && !autodetectPaused);
+  autodetectToggle.classList.toggle('off', !autodetectOn && !autodetectPaused);
+  autodetectToggle.classList.toggle('paused', autodetectPaused);
   autodetectToggle.setAttribute('aria-pressed', autodetectOn ? 'true' : 'false');
-  autodetectToggle.title = autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten';
-  autodetectLed.classList.toggle('on', autodetectOn);
+  autodetectToggle.disabled = autodetectPaused;
+  autodetectToggle.title = autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten');
+  autodetectLed.classList.toggle('on', autodetectOn && !autodetectPaused);
   syncStopwatchTimer(s.stopwatch);
   renderStopwatch();
   el('shotsTotal').textContent = s.stats?.shots?.total ?? 0;
@@ -478,6 +721,10 @@ function render(s) {
   el('swToggle').disabled = false;
   el('swReset').disabled = false;
   renderMaintenance(s.maintenance);
+  renderGefaessSettings(s);
+  if (el('wizardOverlay').classList.contains('show')) {
+    updateWizardLiveFields();
+  }
 }
 
 function connect() {
@@ -545,6 +792,8 @@ function sendTargetWeight() {
 el('targetSave').addEventListener('click', sendTargetWeight);
 el('openSettings').addEventListener('click', () => showSettings(true));
 el('backDashboard').addEventListener('click', () => showSettings(false));
+el('openCalibrate').addEventListener('click', openCalibrationWizard);
+el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
 el('autodetectToggle').addEventListener('click', () => {
   const autodetectOn = !!lastState?.selection?.autodetect;
   sendCommand(autodetectOn ? 'autodetect_off' : 'autodetect_on', autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
@@ -567,20 +816,44 @@ el('resetFilter').addEventListener('click', () => openConfirmOverlay(
   'maintenance_reset_filter',
   'Reset Filter gesendet …'
 ));
+el('gefaessList').addEventListener('click', e => {
+  const button = e.target.closest('.delete-gefaess');
+  if (!button) return;
+
+  const index = Number(button.dataset.gefaessIndex);
+  if (!Number.isInteger(index) || index < 0 || index > 3) return;
+
+  openConfirmOverlay(
+    `Gefäß ${index + 1} löschen?`,
+    `Das gespeicherte Gewicht für Gefäß ${index + 1} wird gelöscht. Autodetect erkennt dieses Gefäß danach nicht mehr.`,
+    `delete_gefaess_${index}`,
+    `Gefäß ${index + 1} löschen gesendet …`
+  );
+});
 el('confirmCancel').addEventListener('click', closeConfirmOverlay);
 el('confirmOk').addEventListener('click', confirmPendingAction);
 el('confirmOverlay').addEventListener('click', e => {
   if (e.target === el('confirmOverlay')) closeConfirmOverlay();
 });
+el('wizardOverlay').addEventListener('click', e => {
+  if (e.target === el('wizardOverlay')) closeWizardOverlay();
+});
 document.addEventListener('keydown', e => {
-  if (!el('confirmOverlay').classList.contains('show')) return;
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    closeConfirmOverlay();
+  if (el('confirmOverlay').classList.contains('show')) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeConfirmOverlay();
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirmPendingAction();
+    }
+    return;
   }
-  if (e.key === 'Enter') {
+
+  if (el('wizardOverlay').classList.contains('show') && e.key === 'Escape') {
     e.preventDefault();
-    confirmPendingAction();
+    closeWizardOverlay();
   }
 });
 el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
@@ -601,6 +874,12 @@ setInterval(function stopwatchClientTick() {
 }, 100);
 
 connect();
+
+window.addEventListener('beforeunload', () => {
+  if (ws && ws.readyState === WebSocket.OPEN && !wizardEndSent) {
+    ws.send(JSON.stringify({ cmd: 'web_wizard_end' }));
+  }
+});
 </script>
 </body>
 </html>)rawliteral";
@@ -724,7 +1003,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<1536> doc;
+  StaticJsonDocument<2048> doc;
 
   doc["type"] = "state";
 
@@ -742,6 +1021,14 @@ static String buildStateJson(const AppState& s)
   doc["selection"]["siebtraeger"] = s.selection.siebtraeger;
   doc["selection"]["gefaess"] = s.selection.gefaess;
   doc["selection"]["autodetect"] = s.selection.autodetect;
+
+  doc["calibration"]["set_weight_g"] = s.calibration.set_weight_g;
+  doc["calibration"]["factor"] = s.calibration.factor;
+
+  JsonArray gefaessWeights = doc["gefaesse"]["weights_g"].to<JsonArray>();
+  for (int i = 0; i < 4; ++i) {
+    gefaessWeights.add(s.gefaesse.weights_g[i]);
+  }
 
   doc["stats"]["ground"]["total_g"] = s.stats.ground.total_g;
   doc["stats"]["ground"]["since_grinder_clean_g"] = s.stats.ground.since_grinder_clean_g;
@@ -767,6 +1054,8 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi"] = s.system.wifi_connected;
   doc["system"]["ip"] = s.system.ip;
   doc["system"]["uptime_ms"] = s.system.uptime_ms;
+  doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
+  doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
 
   String out;
   serializeJson(doc, out);

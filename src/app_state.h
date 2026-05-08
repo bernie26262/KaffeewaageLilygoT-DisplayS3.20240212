@@ -25,6 +25,15 @@ struct SelectionState {
   bool autodetect = false;
 };
 
+struct CalibrationState {
+  float set_weight_g = 0.0f;
+  float factor = 0.0f;
+};
+
+struct GefaessState {
+  float weights_g[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
 struct StatsGround {
   float total_g = 0.0f;
   float since_grinder_clean_g = 0.0f;
@@ -63,6 +72,8 @@ struct SystemState {
   bool wifi_connected = false;
   String ip;
   uint32_t uptime_ms = 0;
+  bool web_wizard_active = false;
+  bool autodetect_paused = false;
 };
 
 struct StatusState {
@@ -74,6 +85,8 @@ struct AppState {
   WeightState weight;
   StopwatchState stopwatch;
   SelectionState selection;
+  CalibrationState calibration;
+  GefaessState gefaesse;
   StatsState stats;
   MaintenanceState maintenance;
   TimeState time;

@@ -172,7 +172,12 @@ AsyncWebServer server(HTTP_PORT);
 
 AppState appState;
 static unsigned long lastWebStateBroadcastMs = 0;
-static const unsigned long WEB_STATE_BROADCAST_INTERVAL_MS = 200;
+static unsigned long lastWebWeightBroadcastMs = 0;
+static float lastWebBroadcastWeightG = 0.0f;
+static bool hasWebBroadcastWeight = false;
+static const unsigned long WEB_STATE_FULL_BROADCAST_INTERVAL_MS = 1000;
+static const unsigned long WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS = 200;
+static const float WEB_STATE_WEIGHT_BROADCAST_DELTA_G = 0.1f;
 
 
 
@@ -323,6 +328,9 @@ const float minWeightCalibration = 50.0;
 const float maxWeightCalibration = 800.0;
 int menuItemPos = 3;                                                 // startet auf Punkt Tara im Root-Menue
 bool autoDetect = 0;
+bool webWizardActive = false;
+bool webWizardAutodetectPaused = false;
+bool webWizardPreviousAutodetect = false;
 bool oldAutoDetect = 0;
 float oldWeightAutoDetect = 0;
 float weightToCompareAutoDetect = 0;
@@ -651,6 +659,12 @@ static void updateCoffeeAppStateFromGlobals()
   appState.selection.gefaess = selectedGefaess;
   appState.selection.autodetect = autoDetect;
 
+  appState.calibration.set_weight_g = setWeightCalibration;
+  appState.calibration.factor = calFactor;
+  for (int i = 0; i < 4; ++i) {
+    appState.gefaesse.weights_g[i] = weightGefaess[i];
+  }
+
   appState.stats.ground.total_g = groundWeightForever;
   appState.stats.ground.since_grinder_clean_g = groundWeightSinceClean;
   appState.stats.ground.since_machine_clean_g = groundWeightSinceMachineClean;
@@ -677,6 +691,8 @@ static void updateCoffeeAppStateFromGlobals()
 
   appState.system.wifi_connected = WiFi.status() == WL_CONNECTED;
   appState.system.ip = appState.system.wifi_connected ? WiFi.localIP().toString() : String();
+  appState.system.web_wizard_active = webWizardActive;
+  appState.system.autodetect_paused = webWizardActive && webWizardAutodetectPaused;
   appState.system.uptime_ms = millis();
 }
 
@@ -688,6 +704,8 @@ void RefreshTFTTaraWait();
 void RefreshTFTTaraFinished();
 void doTara();
 void stringifySetWeight();
+void CalibrateSetWeight();
+void CalibrateFactor();
 
 static float getLastDoseWeight()
 {
@@ -869,15 +887,17 @@ static bool setSelectedSiebtraegerWeightFromWeb(float weight_g)
   return true;
 }
 
-static void setAutodetectCore(bool enabled)
+static void applyAutodetectRuntime(bool enabled, bool persist)
 {
   autoDetect = enabled;
   measurementAutoDetectReady = enabled;
   statusReadyToSave = 0;
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putBool("savedAutoDetect", autoDetect);
-  preferences.end();
+  if (persist) {
+    preferences.begin("savedValues", RW_MODE);
+    preferences.putBool("savedAutoDetect", autoDetect);
+    preferences.end();
+  }
 
   debug("autodetect = ");
   debugln(autoDetect);
@@ -887,6 +907,169 @@ static void setAutodetectCore(bool enabled)
     RefreshTFTCursor();
     RefreshFooter();
   }
+}
+
+static void setAutodetectCore(bool enabled)
+{
+  webWizardPreviousAutodetect = enabled;
+  webWizardAutodetectPaused = false;
+  applyAutodetectRuntime(enabled, true);
+}
+
+static void beginWebWizardCore()
+{
+  if (!webWizardActive) {
+    webWizardPreviousAutodetect = autoDetect;
+  }
+
+  webWizardActive = true;
+  webWizardAutodetectPaused = webWizardPreviousAutodetect;
+
+  if (autoDetect) {
+    applyAutodetectRuntime(false, false);
+  }
+
+  broadcastWebStateFromGlobals();
+}
+
+static void endWebWizardCore()
+{
+  const bool wasActive = webWizardActive;
+  const bool restoreAutodetect = webWizardPreviousAutodetect;
+
+  webWizardActive = false;
+  webWizardAutodetectPaused = false;
+
+  if (wasActive && restoreAutodetect != autoDetect) {
+    applyAutodetectRuntime(restoreAutodetect, false);
+  }
+
+  broadcastWebStateFromGlobals();
+}
+
+
+static bool setCalibrationWeightFromWeb(float weight_g)
+{
+  if (weight_g < minWeightCalibration || weight_g > maxWeightCalibration) {
+    return false;
+  }
+
+  setWeightCalibration = weight_g;
+  oldsetWeightCalibration = weight_g;
+  CalibrateSetWeight();
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putFloat("savedCalWeight", setWeightCalibration);
+  preferences.end();
+
+  debug("SetWeightCalibration saved = ");
+  debugln(setWeightCalibration);
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool applyCalibrationFromWeb()
+{
+  CalibrateFactor();
+  LoadCell.setCalFactor(calFactor);
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putFloat("savedCalFact", calFactor);
+  preferences.end();
+
+  debug("CalibrationFactor saved = ");
+  debugln(calFactor);
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool selectGefaessFromWeb(byte index)
+{
+  if (index >= 4) {
+    return false;
+  }
+
+  selectedGefaess = index;
+  menuItemsOfPage[9][0] = gefaess[selectedGefaess];
+  menuItemsOfPage[15][0] = gefaess[selectedGefaess];
+  menuItemsOfPage[23][0] = gefaess[selectedGefaess];
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putShort("savedSelGef", selectedGefaess);
+  preferences.end();
+
+  debug("Selected Gefaess = ");
+  debugln(selectedGefaess);
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool saveSelectedGefaessWeightFromWeb()
+{
+  if (selectedGefaess >= 4) {
+    return false;
+  }
+
+  weightGefaess[selectedGefaess] = actualWeight;
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putBytes("savedWeightGef", weightGefaess, sizeof(weightGefaess));
+  preferences.end();
+
+  debug("Selected Gefaess = ");
+  debug(selectedGefaess);
+  debug(" Gewicht: ");
+  debugln(weightGefaess[selectedGefaess]);
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool deleteGefaessWeightFromWeb(byte index)
+{
+  if (index >= 4) {
+    return false;
+  }
+
+  weightGefaess[index] = 0.0f;
+
+  preferences.begin("savedValues", RW_MODE);
+  preferences.putBytes("savedWeightGef", weightGefaess, sizeof(weightGefaess));
+  preferences.end();
+
+  debug("Gefaess geloescht = ");
+  debugln(index);
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
 }
 
 void updateStopWatch();
@@ -941,7 +1124,23 @@ static bool handleCoffeeWebCommand(const char* cmd)
     return setSelectedSiebtraegerWeightFromWeb(weight_g);
   }
 
-  if (strcmp(cmd, "tare") == 0) {
+  if (strncmp(cmd, "scale_calibration_set_weight_", 29) == 0) {
+    beginWebWizardCore();
+    const float weight_g = atof(cmd + 29);
+    return setCalibrationWeightFromWeb(weight_g);
+  }
+
+  if (strncmp(cmd, "select_gefaess_", 15) == 0) {
+    beginWebWizardCore();
+    const int index = atoi(cmd + 15);
+    return selectGefaessFromWeb(static_cast<byte>(index));
+  }
+
+  const bool webWizardTare = strcmp(cmd, "web_wizard_tare") == 0;
+  if (webWizardTare || strcmp(cmd, "tare") == 0) {
+    if (webWizardTare) {
+      beginWebWizardCore();
+    }
     if (displayOff == 0) {
       RefreshTFTTaraWait();
     }
@@ -955,6 +1154,31 @@ static bool handleCoffeeWebCommand(const char* cmd)
 
     broadcastWebStateFromGlobals();
     return true;
+  }
+
+  if (strcmp(cmd, "scale_calibration_apply") == 0) {
+    beginWebWizardCore();
+    return applyCalibrationFromWeb();
+  }
+
+  if (strcmp(cmd, "web_wizard_begin") == 0) {
+    beginWebWizardCore();
+    return true;
+  }
+
+  if (strcmp(cmd, "web_wizard_end") == 0) {
+    endWebWizardCore();
+    return true;
+  }
+
+  if (strcmp(cmd, "measure_gefaess_save") == 0) {
+    beginWebWizardCore();
+    return saveSelectedGefaessWeightFromWeb();
+  }
+
+  if (strncmp(cmd, "delete_gefaess_", 15) == 0) {
+    const int index = atoi(cmd + 15);
+    return deleteGefaessWeightFromWeb(static_cast<byte>(index));
   }
 
   if (strcmp(cmd, "maintenance_reset_grinder") == 0) {
@@ -3865,9 +4089,19 @@ void loop(void)
   LoadCell.update();
   actualWeight = LoadCell.getData();
   updateCoffeeAppStateFromGlobals();
-  if (millis() - lastWebStateBroadcastMs >= WEB_STATE_BROADCAST_INTERVAL_MS)
+  const unsigned long nowWebMs = millis();
+  const float webWeightDelta = actualWeight - lastWebBroadcastWeightG;
+  const bool webWeightChanged = !hasWebBroadcastWeight ||
+    webWeightDelta > WEB_STATE_WEIGHT_BROADCAST_DELTA_G ||
+    webWeightDelta < -WEB_STATE_WEIGHT_BROADCAST_DELTA_G;
+
+  if ((nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_FULL_BROADCAST_INTERVAL_MS) ||
+      (webWeightChanged && nowWebMs - lastWebWeightBroadcastMs >= WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS))
   {
-    lastWebStateBroadcastMs = millis();
+    lastWebStateBroadcastMs = nowWebMs;
+    lastWebWeightBroadcastMs = nowWebMs;
+    lastWebBroadcastWeightG = actualWeight;
+    hasWebBroadcastWeight = true;
     coffeeWebBroadcastState(appState);
   }
   
@@ -3891,7 +4125,9 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   
   if (pageID == 0)
   {
-    Autodetect();
+    if (!webWizardActive) {
+      Autodetect();
+    }
     saveGrindResult();
   }
   //################################
