@@ -337,6 +337,9 @@ float weightToCompareAutoDetect = 0;
 unsigned long lastTimeAutodetectPlace = 0;
 unsigned long lastTimeAutodetectLift = 0;
 unsigned long delayTimeAutodetect = 500;
+const float AUTO_DETECT_PLACE_THRESHOLD_G = 40.0f;
+const float AUTO_DETECT_LIFT_THRESHOLD_G = 30.0f;
+const float SAVE_MIN_DOSE_G = 0.05f;
 bool foundGefaess = false;
 bool foundSelectedST = false;
 
@@ -350,6 +353,13 @@ unsigned long lastTimeSTWasLifted = 0;
 unsigned long lastTimeGefaessWasLifted = 0;
 unsigned long delayTimeSTWasLifted = 500;
 unsigned long delayTimeGefaessWasLifted = 500;
+
+bool autoDetectPostTaraPending = false;
+bool autoDetectPostTaraSecondTara = false;
+bool autoDetectPostTaraSaveReady = false;
+byte autoDetectPostTaraPhase = 0;
+unsigned long lastTimeAutoDetectPostTara = 0;
+unsigned long delayTimeAutoDetectPostTara = 500;
 
 //bool statusswitchGrindfell = 0;
 //bool statusswitchGrindrose = 0;
@@ -449,6 +459,7 @@ bool displayOff = 0;
 float oldWeightDisplayOff = 0;
 
 bool statusReadyToSave = 0;
+float lastDoseWeightCandidate = 0.0f;
 byte taraCounter = 0;
 
 //unsigned long lastTimePrintTime = 0;
@@ -707,10 +718,32 @@ void stringifySetWeight();
 void CalibrateSetWeight();
 void CalibrateFactor();
 
+static void resetSaveCandidate()
+{
+  lastDoseWeightCandidate = 0.0f;
+}
+
+static void updateSaveCandidateFromActualWeight()
+{
+  if (statusReadyToSave && actualWeight > SAVE_MIN_DOSE_G) {
+    lastDoseWeightCandidate = actualWeight;
+  }
+}
+
 static float getLastDoseWeight()
 {
-  const float dose = stopWeightGrinding - startWeightGrinding;
-  return dose > 0.0f ? dose : 0.0f;
+  // Primaer zaehlt die aktuelle positive Dosis seit dem letzten Tara.
+  if (actualWeight > SAVE_MIN_DOSE_G) {
+    return actualWeight;
+  }
+
+  // Fallback: Falls der Save-Klick genau zwischen zwei Mess-/UI-Zyklen kommt,
+  // verwenden wir den zuletzt gesehenen positiven Dosierwert.
+  if (lastDoseWeightCandidate > SAVE_MIN_DOSE_G) {
+    return lastDoseWeightCandidate;
+  }
+
+  return 0.0f;
 }
 
 static void persistCoffeeStats()
@@ -728,7 +761,7 @@ static void persistCoffeeStats()
 
 static void addCoffeeStatsDose(float dose_g)
 {
-  if (dose_g <= 0.0f) {
+  if (dose_g <= SAVE_MIN_DOSE_G) {
     return;
   }
 
@@ -1115,192 +1148,353 @@ static void resetStopwatchCore()
 // die Auswertung bleibt hier im Core-Kontext und aktualisiert anschliessend den
 // gemeinsamen AppState fuer WebUI und HMI.
 
-static bool handleCoffeeWebCommand(const char* cmd)
+static bool cmdEquals(const char* cmd, const char* expected)
 {
-  if (!cmd) {
-    return false;
-  }
+  return strcmp(cmd, expected) == 0;
+}
 
-  // Auswahl / Konfiguration
-  if (strncmp(cmd, "select_siebtraeger_", 19) == 0) {
-    const int index = atoi(cmd + 19);
+static bool cmdStartsWith(const char* cmd, const char* prefix)
+{
+  return strncmp(cmd, prefix, strlen(prefix)) == 0;
+}
+
+static constexpr const char* CMD_SAVE_DOSE = "save_dose";
+static constexpr const char* CMD_TARE = "tare";
+static constexpr const char* CMD_STOPWATCH_START_STOP = "stopwatch_start_stop";
+static constexpr const char* CMD_STOPWATCH_RESET = "stopwatch_reset";
+static constexpr const char* CMD_AUTODETECT_ON = "autodetect_on";
+static constexpr const char* CMD_AUTODETECT_OFF = "autodetect_off";
+static constexpr const char* CMD_WEB_WIZARD_BEGIN = "web_wizard_begin";
+static constexpr const char* CMD_WEB_WIZARD_END = "web_wizard_end";
+static constexpr const char* CMD_WEB_WIZARD_TARE = "web_wizard_tare";
+static constexpr const char* CMD_SCALE_CALIBRATION_APPLY = "scale_calibration_apply";
+static constexpr const char* CMD_MEASURE_GEFAESS_SAVE = "measure_gefaess_save";
+static constexpr const char* CMD_MAINTENANCE_RESET_GRINDER = "maintenance_reset_grinder";
+static constexpr const char* CMD_MAINTENANCE_RESET_MACHINE = "maintenance_reset_machine";
+static constexpr const char* CMD_MAINTENANCE_RESET_FILTER = "maintenance_reset_filter";
+
+static constexpr const char* PREFIX_SELECT_SIEBTRAEGER = "select_siebtraeger_";
+static constexpr const char* PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT = "set_selected_siebtraeger_weight_";
+static constexpr const char* PREFIX_SCALE_CALIBRATION_SET_WEIGHT = "scale_calibration_set_weight_";
+static constexpr const char* PREFIX_SELECT_GEFAESS = "select_gefaess_";
+static constexpr const char* PREFIX_DELETE_GEFAESS = "delete_gefaess_";
+static constexpr const char* PREFIX_SET_STATS_TOTALS = "set_stats_totals_";
+
+static bool handleWebSelectionCommand(const char* cmd, bool& handled)
+{
+  handled = true;
+
+  if (cmdStartsWith(cmd, PREFIX_SELECT_SIEBTRAEGER)) {
+    const int index = atoi(cmd + strlen(PREFIX_SELECT_SIEBTRAEGER));
     return selectSiebtraegerFromWeb(static_cast<byte>(index));
   }
 
-  if (strncmp(cmd, "set_selected_siebtraeger_weight_", 32) == 0) {
-    const float weight_g = atof(cmd + 32);
+  if (cmdStartsWith(cmd, PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT)) {
+    const float weight_g = atof(cmd + strlen(PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT));
     return setSelectedSiebtraegerWeightFromWeb(weight_g);
   }
 
-  if (strncmp(cmd, "scale_calibration_set_weight_", 29) == 0) {
+  if (cmdStartsWith(cmd, PREFIX_SCALE_CALIBRATION_SET_WEIGHT)) {
     beginWebWizardCore();
-    const float weight_g = atof(cmd + 29);
+    const float weight_g = atof(cmd + strlen(PREFIX_SCALE_CALIBRATION_SET_WEIGHT));
     return setCalibrationWeightFromWeb(weight_g);
   }
 
-  if (strncmp(cmd, "select_gefaess_", 15) == 0) {
+  if (cmdStartsWith(cmd, PREFIX_SELECT_GEFAESS)) {
     beginWebWizardCore();
-    const int index = atoi(cmd + 15);
+    const int index = atoi(cmd + strlen(PREFIX_SELECT_GEFAESS));
     return selectGefaessFromWeb(static_cast<byte>(index));
   }
 
-  // Tara / Wizard
-  const bool webWizardTare = strcmp(cmd, "web_wizard_tare") == 0;
-  if (webWizardTare || strcmp(cmd, "tare") == 0) {
-    if (webWizardTare) {
-      beginWebWizardCore();
-    }
-    if (displayOff == 0) {
-      RefreshTFTTaraWait();
-    }
-
-    doTara();
-
-    if (displayOff == 0) {
-      RefreshTFTTaraFinished();
-      RefreshFooter();
-    }
-
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdStartsWith(cmd, PREFIX_DELETE_GEFAESS)) {
+    const int index = atoi(cmd + strlen(PREFIX_DELETE_GEFAESS));
+    return deleteGefaessWeightFromWeb(static_cast<byte>(index));
   }
 
-  if (strcmp(cmd, "scale_calibration_apply") == 0) {
+  handled = false;
+  return false;
+}
+
+void scheduleAutoDetectPostTara(bool saveReadyAfterTara, bool secondTara);
+
+static bool handleWebTareCommand(const char* cmd, bool& handled)
+{
+  const bool webWizardTare = cmdEquals(cmd, CMD_WEB_WIZARD_TARE);
+  if (!webWizardTare && !cmdEquals(cmd, CMD_TARE)) {
+    handled = false;
+    return false;
+  }
+
+  handled = true;
+
+  if (webWizardTare) {
+    beginWebWizardCore();
+  }
+  if (displayOff == 0) {
+    RefreshTFTTaraWait();
+  }
+
+  doTara();
+
+  if (!webWizardTare && autoDetect == 0) {
+    scheduleAutoDetectPostTara(true, false);
+  }
+
+  if (displayOff == 0) {
+    RefreshTFTTaraFinished();
+    RefreshFooter();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool handleWebWizardCommand(const char* cmd, bool& handled)
+{
+  handled = true;
+
+  if (cmdEquals(cmd, CMD_SCALE_CALIBRATION_APPLY)) {
     beginWebWizardCore();
     return applyCalibrationFromWeb();
   }
 
-  if (strcmp(cmd, "web_wizard_begin") == 0) {
+  if (cmdEquals(cmd, CMD_WEB_WIZARD_BEGIN)) {
     beginWebWizardCore();
     return true;
   }
 
-  if (strcmp(cmd, "web_wizard_end") == 0) {
+  if (cmdEquals(cmd, CMD_WEB_WIZARD_END)) {
     endWebWizardCore();
     return true;
   }
 
-  if (strcmp(cmd, "measure_gefaess_save") == 0) {
+  if (cmdEquals(cmd, CMD_MEASURE_GEFAESS_SAVE)) {
     beginWebWizardCore();
     return saveSelectedGefaessWeightFromWeb();
   }
 
-  if (strncmp(cmd, "delete_gefaess_", 15) == 0) {
-    const int index = atoi(cmd + 15);
-    return deleteGefaessWeightFromWeb(static_cast<byte>(index));
+  handled = false;
+  return false;
+}
+
+static bool resetMaintenanceAndBroadcast(bool resetOk)
+{
+  if (!resetOk) {
+    return false;
+  }
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool handleWebMaintenanceCommand(const char* cmd, bool& handled)
+{
+  handled = true;
+
+  if (cmdEquals(cmd, CMD_MAINTENANCE_RESET_GRINDER)) {
+    return resetMaintenanceAndBroadcast(resetMuehlenReinigungCore());
   }
 
-  // Wartung
-  if (strcmp(cmd, "maintenance_reset_grinder") == 0) {
-    if (!resetMuehlenReinigungCore()) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, CMD_MAINTENANCE_RESET_MACHINE)) {
+    return resetMaintenanceAndBroadcast(resetKaffeemReinigungCore());
   }
 
-  if (strcmp(cmd, "maintenance_reset_machine") == 0) {
-    if (!resetKaffeemReinigungCore()) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, CMD_MAINTENANCE_RESET_FILTER)) {
+    return resetMaintenanceAndBroadcast(resetFilterWechselCore());
   }
 
-  if (strcmp(cmd, "maintenance_reset_filter") == 0) {
-    if (!resetFilterWechselCore()) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
-  }
+  handled = false;
+  return false;
+}
 
 #if WEBUI_DEBUG_COMMANDS
+static bool handleWebMaintenanceDebugCommand(const char* cmd, bool& handled)
+{
+  handled = true;
+
   // Debug-Kommandos fuer Wartungstests ohne echte Intervall-Aenderung.
-  if (strcmp(cmd, "debug_maintenance_grinder_due") == 0) {
-    if (!debugForceMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, "lstMhlRngng")) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, "debug_maintenance_grinder_due")) {
+    return resetMaintenanceAndBroadcast(debugForceMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, "lstMhlRngng"));
   }
 
-  if (strcmp(cmd, "debug_maintenance_machine_due") == 0) {
-    if (!debugForceMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, "lstKffmRngng")) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, "debug_maintenance_machine_due")) {
+    return resetMaintenanceAndBroadcast(debugForceMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, "lstKffmRngng"));
   }
 
-  if (strcmp(cmd, "debug_maintenance_filter_due") == 0) {
-    if (!debugForceMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, "lstFltwchsl")) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, "debug_maintenance_filter_due")) {
+    return resetMaintenanceAndBroadcast(debugForceMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, "lstFltwchsl"));
   }
 
-  if (strcmp(cmd, "debug_maintenance_all_due") == 0) {
+  if (cmdEquals(cmd, "debug_maintenance_all_due")) {
     bool ok = true;
     ok = debugForceMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, "lstMhlRngng") && ok;
     ok = debugForceMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, "lstKffmRngng") && ok;
     ok = debugForceMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, "lstFltwchsl") && ok;
-    if (!ok) {
-      return false;
-    }
-    broadcastWebStateFromGlobals();
-    return true;
+    return resetMaintenanceAndBroadcast(ok);
   }
+
+  handled = false;
+  return false;
+}
 #endif
 
-  // Stoppuhr / Autodetect / Dose speichern
-  if (strcmp(cmd, "stopwatch_start_stop") == 0) {
+
+static bool setCoffeeStatsTotalsFromWeb(uint32_t totalShots, float totalGround_g)
+{
+  if (totalGround_g < 0.0f) {
+    return false;
+  }
+
+  shotCounterForever = totalShots;
+  groundWeightForever = totalGround_g;
+
+  preferences.begin("savedValues", RW_MODE);
+  persistCoffeeStats();
+  preferences.end();
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool parseAndSetCoffeeStatsTotalsFromWeb(const char* cmd)
+{
+  const char* payload = cmd + strlen(PREFIX_SET_STATS_TOTALS);
+  char* end = nullptr;
+
+  const unsigned long totalShots = strtoul(payload, &end, 10);
+  if (end == payload || *end != '_') {
+    return false;
+  }
+
+  const char* groundPayload = end + 1;
+  const long totalGroundTenths = strtol(groundPayload, &end, 10);
+  if (end == groundPayload || *end != '\0' || totalGroundTenths < 0) {
+    return false;
+  }
+
+  return setCoffeeStatsTotalsFromWeb(
+    static_cast<uint32_t>(totalShots),
+    static_cast<float>(totalGroundTenths) / 10.0f
+  );
+}
+
+static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
+{
+  handled = true;
+
+  if (cmdEquals(cmd, CMD_STOPWATCH_START_STOP)) {
     toggleStopwatchCore();
     broadcastWebStateFromGlobals();
     return true;
   }
 
-  if (strcmp(cmd, "stopwatch_reset") == 0) {
+  if (cmdEquals(cmd, CMD_STOPWATCH_RESET)) {
     resetStopwatchCore();
     broadcastWebStateFromGlobals();
     return true;
   }
 
-  if (strcmp(cmd, "autodetect_on") == 0) {
+  if (cmdEquals(cmd, CMD_AUTODETECT_ON)) {
     setAutodetectCore(true);
     broadcastWebStateFromGlobals();
     return true;
   }
 
-  if (strcmp(cmd, "autodetect_off") == 0) {
+  if (cmdEquals(cmd, CMD_AUTODETECT_OFF)) {
     setAutodetectCore(false);
     broadcastWebStateFromGlobals();
     return true;
   }
 
-  if (strcmp(cmd, "save_dose") != 0) {
+  if (cmdStartsWith(cmd, PREFIX_SET_STATS_TOTALS)) {
+    return parseAndSetCoffeeStatsTotalsFromWeb(cmd);
+  }
+
+  handled = false;
+  return false;
+}
+
+static bool handleWebSaveDoseCommand(const char* cmd, bool& handled)
+{
+  if (!cmdEquals(cmd, CMD_SAVE_DOSE)) {
+    handled = false;
     return false;
   }
+
+  handled = true;
 
   if (!statusReadyToSave) {
     return false;
   }
 
+  updateSaveCandidateFromActualWeight();
   stopWeightGrinding = actualWeight;
-  addCoffeeStatsDose(getLastDoseWeight());
+  const float doseWeight = getLastDoseWeight();
+  if (doseWeight <= SAVE_MIN_DOSE_G) {
+    broadcastWebStateFromGlobals();
+    return false;
+  }
+
+  addCoffeeStatsDose(doseWeight);
 
   preferences.begin("savedValues", RW_MODE);
   persistCoffeeStats();
   preferences.end();
 
   statusReadyToSave = 0;
+  resetSaveCandidate();
   statusSwitchSaveWeightFell = 0;
   statusSwitchSaveWeightRose = 0;
   RefreshFooter();
 
   broadcastWebStateFromGlobals();
   return true;
+}
+
+static bool handleCoffeeWebCommand(const char* cmd)
+{
+  if (!cmd) {
+    return false;
+  }
+
+  bool handled = false;
+  bool ok = handleWebSelectionCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+  ok = handleWebTareCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+  ok = handleWebWizardCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+  ok = handleWebMaintenanceCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+#if WEBUI_DEBUG_COMMANDS
+  ok = handleWebMaintenanceDebugCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+#endif
+
+  ok = handleWebRuntimeCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+  ok = handleWebSaveDoseCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+  return false;
 }
 
 void onRootRequest(AsyncWebServerRequest *request) {
@@ -2724,12 +2918,17 @@ if (buttonReleasedbuttonRight == 1)
 }
 
 if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
+     updateSaveCandidateFromActualWeight();
      stopWeightGrinding = actualWeight;
-     addCoffeeStatsDose(getLastDoseWeight());
-     preferences.begin("savedValues", RW_MODE);// Preferences: Stats
-     persistCoffeeStats();
-     preferences.end();
+     const float doseWeight = getLastDoseWeight();
+     if (doseWeight > SAVE_MIN_DOSE_G) {
+       addCoffeeStatsDose(doseWeight);
+       preferences.begin("savedValues", RW_MODE);// Preferences: Stats
+       persistCoffeeStats();
+       preferences.end();
+     }
      statusReadyToSave = 0;
+     resetSaveCandidate();
      RefreshFooter();
      statusSwitchSaveWeightFell = 0;
   }
@@ -2783,265 +2982,153 @@ void DisplayOnOff()
   }
 }
 
+void scheduleAutoDetectPostTara(bool saveReadyAfterTara, bool secondTara)
+{
+  autoDetectPostTaraPending = true;
+  autoDetectPostTaraSecondTara = secondTara;
+  autoDetectPostTaraSaveReady = saveReadyAfterTara;
+  autoDetectPostTaraPhase = 0;
+  lastTimeAutoDetectPostTara = millis();
+
+  ifPathAutoDetectPlace = false;
+  ifPathAutoDetectLift = false;
+  ifpathGefaessWasLifted = false;
+  measurementAutoDetectReady = false;
+  taraCounter = 0;
+
+  // Direkt nach LoadCell.tare() kann actualWeight noch einen alten Messwert enthalten.
+  // Darum Autodetect kurz pausieren und erst danach den neuen Nullpunkt als Basis uebernehmen.
+  oldWeightAutoDetect = 0.0;
+  weightToCompareAutoDetect = 0.0;
+  statusReadyToSave = 0;
+  resetSaveCandidate();
+  RefreshFooter();
+}
+
+bool handleAutoDetectPostTara()
+{
+  if (!autoDetectPostTaraPending) {
+    return false;
+  }
+
+  if (millis() - lastTimeAutoDetectPostTara < delayTimeAutoDetectPostTara) {
+    return true;
+  }
+
+  if (autoDetectPostTaraSecondTara && autoDetectPostTaraPhase == 0) {
+    doTara();
+    autoDetectPostTaraPhase = 1;
+    lastTimeAutoDetectPostTara = millis();
+    oldWeightAutoDetect = 0.0;
+    weightToCompareAutoDetect = 0.0;
+    debugln("AutoDetect Nach-Tara 2 gestartet");
+    return true;
+  }
+
+  autoDetectPostTaraPending = false;
+  autoDetectPostTaraSecondTara = false;
+  autoDetectPostTaraPhase = 0;
+
+  oldWeightAutoDetect = actualWeight;
+  weightToCompareAutoDetect = 0.0;
+  measurementAutoDetectReady = true;
+  startWeightGrinding = actualWeight;
+  stopWeightGrinding = actualWeight;
+  statusReadyToSave = autoDetectPostTaraSaveReady ? 1 : 0;
+  resetSaveCandidate();
+  taraCounter = 0;
+
+  debugln("AutoDetect Tara-Phase abgeschlossen");
+  RefreshFooter();
+  RefreshTFTAutodetect();
+  return false;
+}
+
 void Autodetect()
 {
-  if (autoDetect == 1)
-  {
-
-     
-  if (ifpathGefaessWasLifted == 1 && millis() - lastTimeGefaessWasLifted >= delayTimeGefaessWasLifted)
-  {
-    ifpathGefaessWasLifted = 0;
-    oldWeightAutoDetect = actualWeight;
-    debugln("OldWeightAutoDetect erneut genullt");
+  if (handleAutoDetectPostTara()) {
+    return;
   }
+
+  updateSaveCandidateFromActualWeight();
+
   weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
-    
-    //##################################
-  //Gefaess wird aufgelegt
+
   //##################################
-  if (weightToCompareAutoDetect > 30.0 && measurementAutoDetectReady == true && autoDetect == 1)            // muss größer sein als das höchste Malgewicht
-  { 
+  // Gefaess wird aufgelegt
+  //##################################
+  if (autoDetect == 1 && statusReadyToSave == 0 &&
+      weightToCompareAutoDetect > AUTO_DETECT_PLACE_THRESHOLD_G &&
+      measurementAutoDetectReady == true)
+  {
     foundGefaess = false;
-    //foundSelectedST = false;
-    //foundSelectedTrichter = false;
     ifPathAutoDetectPlace = true;
     lastTimeAutodetectPlace = millis();
     measurementAutoDetectReady = false;
-    debugln("Gewichtsänderung > 30 g");
-    
+    statusReadyToSave = 0;
+    RefreshFooter();
+    debugln("Gewichtsaenderung > 40 g");
   }
 
+  if (autoDetect == 1 && millis() - lastTimeAutodetectPlace > delayTimeAutodetect && ifPathAutoDetectPlace == true)
+  {
+    ifPathAutoDetectPlace = false;
+    weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
+    debug("weightToCompareAutoDetect1 = ");
+    debugln(weightToCompareAutoDetect);
 
-  if ((millis() - lastTimeAutodetectPlace > delayTimeAutodetect) && (ifPathAutoDetectPlace == true))
+    for (int i = 0; i <= 3; i++)
     {
-      ifPathAutoDetectPlace = false;
-      weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect; 
-      debug("weightToCompareAutoDetect1 = ");
-      debugln(weightToCompareAutoDetect);    
-      //#######################################
-      //Fall: Gefaess aufgelegt
-      //#######################################
-      for (int i = 0; i <= 3; i++)
-      { 
-      
-      if (weightToCompareAutoDetect - weightGefaess[i] < 2 && weightToCompareAutoDetect - weightGefaess[i] >  -2)
-       {
+      if (weightToCompareAutoDetect - weightGefaess[i] < 2 && weightToCompareAutoDetect - weightGefaess[i] > -2)
+      {
         selectedGefaess = i;
         foundGefaess = true;
-        //foundSelectedTrichter = false;
-
-        doTara();
-        oldWeightAutoDetect = actualWeight;
-        weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect; 
-        debug("weightToCompareAutoDetect2 = ");
-        debugln(weightToCompareAutoDetect);
-        measurementAutoDetectReady = true;
         debug("Gefaess erkannt: ");
         debugln(gefaess[selectedGefaess]);
-        RefreshTFTAutodetect();      
-                                          
-        measurementAutoDetectReady = true;
-        statusReadyToSave = 1;
-        taraCounter = 0;
-        RefreshFooter();
-       }
+        RefreshTFTAutodetect();
+
+        doTara();
+        scheduleAutoDetectPostTara(true, false);
+        return;
       }
-      
-      if (foundGefaess == false);
-      {
-        debugln("Kein Gefaess erkannt");
-        measurementAutoDetectReady = true;
-        //statusReadyToSave = 0;
-        //RefreshFooter();
-        
-      }
-      
     }
-      
-          
+
+    debugln("Kein Gefaess erkannt");
+    oldWeightAutoDetect = actualWeight;
+    weightToCompareAutoDetect = 0.0;
+    measurementAutoDetectReady = true;
+    statusReadyToSave = 0;
+    resetSaveCandidate();
+    RefreshFooter();
+  }
+
   //##################################
-  //Gefaess wird abgenommen
+  // Gefaess / Last wird abgenommen
   //##################################
-  if ((weightToCompareAutoDetect  < -30.0 && measurementAutoDetectReady == true) )            // muss größer sein als das höchste Malgewicht
-  { 
-     
+  if (weightToCompareAutoDetect < -AUTO_DETECT_LIFT_THRESHOLD_G && measurementAutoDetectReady == true)
+  {
     foundGefaess = false;
-   
-  
+    statusReadyToSave = 0;
+    resetSaveCandidate();
     ifPathAutoDetectLift = true;
     lastTimeAutodetectLift = millis();
     measurementAutoDetectReady = false;
-    debugln("Gewichtsänderung < -30 g");
-    weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
+    RefreshFooter();
+    debugln("Gewichtsaenderung < -30 g");
     debug("weightToCompareAutoDetect3 = ");
     debugln(weightToCompareAutoDetect);
-    
   }
+
   if (millis() - lastTimeAutodetectLift > delayTimeAutodetect && ifPathAutoDetectLift == true)
   {
     ifPathAutoDetectLift = false;
     doTara();
-    
-    oldWeightAutoDetect = actualWeight;
-    weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
-    debug("weightToCompareAutoDetect4 = ");
-    debugln(weightToCompareAutoDetect);
-    measurementAutoDetectReady = true;
-    
+    scheduleAutoDetectPostTara(false, true);
     debug("foundGefaess beim Abheben = ");
     debugln(foundGefaess);
-    taraCounter++;
-    if (taraCounter == 2){
-       statusReadyToSave = 0;
-       taraCounter = 0;
-    }
-   
-    RefreshFooter();
-    RefreshTFTAutodetect();
-    //RefreshTFTSetWeightST();
-
-    ifpathGefaessWasLifted = 1;
-    lastTimeGefaessWasLifted = millis();
-    
-    
+    return;
   }
-  }
-
-  //####################
-  // bei autoDetect == 0 wird beim Abheben eines Gegenstands mit Gewicht > 30 g lediglich das Speichern (readyToSave) deaktiviert.
-  //####################
-
-  if (autoDetect == 0)
-  {
-    /*
-    weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
-    if (millis() - lastTimeAutodetectLift >= delayTimeAutodetect && weightToCompareAutoDetect < -30){
-      statusReadyToSave = 0;
-      oldWeightAutoDetect = actualWeight;
-      lastTimeAutodetectLift = millis();
-    }
-    */
-
-    if (ifpathGefaessWasLifted == 1 && millis() - lastTimeGefaessWasLifted >= delayTimeGefaessWasLifted)
-  {
-    ifpathGefaessWasLifted = 0;
-    oldWeightAutoDetect = actualWeight;
-    
-  }
-  weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
-  
-
-  //##################################
-  //Gefaess wird aufgelegt
-  //##################################
-  if (weightToCompareAutoDetect > 30.0 && measurementAutoDetectReady == true)            // muss größer sein als das höchste Malgewicht
-  { 
-    foundGefaess = false;
-    //foundSelectedST = false;
-    //foundSelectedTrichter = false;
-    ifPathAutoDetectPlace = true;
-    lastTimeAutodetectPlace = millis();
-    measurementAutoDetectReady = false;
-    debugln("Gewichtsänderung > 30 g");
-    
-  }
-
-
-  if ((millis() - lastTimeAutodetectPlace > delayTimeAutodetect) && (ifPathAutoDetectPlace == true))
-    {
-      ifPathAutoDetectPlace = false;
-      weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect; 
-      debug("weightToCompareAutoDetect1 = ");
-      debugln(weightToCompareAutoDetect);    
-      measurementAutoDetectReady = true;
-      taraCounter = 0;
-      
-      //#######################################
-      //Fall: Gefaess aufgelegt
-      //#######################################
-      for (int i = 0; i <= 3; i++)
-      { 
-      
-      if (weightToCompareAutoDetect - weightGefaess[i] < 2 && weightToCompareAutoDetect - weightGefaess[i] >  -2)
-       {
-        selectedGefaess = i;
-        foundGefaess = true;
-        //foundSelectedTrichter = false;
-
-        //doTara();
-        oldWeightAutoDetect = actualWeight;
-        weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect; 
-        debug("weightToCompareAutoDetect2 = ");
-        debugln(weightToCompareAutoDetect);
-        measurementAutoDetectReady = true;
-        debug("Gefaess erkannt: ");
-        debugln(gefaess[selectedGefaess]);
-        RefreshTFTAutodetect();      
-                                          
-        measurementAutoDetectReady = true;
-        //statusReadyToSave = 1;
-        taraCounter = 0;
-        RefreshFooter();
-       }
-      }
-      
-      if (foundGefaess == false);
-      {
-        debugln("Kein Gefaess erkannt");
-        measurementAutoDetectReady = true;
-        //statusReadyToSave = 0;
-        //RefreshFooter();
-      
-      }
-    }
-      
-    
-  if ((weightToCompareAutoDetect  < -30.0 && measurementAutoDetectReady == true) )            // muss größer sein als das höchste Malgewicht
-  { 
-    foundGefaess = false;
-    ifPathAutoDetectLift = true;
-    lastTimeAutodetectLift = millis();
-    measurementAutoDetectReady = false;
-    debugln("Gewichtsänderung < -30 g");
-    weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
-    debug("weightToCompareAutoDetect3 = ");
-    debugln(weightToCompareAutoDetect);
-    
-  }
-  if (millis() - lastTimeAutodetectLift > delayTimeAutodetect && ifPathAutoDetectLift == true)
-  {
-    ifPathAutoDetectLift = false;
-    //doTara();
-    
-    oldWeightAutoDetect = actualWeight;
-    weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
-    debug("weightToCompareAutoDetect4 = ");
-    debugln(weightToCompareAutoDetect);
-    measurementAutoDetectReady = true;
-    
-    debug("foundGefaess beim Abheben = ");
-    debugln(foundGefaess);
-    statusReadyToSave = 0;
-    taraCounter++;
-    if (taraCounter == 2){
-       
-       taraCounter = 0;
-    }
-   
-    RefreshFooter();
-    RefreshTFTAutodetect();
-    //RefreshTFTSetWeightST();
-
-    ifpathGefaessWasLifted = 1;
-    lastTimeGefaessWasLifted = millis();
-  }
- }
 }
-
-
-	
-
 
 void IRAM_ATTR readEncoderISR()
 {
@@ -3367,8 +3454,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
         debugln("doTara");
         doTara();                              //taraRequest = false; ist in doTara() enthalten
         if (autoDetect == 0){
-        statusReadyToSave = 1;
-        RefreshFooter();
+        scheduleAutoDetectPostTara(true, false);
         }
         
         if (taraRequest == false)

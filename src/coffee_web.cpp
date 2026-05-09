@@ -204,6 +204,18 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </section>
 
   <section class="card">
+    <div class="stats-title">Gesamtwerte</div>
+    <div class="small">Gesamtzahl Shots und Gesamtgewicht Mahlgut manuell korrigieren.</div>
+    <div class="settings-list small" style="margin-top: 12px;">
+      <div>Gesamtzahl Shots: <b id="statsTotalShotsView">0</b></div>
+      <div>Gesamtgewicht Mahlgut: <b id="statsTotalGroundView">0,0 g</b></div>
+    </div>
+    <div class="settings-actions" style="margin-top: 12px;">
+      <button id="openStatsTotals" class="secondary">Gesamtwerte ändern</button>
+    </div>
+  </section>
+
+  <section class="card">
     <div class="stats-title">Waage kalibrieren</div>
     <div class="small">Geführter Assistent zum Tarieren, Eingeben des Kalibriergewichts und Speichern des Kalibrierfaktors.</div>
     <div class="settings-actions" style="margin-top: 12px;">
@@ -281,7 +293,8 @@ const CMD = Object.freeze({
   measureGefaessSave: 'measure_gefaess_save',
   maintenanceResetMachine: 'maintenance_reset_machine',
   maintenanceResetGrinder: 'maintenance_reset_grinder',
-  maintenanceResetFilter: 'maintenance_reset_filter'
+  maintenanceResetFilter: 'maintenance_reset_filter',
+  setStatsTotalsPrefix: 'set_stats_totals_'
 });
 const fmtG = v => {
   let n = Number(v || 0);
@@ -324,6 +337,10 @@ function addLog(msg) {
 function showSettings(show) {
   el('dashboardPage').classList.toggle('hidden', show);
   el('settingsPage').classList.toggle('hidden', !show);
+
+  // Beim Seitenwechsel immer oben starten.
+  // Sonst bleibt die Scrollposition der vorherigen Seite erhalten.
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 }
 
 // ===== Bestaetigungs-Overlay =====
@@ -527,9 +544,43 @@ function renderMeasureGefaessWizard() {
   );
 }
 
+function renderStatsTotalsWizard() {
+  const currentShots = Number(lastState?.stats?.shots?.total ?? 0);
+  const currentGround = fmtG(lastState?.stats?.ground?.total_g);
+  setWizardContent(
+    'Gesamtwerte wirklich verändern?',
+    'Hier können die Gesamtzahl der Shots und das gesamte Mahlgut korrigiert werden. Wartungszähler seit Reinigung oder Filterwechsel bleiben unverändert.',
+    `<label class="wizard-field"><span>Gesamtzahl Shots</span><input id="editShotsTotal" type="number" min="0" step="1" inputmode="numeric" value="${currentShots}"></label>` +
+    `<label class="wizard-field"><span>Gesamtgewicht Mahlgut in g</span><input id="editGroundTotal" type="text" inputmode="decimal" value="${currentGround}"></label>`,
+    [
+      wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+      wizardButton('Speichern', '', () => {
+        const shots = Number(el('editShotsTotal').value);
+        const ground = Number(el('editGroundTotal').value.replace(',', '.'));
+
+        if (!Number.isInteger(shots) || shots < 0) {
+          addLog('Ungültige Gesamtzahl Shots');
+          return;
+        }
+        if (!Number.isFinite(ground) || ground < 0) {
+          addLog('Ungültiges Gesamtgewicht Mahlgut');
+          return;
+        }
+
+        const groundTenths = Math.round(ground * 10);
+        const groundText = (groundTenths / 10).toFixed(1).replace('.', ',');
+        sendCommand(`${CMD.setStatsTotalsPrefix}${shots}_${groundTenths}`, `Gesamtwerte ändern gesendet: ${shots} Shots, ${groundText} g`);
+        closeWizardOverlay();
+      })
+    ]
+  );
+  el('editShotsTotal').focus();
+}
+
 function renderWizard() {
   if (wizard.type === 'calibration') renderCalibrationWizard();
   if (wizard.type === 'gefaess') renderMeasureGefaessWizard();
+  if (wizard.type === 'statsTotals') renderStatsTotalsWizard();
 }
 
 function updateWizardLiveFields() {
@@ -539,10 +590,12 @@ function updateWizardLiveFields() {
   }
 }
 
-function openWizard(type) {
+function openWizard(type, pauseAutodetect = true) {
   wizard = { type, step: 0 };
-  wizardEndSent = false;
-  sendCommand('web_wizard_begin', 'Assistent gestartet, Autodetect pausieren …');
+  wizardEndSent = !pauseAutodetect;
+  if (pauseAutodetect) {
+    sendCommand('web_wizard_begin', 'Assistent gestartet, Autodetect pausieren …');
+  }
   el('wizardOverlay').classList.add('show');
   renderWizard();
 }
@@ -553,6 +606,10 @@ function openCalibrationWizard() {
 
 function openMeasureGefaessWizard() {
   openWizard('gefaess');
+}
+
+function openStatsTotalsWizard() {
+  openWizard('statsTotals', false);
 }
 
 // ===== Wartung =====
@@ -760,6 +817,8 @@ function renderStatsAndSystem(s) {
   setText('groundMachineG', fmtWholeG(s.stats?.ground?.since_machine_clean_g));
   setText('groundGrinderG', fmtWholeG(s.stats?.ground?.since_grinder_clean_g));
   setText('groundFilterG', fmtWholeG(s.stats?.ground?.since_filter_change_g));
+  setText('statsTotalShotsView', s.stats?.shots?.total ?? 0);
+  setText('statsTotalGroundView', `${fmtG(s.stats?.ground?.total_g)} g`);
   setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));
   setText('uptime', fmtUptime(s.system?.uptime_ms));
   setText('ip', s.system?.ip || location.hostname);
@@ -858,6 +917,7 @@ el('openSettings').addEventListener('click', () => showSettings(true));
 el('backDashboard').addEventListener('click', () => showSettings(false));
 el('openCalibrate').addEventListener('click', openCalibrationWizard);
 el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
+el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
 el('autodetectToggle').addEventListener('click', () => {
   const autodetectOn = !!lastState?.selection?.autodetect;
   sendCommand(autodetectOn ? CMD.autodetectOff : CMD.autodetectOn, autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
