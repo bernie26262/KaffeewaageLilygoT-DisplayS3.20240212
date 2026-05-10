@@ -232,6 +232,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </div>
   </section>
 
+  <section class="card">
+    <div class="stats-title">System</div>
+    <div class="small">Firmware-Update und Neustart.</div>
+    <div class="settings-actions" style="margin-top: 12px;">
+      <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
+      <button id="restartDevice" class="danger">ESP32 neu starten</button>
+    </div>
+  </section>
+
   <div class="button-row">
     <button id="backDashboard" class="nav-button">Zurück zum Dashboard</button>
   </div>
@@ -294,6 +303,7 @@ const CMD = Object.freeze({
   maintenanceResetMachine: 'maintenance_reset_machine',
   maintenanceResetGrinder: 'maintenance_reset_grinder',
   maintenanceResetFilter: 'maintenance_reset_filter',
+  restartDevice: 'restart_device',
   setStatsTotalsPrefix: 'set_stats_totals_'
 });
 const fmtG = v => {
@@ -918,6 +928,13 @@ el('backDashboard').addEventListener('click', () => showSettings(false));
 el('openCalibrate').addEventListener('click', openCalibrationWizard);
 el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
 el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
+el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
+el('restartDevice').addEventListener('click', () => openConfirmOverlay(
+  'ESP32 wirklich neu starten?',
+  'Der ESP32 startet neu. Die WebUI ist während des Neustarts kurz nicht erreichbar.',
+  CMD.restartDevice,
+  'Neustart angefordert …'
+));
 el('autodetectToggle').addEventListener('click', () => {
   const autodetectOn = !!lastState?.selection?.autodetect;
   sendCommand(autodetectOn ? CMD.autodetectOff : CMD.autodetectOn, autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
