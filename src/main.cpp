@@ -734,6 +734,15 @@ static void resetSaveCandidate()
   lastDoseWeightCandidate = 0.0f;
 }
 
+static void setSaveReady(bool ready)
+{
+  statusReadyToSave = ready ? 1 : 0;
+  if (!ready) {
+    resetSaveCandidate();
+  }
+  RefreshFooter();
+}
+
 static void updateSaveCandidateFromActualWeight()
 {
   if (statusReadyToSave && actualWeight > SAVE_MIN_DOSE_G) {
@@ -1459,11 +1468,9 @@ static bool handleWebSaveDoseCommand(const char* cmd, bool& handled)
   persistCoffeeStats();
   preferences.end();
 
-  statusReadyToSave = 0;
-  resetSaveCandidate();
+  setSaveReady(false);
   statusSwitchSaveWeightFell = 0;
   statusSwitchSaveWeightRose = 0;
-  RefreshFooter();
 
   broadcastWebStateFromGlobals();
   return true;
@@ -3220,9 +3227,7 @@ if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
        persistCoffeeStats();
        preferences.end();
      }
-     statusReadyToSave = 0;
-     resetSaveCandidate();
-     RefreshFooter();
+     setSaveReady(false);
      statusSwitchSaveWeightFell = 0;
   }
 
@@ -3294,9 +3299,7 @@ static void finishUnknownAutodetectLoad()
   oldWeightAutoDetect = actualWeight;
   weightToCompareAutoDetect = 0.0;
   measurementAutoDetectReady = true;
-  statusReadyToSave = 0;
-  resetSaveCandidate();
-  RefreshFooter();
+  setSaveReady(false);
 }
 
 static void startAutoDetectPlaceCandidate()
@@ -3305,9 +3308,7 @@ static void startAutoDetectPlaceCandidate()
   ifPathAutoDetectPlace = true;
   lastTimeAutodetectPlace = millis();
   measurementAutoDetectReady = false;
-  statusReadyToSave = 0;
-  resetSaveCandidate();
-  RefreshFooter();
+  setSaveReady(false);
   debugln("Gewichtsaenderung > 40 g");
 }
 
@@ -3343,9 +3344,7 @@ void scheduleAutoDetectPostTara(bool saveReadyAfterTara, bool secondTara)
   // Darum Autodetect kurz pausieren und erst danach den neuen Nullpunkt als Basis uebernehmen.
   oldWeightAutoDetect = 0.0;
   weightToCompareAutoDetect = 0.0;
-  statusReadyToSave = 0;
-  resetSaveCandidate();
-  RefreshFooter();
+  setSaveReady(false);
 }
 
 static void finishAutoDetectPostTara()
@@ -3359,8 +3358,7 @@ static void finishAutoDetectPostTara()
   measurementAutoDetectReady = true;
   startWeightGrinding = actualWeight;
   stopWeightGrinding = actualWeight;
-  statusReadyToSave = autoDetectPostTaraSaveReady ? 1 : 0;
-  resetSaveCandidate();
+  setSaveReady(autoDetectPostTaraSaveReady);
   taraCounter = 0;
 
   debugln("AutoDetect Tara-Phase abgeschlossen");
