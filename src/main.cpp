@@ -359,10 +359,18 @@ unsigned long lastTimeGefaessWasLifted = 0;
 unsigned long delayTimeSTWasLifted = 500;
 unsigned long delayTimeGefaessWasLifted = 500;
 
+enum class AutoDetectState : uint8_t {
+  Idle,
+  WaitPlaceSettle,
+  WaitLiftSettle,
+  WaitPostTara,
+  WaitSecondPostTara
+};
+
+AutoDetectState autoDetectState = AutoDetectState::Idle;
 bool autoDetectPostTaraPending = false;
 bool autoDetectPostTaraSecondTara = false;
 bool autoDetectPostTaraSaveReady = false;
-byte autoDetectPostTaraPhase = 0;
 unsigned long lastTimeAutoDetectPostTara = 0;
 
 // Autodetect-/Save-Zielzustand:
@@ -728,6 +736,16 @@ void doTara();
 void stringifySetWeight();
 void CalibrateSetWeight();
 void CalibrateFactor();
+
+static void setAutoDetectState(AutoDetectState state)
+{
+  autoDetectState = state;
+}
+
+static bool isAutoDetectState(AutoDetectState state)
+{
+  return autoDetectState == state;
+}
 
 static void resetSaveCandidate()
 {
@@ -3299,13 +3317,14 @@ static void finishUnknownAutodetectLoad()
   oldWeightAutoDetect = actualWeight;
   weightToCompareAutoDetect = 0.0;
   measurementAutoDetectReady = true;
+  setAutoDetectState(AutoDetectState::Idle);
   setSaveReady(false);
 }
 
 static void startAutoDetectPlaceCandidate()
 {
   foundGefaess = false;
-  ifPathAutoDetectPlace = true;
+  setAutoDetectState(AutoDetectState::WaitPlaceSettle);
   lastTimeAutodetectPlace = millis();
   measurementAutoDetectReady = false;
   setSaveReady(false);
@@ -3317,7 +3336,7 @@ static void startAutoDetectLiftCandidate()
   foundGefaess = false;
   statusReadyToSave = 0;
   resetSaveCandidate();
-  ifPathAutoDetectLift = true;
+  setAutoDetectState(AutoDetectState::WaitLiftSettle);
   lastTimeAutodetectLift = millis();
   measurementAutoDetectReady = false;
   RefreshFooter();
@@ -3331,7 +3350,7 @@ void scheduleAutoDetectPostTara(bool saveReadyAfterTara, bool secondTara)
   autoDetectPostTaraPending = true;
   autoDetectPostTaraSecondTara = secondTara;
   autoDetectPostTaraSaveReady = saveReadyAfterTara;
-  autoDetectPostTaraPhase = 0;
+  setAutoDetectState(AutoDetectState::WaitPostTara);
   lastTimeAutoDetectPostTara = millis();
 
   ifPathAutoDetectPlace = false;
@@ -3351,7 +3370,7 @@ static void finishAutoDetectPostTara()
 {
   autoDetectPostTaraPending = false;
   autoDetectPostTaraSecondTara = false;
-  autoDetectPostTaraPhase = 0;
+  setAutoDetectState(AutoDetectState::Idle);
 
   oldWeightAutoDetect = actualWeight;
   weightToCompareAutoDetect = 0.0;
@@ -3369,7 +3388,7 @@ static void finishAutoDetectPostTara()
 static void startSecondAutoDetectPostTara()
 {
   doTara();
-  autoDetectPostTaraPhase = 1;
+  setAutoDetectState(AutoDetectState::WaitSecondPostTara);
   lastTimeAutoDetectPostTara = millis();
   oldWeightAutoDetect = 0.0;
   weightToCompareAutoDetect = 0.0;
@@ -3386,7 +3405,7 @@ bool handleAutoDetectPostTara()
     return true;
   }
 
-  if (autoDetectPostTaraSecondTara && autoDetectPostTaraPhase == 0) {
+  if (autoDetectPostTaraSecondTara && isAutoDetectState(AutoDetectState::WaitPostTara)) {
     startSecondAutoDetectPostTara();
     return true;
   }
@@ -3397,7 +3416,6 @@ bool handleAutoDetectPostTara()
 
 static void finishAutoDetectPlaceCandidate()
 {
-  ifPathAutoDetectPlace = false;
   weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
   debug("weightToCompareAutoDetect1 = ");
   debugln(weightToCompareAutoDetect);
@@ -3421,7 +3439,6 @@ static void finishAutoDetectPlaceCandidate()
 
 static void finishAutoDetectLiftCandidate()
 {
-  ifPathAutoDetectLift = false;
   doTara();
   scheduleAutoDetectPostTara(false, true);
   debug("foundGefaess beim Abheben = ");
@@ -3437,7 +3454,8 @@ static void handleAutoDetectPlace()
     startAutoDetectPlaceCandidate();
   }
 
-  if (autoDetect == 1 && millis() - lastTimeAutodetectPlace > AUTO_DETECT_SETTLE_MS && ifPathAutoDetectPlace == true)
+  if (autoDetect == 1 && isAutoDetectState(AutoDetectState::WaitPlaceSettle) &&
+      millis() - lastTimeAutodetectPlace > AUTO_DETECT_SETTLE_MS)
   {
     finishAutoDetectPlaceCandidate();
   }
@@ -3450,7 +3468,8 @@ static void handleAutoDetectLift()
     startAutoDetectLiftCandidate();
   }
 
-  if (millis() - lastTimeAutodetectLift > AUTO_DETECT_SETTLE_MS && ifPathAutoDetectLift == true)
+  if (isAutoDetectState(AutoDetectState::WaitLiftSettle) &&
+      millis() - lastTimeAutodetectLift > AUTO_DETECT_SETTLE_MS)
   {
     finishAutoDetectLiftCandidate();
   }
