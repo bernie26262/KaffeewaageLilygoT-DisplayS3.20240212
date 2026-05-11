@@ -34,11 +34,11 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
-#include <Update.h>
 #include "time.h"
 #include "wifi_secrets.h"
 #include "app_state.h"
 #include "coffee_web.h"
+#include "coffee_ota.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -170,8 +170,6 @@ HX711_ADC LoadCell(HX711_dout, HX711_sck);
 AsyncWebServer server(HTTP_PORT);
 //AsyncWebSocket ws("/ws");
 
-static bool otaRebootRequested = false;
-static unsigned long otaRebootRequestMs = 0;
 
 AppState appState;
 static unsigned long lastWebStateBroadcastMs = 0;
@@ -1468,8 +1466,7 @@ static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
   }
 
   if (cmdEquals(cmd, CMD_RESTART_DEVICE)) {
-    otaRebootRequested = true;
-    otaRebootRequestMs = millis();
+    coffeeOtaRequestReboot();
     broadcastWebStateFromGlobals();
     return true;
   }
@@ -1564,287 +1561,12 @@ void onRootRequest(AsyncWebServerRequest *request) {
   coffeeWebHandleRoot(request);
 }
 
-const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kaffeewaage OTA Update</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f3f6fb; margin: 0; padding: 24px; color: #1f2933; }
-    .panel { max-width: 720px; margin: 0 auto; background: white; border-radius: 12px; padding: 22px; box-shadow: 0 4px 18px rgba(0,0,0,0.12); }
-    h1 { margin-top: 0; }
-    .card { border: 1px solid #d7dde8; border-radius: 10px; padding: 16px; margin: 16px 0; background: #fbfcff; }
-    .hint { color: #52606d; font-size: 0.95rem; }
-    input[type=file] { display: block; margin: 12px 0; width: 100%; }
-    button, .button { display: inline-block; border: 0; border-radius: 8px; padding: 10px 16px; background: #2563eb; color: white; font-weight: bold; text-decoration: none; cursor: pointer; }
-    button:hover, .button:hover { background: #1d4ed8; }
-    button:disabled { background: #9aa5b1; cursor: wait; }
-    .danger { background: #b91c1c; }
-    .danger:hover { background: #991b1b; }
-    code { background: #edf2f7; padding: 2px 5px; border-radius: 4px; }
-    progress { width: 100%; height: 22px; margin-top: 12px; }
-    .status { min-height: 1.4em; margin-top: 10px; font-weight: bold; }
-    .reboot-panel { display: none; border: 1px solid #bbf7d0; border-radius: 10px; padding: 16px; margin: 16px 0; background: #f0fdf4; }
-    .reboot-panel.visible { display: block; }
-    .ok { color: #047857; }
-    .err { color: #b91c1c; }
-    .busy { color: #1d4ed8; }
-  </style>
-</head>
-<body>
-  <div class="panel">
-    <h1>Kaffeewaage OTA Update</h1>
-    <p class="hint">Hier koennen Firmware und SPIFFS-Dateisystem getrennt aktualisiert werden.</p>
-
-    <div class="card">
-      <h2>Firmware aktualisieren</h2>
-      <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/firmware.bin</code></p>
-      <form class="ota-form" method="POST" action="/update/firmware" enctype="multipart/form-data" data-label="Firmware">
-        <input type="file" name="update" accept=".bin" required>
-        <button class="danger" type="submit">Firmware hochladen</button>
-        <progress value="0" max="100" hidden></progress>
-        <div class="status"></div>
-      </form>
-    </div>
-
-    <div class="card">
-      <h2>Dateisystem aktualisieren</h2>
-      <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/spiffs.bin</code></p>
-      <form class="ota-form" method="POST" action="/update/filesystem" enctype="multipart/form-data" data-label="SPIFFS">
-        <input type="file" name="update" accept=".bin" required>
-        <button type="submit">SPIFFS hochladen</button>
-        <progress value="0" max="100" hidden></progress>
-        <div class="status"></div>
-      </form>
-    </div>
-
-    <div id="reboot-panel" class="reboot-panel">
-      <h2>Neustart erforderlich</h2>
-      <p class="hint">Das Update wurde erfolgreich eingespielt. Bitte starte den ESP32 jetzt neu, damit die neue Firmware bzw. das neue Dateisystem aktiv wird.</p>
-      <button id="reboot-button" class="danger" type="button">ESP32 jetzt neu starten</button>
-      <div id="reboot-status" class="status"></div>
-    </div>
-
-    <p><a class="button" href="/">Zurueck zur WebUI</a></p>
-  </div>
-
-  <script>
-    function setStatus(el, text, cls) {
-      el.textContent = text;
-      el.className = 'status ' + (cls || '');
-    }
-
-    var rebootButton = document.getElementById('reboot-button');
-    var rebootStatus = document.getElementById('reboot-status');
-    if (rebootButton) {
-      rebootButton.addEventListener('click', function() {
-        rebootButton.disabled = true;
-        setStatus(rebootStatus, 'Neustart wird angefordert...', 'busy');
-
-        var xhr = new XMLHttpRequest();
-        xhr.onload = function() {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            setStatus(rebootStatus, 'Neustart angefordert. Verbindung bricht gleich ab; die WebUI danach neu laden.', 'ok');
-          } else {
-            rebootButton.disabled = false;
-            setStatus(rebootStatus, 'Neustart fehlgeschlagen: HTTP ' + xhr.status, 'err');
-          }
-        };
-        xhr.onerror = function() {
-          rebootButton.disabled = false;
-          setStatus(rebootStatus, 'Neustart fehlgeschlagen: Verbindung abgebrochen.', 'err');
-        };
-        xhr.open('POST', '/update/reboot', true);
-        xhr.send();
-      });
-    }
-
-    document.querySelectorAll('.ota-form').forEach(function(form) {
-      var button = form.querySelector('button');
-      var fileInput = form.querySelector('input[type=file]');
-      var progress = form.querySelector('progress');
-      var status = form.querySelector('.status');
-      var label = form.dataset.label || 'Update';
-
-      form.addEventListener('submit', function(event) {
-        event.preventDefault();
-
-        if (!fileInput.files.length) {
-          setStatus(status, 'Bitte zuerst eine .bin-Datei auswaehlen.', 'err');
-          return;
-        }
-
-        var xhr = new XMLHttpRequest();
-        var data = new FormData(form);
-        var fallbackPercent = 1;
-        var fallbackTimer = null;
-        var sawProgressEvent = false;
-
-        function stopFallbackTimer() {
-          if (fallbackTimer) {
-            clearInterval(fallbackTimer);
-            fallbackTimer = null;
-          }
-        }
-
-        button.disabled = true;
-        progress.hidden = false;
-        progress.value = fallbackPercent;
-        setStatus(status, label + '-Upload startet...', 'busy');
-
-        fallbackTimer = setInterval(function() {
-          if (sawProgressEvent) {
-            stopFallbackTimer();
-            return;
-          }
-          if (fallbackPercent < 95) {
-            fallbackPercent += 1;
-            progress.value = fallbackPercent;
-            setStatus(status, label + '-Upload laeuft... ' + fallbackPercent + ' %', 'busy');
-          }
-        }, 350);
-
-        xhr.upload.onprogress = function(e) {
-          if (e.lengthComputable) {
-            sawProgressEvent = true;
-            stopFallbackTimer();
-            var percent = Math.max(1, Math.round((e.loaded / e.total) * 100));
-            progress.value = percent;
-            setStatus(status, label + '-Upload: ' + percent + ' %', 'busy');
-          } else if (!sawProgressEvent) {
-            setStatus(status, label + '-Upload laeuft...', 'busy');
-          }
-        };
-
-        xhr.upload.onload = function() {
-          sawProgressEvent = true;
-          stopFallbackTimer();
-          progress.value = 100;
-          setStatus(status, label + '-Upload abgeschlossen, Update wird verarbeitet...', 'busy');
-        };
-
-        xhr.onload = function() {
-          stopFallbackTimer();
-          button.disabled = false;
-          if (xhr.status >= 200 && xhr.status < 300) {
-            progress.value = 100;
-            setStatus(status, label + '-Update erfolgreich eingespielt. Bitte ESP32 neu starten.', 'ok');
-            var rebootPanel = document.getElementById('reboot-panel');
-            if (rebootPanel) {
-              rebootPanel.classList.add('visible');
-              rebootPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-          } else {
-            setStatus(status, label + '-Update fehlgeschlagen: HTTP ' + xhr.status, 'err');
-          }
-        };
-
-        xhr.onerror = function() {
-          stopFallbackTimer();
-          button.disabled = false;
-          setStatus(status, label + '-Update fehlgeschlagen: Verbindung abgebrochen.', 'err');
-        };
-
-        xhr.ontimeout = function() {
-          stopFallbackTimer();
-          button.disabled = false;
-          setStatus(status, label + '-Update fehlgeschlagen: Timeout.', 'err');
-        };
-
-        xhr.open('POST', form.action, true);
-        xhr.timeout = 120000;
-        xhr.send(data);
-      });
-    });
-  </script>
-</body>
-</html>
-)rawliteral";
-
-void onUpdateRequest(AsyncWebServerRequest *request) {
-  request->send_P(200, "text/html", OTA_UPDATE_PAGE);
-}
-
-void onUpdateFinished(AsyncWebServerRequest *request) {
-  const bool ok = !Update.hasError();
-  const char *message = ok
-    ? "Update erfolgreich eingespielt. Neustart erforderlich."
-    : "Update fehlgeschlagen. Details siehe serieller Monitor.";
-  AsyncWebServerResponse *response = request->beginResponse(ok ? 200 : 500, "text/plain", message);
-  response->addHeader("Connection", "close");
-  request->send(response);
-}
-
-void onUpdateRebootRequest(AsyncWebServerRequest *request) {
-  AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "Neustart angefordert.");
-  response->addHeader("Connection", "close");
-  request->send(response);
-  otaRebootRequested = true;
-  otaRebootRequestMs = millis();
-}
-
-void handleFirmwareUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
-  if (index == 0) {
-    debug("Firmware update started: ");
-    debugln(filename.c_str());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
-      Update.printError(Serial);
-    }
-  }
-
-  if (!Update.hasError()) {
-    if (Update.write(data, len) != len) {
-      Update.printError(Serial);
-    }
-  }
-
-  if (final) {
-    if (Update.end(true)) {
-      debug("Firmware update complete: ");
-      debugln(index + len);
-    } else {
-      Update.printError(Serial);
-    }
-  }
-}
-
-void handleFilesystemUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
-  if (index == 0) {
-    debug("SPIFFS update started: ");
-    debugln(filename.c_str());
-    SPIFFS.end();
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
-      Update.printError(Serial);
-    }
-  }
-
-  if (!Update.hasError()) {
-    if (Update.write(data, len) != len) {
-      Update.printError(Serial);
-    }
-  }
-
-  if (final) {
-    if (Update.end(true)) {
-      debug("SPIFFS update complete: ");
-      debugln(index + len);
-    } else {
-      Update.printError(Serial);
-    }
-  }
-}
-
 void initWebServer() {
     server.on("/", onRootRequest);
-    server.on("/update", HTTP_GET, onUpdateRequest);
-    server.on("/update/firmware", HTTP_POST, onUpdateFinished, handleFirmwareUpload);
-    server.on("/update/filesystem", HTTP_POST, onUpdateFinished, handleFilesystemUpload);
-    server.on("/update/reboot", HTTP_POST, onUpdateRebootRequest);
     server.serveStatic("/", SPIFFS, "/");
     coffeeWebSetCommandHandler(handleCoffeeWebCommand);
     coffeeWebBegin(server);
+    coffeeOtaBegin(server);
     server.begin();
 }
 
@@ -4566,10 +4288,7 @@ void setup()
 void loop(void)
 { 
   coffeeWebLoop();
-  if (otaRebootRequested && (millis() - otaRebootRequestMs > 1000)) {
-    debugln("Restarting ESP32 after OTA request...");
-    ESP.restart();
-  }
+  coffeeOtaLoop();
   //ws.cleanupClients();
   rotaryMenu();
   LoadCell.update();
