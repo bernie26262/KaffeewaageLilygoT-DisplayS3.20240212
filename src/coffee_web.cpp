@@ -75,6 +75,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .stat-row span:last-child { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; }
     .ip-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
+    .dashboard-settings-list { gap: 4px; margin-top: 6px; line-height: 1.25; }
     .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
     .gefaess-list { display: grid; gap: 8px; margin-top: 10px; }
     .gefaess-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #f3f4f6; }
@@ -179,10 +180,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <section class="card">
     <div class="stats-title">Einstellungen</div>
-    <div class="settings-list small">
+    <div class="settings-list dashboard-settings-list small">
       <div>Wartung zurücksetzen</div>
       <div>Waage kalibrieren</div>
       <div>Gefäße einmessen</div>
+      <div>Gesamtwerte bearbeiten</div>
+      <div>OTA-Update</div>
+      <div>Neustart</div>
     </div>
     <div class="button-row" style="margin-top: 12px;">
       <button id="openSettings" class="nav-button secondary">Einstellungen öffnen</button>

@@ -479,7 +479,6 @@ float oldWeightDisplayOff = 0;
 
 bool statusReadyToSave = 0;
 float lastDoseWeightCandidate = 0.0f;
-byte taraCounter = 0;
 
 //unsigned long lastTimePrintTime = 0;
 //int delayTimePrintTime = 1000;
@@ -737,8 +736,28 @@ void stringifySetWeight();
 void CalibrateSetWeight();
 void CalibrateFactor();
 
+static const char* autoDetectStateName(AutoDetectState state)
+{
+  switch (state) {
+    case AutoDetectState::Idle: return "Idle";
+    case AutoDetectState::WaitPlaceSettle: return "WaitPlaceSettle";
+    case AutoDetectState::WaitLiftSettle: return "WaitLiftSettle";
+    case AutoDetectState::WaitPostTara: return "WaitPostTara";
+    case AutoDetectState::WaitSecondPostTara: return "WaitSecondPostTara";
+  }
+  return "Unknown";
+}
+
 static void setAutoDetectState(AutoDetectState state)
 {
+  if (autoDetectState == state) {
+    return;
+  }
+
+  debug("AutoDetect State: ");
+  debug(autoDetectStateName(autoDetectState));
+  debug(" -> ");
+  debugln(autoDetectStateName(state));
   autoDetectState = state;
 }
 
@@ -3357,8 +3376,6 @@ void scheduleAutoDetectPostTara(bool saveReadyAfterTara, bool secondTara)
   ifPathAutoDetectLift = false;
   ifpathGefaessWasLifted = false;
   measurementAutoDetectReady = false;
-  taraCounter = 0;
-
   // Direkt nach LoadCell.tare() kann actualWeight noch einen alten Messwert enthalten.
   // Darum Autodetect kurz pausieren und erst danach den neuen Nullpunkt als Basis uebernehmen.
   oldWeightAutoDetect = 0.0;
@@ -3372,13 +3389,20 @@ static void finishAutoDetectPostTara()
   autoDetectPostTaraSecondTara = false;
   setAutoDetectState(AutoDetectState::Idle);
 
-  oldWeightAutoDetect = actualWeight;
+  // Wenn waehrend der Post-Tara-Pause bereits wieder ein Gewicht aufgelegt wurde,
+  // darf dieses Gewicht nicht als neue Basis verschluckt werden. Sonst wuerde
+  // die naechste Gefaess-Erkennung ausbleiben. In diesem Fall bewusst gegen
+  // 0 weitervergleichen, damit der normale Auflege-Pfad erneut starten kann.
+  if (!autoDetectPostTaraSaveReady && actualWeight > AUTO_DETECT_PLACE_THRESHOLD_G) {
+    oldWeightAutoDetect = 0.0;
+  } else {
+    oldWeightAutoDetect = actualWeight;
+  }
   weightToCompareAutoDetect = 0.0;
   measurementAutoDetectReady = true;
   startWeightGrinding = actualWeight;
   stopWeightGrinding = actualWeight;
   setSaveReady(autoDetectPostTaraSaveReady);
-  taraCounter = 0;
 
   debugln("AutoDetect Tara-Phase abgeschlossen");
   RefreshFooter();
