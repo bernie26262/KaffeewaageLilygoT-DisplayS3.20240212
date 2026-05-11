@@ -39,6 +39,7 @@
 #include "app_state.h"
 #include "coffee_web.h"
 #include "coffee_ota.h"
+#include "coffee_storage.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -803,15 +804,16 @@ static float getLastDoseWeight()
 
 static void persistCoffeeStats()
 {
-  preferences.putFloat("grndWghtFrvr", groundWeightForever);
-  preferences.putFloat("grndWghtCln", groundWeightSinceClean);
-  preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
-  preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
-
-  preferences.putULong("shotsFrvr", shotCounterForever);
-  preferences.putULong("shotsCln", shotCounterSinceClean);
-  preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
-  preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
+  coffeeStorageSaveStats(
+    preferences,
+    groundWeightForever,
+    groundWeightSinceClean,
+    groundWeightSinceMachineClean,
+    groundWeightSinceFilterChange,
+    shotCounterForever,
+    shotCounterSinceClean,
+    shotCounterSinceMachineClean,
+    shotCounterSinceFilterChange);
 }
 
 static void addCoffeeStatsDose(float dose_g)
@@ -844,11 +846,11 @@ static bool resetMuehlenReinigungCore()
   groundWeightSinceClean = 0;
   shotCounterSinceClean = 0;
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putFloat("grndWghtCln", groundWeightSinceClean);
-  preferences.putULong("shotsCln", shotCounterSinceClean);
-  preferences.putULong("lstMhlRngng", lastTimeMuehlenReinigungNTP);
-  preferences.end();
+  coffeeStorageSaveGrinderMaintenanceReset(
+    preferences,
+    groundWeightSinceClean,
+    shotCounterSinceClean,
+    lastTimeMuehlenReinigungNTP);
 
   displayMuehleReinigen = 0;
   olddisplayMuehleReinigen = 0;
@@ -868,11 +870,11 @@ static bool resetKaffeemReinigungCore()
   groundWeightSinceMachineClean = 0;
   shotCounterSinceMachineClean = 0;
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
-  preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
-  preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
-  preferences.end();
+  coffeeStorageSaveMachineMaintenanceReset(
+    preferences,
+    groundWeightSinceMachineClean,
+    shotCounterSinceMachineClean,
+    lastTimeKaffeemReinigungNTP);
 
   displayKaffeemReinigen = 0;
   olddisplayKaffeemReinigen = 0;
@@ -892,11 +894,11 @@ static bool resetFilterWechselCore()
   groundWeightSinceFilterChange = 0;
   shotCounterSinceFilterChange = 0;
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
-  preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
-  preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
-  preferences.end();
+  coffeeStorageSaveFilterMaintenanceReset(
+    preferences,
+    groundWeightSinceFilterChange,
+    shotCounterSinceFilterChange,
+    lastTimeFilterWechselNTP);
 
   displayFilterwechseln = 0;
   olddisplayFilterwechseln = 0;
@@ -913,9 +915,7 @@ static bool debugForceMaintenanceDue(uint32_t& lastTime, unsigned long delaySeco
   const time_t currentEpoch = time(&now);
   lastTime = static_cast<uint32_t>(currentEpoch - static_cast<time_t>(delaySeconds) - 60);
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putULong(prefKey, lastTime);
-  preferences.end();
+  coffeeStorageSaveMaintenanceTimestamp(preferences, prefKey, lastTime);
 
   updateCoffeeAppStateFromGlobals();
   return true;
@@ -1403,9 +1403,7 @@ static bool setCoffeeStatsTotalsFromWeb(uint32_t totalShots, float totalGround_g
   shotCounterForever = totalShots;
   groundWeightForever = totalGround_g;
 
-  preferences.begin("savedValues", RW_MODE);
   persistCoffeeStats();
-  preferences.end();
 
   broadcastWebStateFromGlobals();
   return true;
@@ -1498,9 +1496,7 @@ static bool handleWebSaveDoseCommand(const char* cmd, bool& handled)
 
   addCoffeeStatsDose(doseWeight);
 
-  preferences.begin("savedValues", RW_MODE);
   persistCoffeeStats();
-  preferences.end();
 
   setSaveReady(false);
   statusSwitchSaveWeightFell = 0;
