@@ -286,7 +286,7 @@ let stopwatchBaseMs = 0;
 let stopwatchRunning = false;
 let targetWeightDirty = false;
 let pendingConfirm = null;
-let wizard = { type: null, step: 0 };
+let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
 const el = id => document.getElementById(id);
 const setText = (id, value) => { el(id).textContent = value; };
@@ -462,6 +462,7 @@ function renderCalibrationWizard() {
         wizardButton('Weiter', '', () => {
           const value = Number(el('calibrationWeightInput').value.replace(',', '.'));
           if (!Number.isFinite(value) || value <= 0) { addLog('Ungültiges Kalibriergewicht'); return; }
+          wizard.calibrationWeight = value;
           sendCommandAndThen(`scale_calibration_set_weight_${value.toFixed(1)}`, `Kalibriergewicht gesendet: ${value.toFixed(1)} g`, 2);
         })
       ]
@@ -471,14 +472,18 @@ function renderCalibrationWizard() {
   }
 
   if (wizard.step === 2) {
-    const current = Number(lastState?.calibration?.set_weight_g || 0).toFixed(1);
+    const current = Number(wizard.calibrationWeight ?? lastState?.calibration?.set_weight_g ?? 0).toFixed(1);
     setWizardContent(
       'Waage kalibrieren: Kalibrieren',
       `Bitte warten, bis das Gewicht ruhig steht. Eingestelltes Kalibriergewicht: ${current} g.`,
       '<div class="wizard-note">Danach wird der Kalibrierfaktor berechnet und gespeichert.</div>',
       [
         wizardButton('Zurück', 'secondary', () => { wizard.step = 1; renderWizard(); }),
-        wizardButton('Kalibrieren', '', () => sendCommandAndThen(CMD.scaleCalibrationApply, 'Kalibrierung gesendet …', 3))
+        wizardButton('Kalibrieren', '', () => {
+          const value = Number(wizard.calibrationWeight ?? lastState?.calibration?.set_weight_g ?? 0);
+          if (!Number.isFinite(value) || value <= 0) { addLog('Ungültiges Kalibriergewicht'); return; }
+          sendCommandAndThen(`scale_calibration_apply_${value.toFixed(1)}`, 'Kalibrierung gesendet …', 3);
+        })
       ]
     );
     return;
@@ -890,29 +895,6 @@ function connect() {
   };
 }
 
-el('save').addEventListener('click', () => {
-  if (lastState?.status?.save_ready) {
-    sendCommand(CMD.saveDose, 'Save gesendet …');
-  }
-});
-
-el('tare').addEventListener('click', () => {
-  sendCommand(CMD.tare, 'Tara gesendet …');
-});
-
-el('swToggle').addEventListener('click', () => {
-  sendCommand(CMD.stopwatchStartStop, stopwatchRunning ? 'Stoppuhr Stop gesendet …' : 'Stoppuhr Start gesendet …');
-});
-
-el('swReset').addEventListener('click', () => {
-  sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …');
-});
-
-el('siebtraegerSelect').addEventListener('change', () => {
-  const idx = Number(el('siebtraegerSelect').value);
-  sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
-});
-
 // ===== Event-Handler =====
 function sendTargetWeight() {
   if (!isWebSocketReady()) return;
@@ -926,42 +908,27 @@ function sendTargetWeight() {
   sendCommand(`set_selected_siebtraeger_weight_${value.toFixed(1)}`, `Sollgewicht gesendet: ${value.toFixed(1)} g`);
 }
 
-el('targetSave').addEventListener('click', sendTargetWeight);
-el('openSettings').addEventListener('click', () => showSettings(true));
-el('backDashboard').addEventListener('click', () => showSettings(false));
-el('openCalibrate').addEventListener('click', openCalibrationWizard);
-el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
-el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
-el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
-el('restartDevice').addEventListener('click', () => openConfirmOverlay(
-  'ESP32 wirklich neu starten?',
-  'Der ESP32 startet neu. Die WebUI ist während des Neustarts kurz nicht erreichbar.',
-  CMD.restartDevice,
-  'Neustart angefordert …'
-));
-el('autodetectToggle').addEventListener('click', () => {
+function handleSaveClick() {
+  if (lastState?.status?.save_ready) {
+    sendCommand(CMD.saveDose, 'Save gesendet …');
+  }
+}
+
+function handleStopwatchToggleClick() {
+  sendCommand(CMD.stopwatchStartStop, stopwatchRunning ? 'Stoppuhr Stop gesendet …' : 'Stoppuhr Start gesendet …');
+}
+
+function handleSiebtraegerChange() {
+  const idx = Number(el('siebtraegerSelect').value);
+  sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
+}
+
+function handleAutodetectToggleClick() {
   const autodetectOn = !!lastState?.selection?.autodetect;
   sendCommand(autodetectOn ? CMD.autodetectOff : CMD.autodetectOn, autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
-});
-el('resetMachine').addEventListener('click', () => openConfirmOverlay(
-  'Kaffeemaschinenreinigung reset?',
-  'Dadurch werden Zeitpunkt und Zähler seit der letzten Kaffeemaschinenreinigung zurückgesetzt.',
-  CMD.maintenanceResetMachine,
-  'Reset Kaffeemaschine gesendet …'
-));
-el('resetGrinder').addEventListener('click', () => openConfirmOverlay(
-  'Mühlenreinigung reset?',
-  'Dadurch werden Zeitpunkt und Zähler seit der letzten Mühlenreinigung zurückgesetzt.',
-  CMD.maintenanceResetGrinder,
-  'Reset Mühle gesendet …'
-));
-el('resetFilter').addEventListener('click', () => openConfirmOverlay(
-  'Filterwechsel reset?',
-  'Dadurch werden Zeitpunkt und Zähler seit dem letzten Filterwechsel zurückgesetzt.',
-  CMD.maintenanceResetFilter,
-  'Reset Filter gesendet …'
-));
-el('gefaessList').addEventListener('click', e => {
+}
+
+function handleGefaessListClick(e) {
   const button = e.target.closest('.delete-gefaess');
   if (!button) return;
 
@@ -974,16 +941,9 @@ el('gefaessList').addEventListener('click', e => {
     `delete_gefaess_${index}`,
     `Gefäß ${index + 1} löschen gesendet …`
   );
-});
-el('confirmCancel').addEventListener('click', closeConfirmOverlay);
-el('confirmOk').addEventListener('click', confirmPendingAction);
-el('confirmOverlay').addEventListener('click', e => {
-  if (e.target === el('confirmOverlay')) closeConfirmOverlay();
-});
-el('wizardOverlay').addEventListener('click', e => {
-  if (e.target === el('wizardOverlay')) closeWizardOverlay();
-});
-document.addEventListener('keydown', e => {
+}
+
+function handleGlobalKeyDown(e) {
   if (el('confirmOverlay').classList.contains('show')) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -1000,31 +960,99 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     closeWizardOverlay();
   }
-});
-el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
-el('targetWeight').addEventListener('keydown', e => {
+}
+
+function handleTargetWeightKeyDown(e) {
   if (e.key === 'Enter') {
     e.preventDefault();
     sendTargetWeight();
   }
-});
+}
 
-setInterval(function maintenanceClientTick() {
-  if (!lastState) return;
-  renderMaintenance(lastState.maintenance);
-}, 1000);
+function bindDashboardHandlers() {
+  el('save').addEventListener('click', handleSaveClick);
+  el('tare').addEventListener('click', () => sendCommand(CMD.tare, 'Tara gesendet …'));
+  el('swToggle').addEventListener('click', handleStopwatchToggleClick);
+  el('swReset').addEventListener('click', () => sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …'));
+  el('siebtraegerSelect').addEventListener('change', handleSiebtraegerChange);
+  el('targetSave').addEventListener('click', sendTargetWeight);
+  el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
+  el('targetWeight').addEventListener('keydown', handleTargetWeightKeyDown);
+  el('autodetectToggle').addEventListener('click', handleAutodetectToggleClick);
+}
 
-setInterval(function stopwatchClientTick() {
-  renderStopwatch();
-}, 100);
+function bindSettingsHandlers() {
+  el('openSettings').addEventListener('click', () => showSettings(true));
+  el('backDashboard').addEventListener('click', () => showSettings(false));
+  el('openCalibrate').addEventListener('click', openCalibrationWizard);
+  el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
+  el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
+  el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
+  el('restartDevice').addEventListener('click', () => openConfirmOverlay(
+    'ESP32 wirklich neu starten?',
+    'Der ESP32 startet neu. Die WebUI ist während des Neustarts kurz nicht erreichbar.',
+    CMD.restartDevice,
+    'Neustart angefordert …'
+  ));
+  el('resetMachine').addEventListener('click', () => openConfirmOverlay(
+    'Kaffeemaschinenreinigung reset?',
+    'Dadurch werden Zeitpunkt und Zähler seit der letzten Kaffeemaschinenreinigung zurückgesetzt.',
+    CMD.maintenanceResetMachine,
+    'Reset Kaffeemaschine gesendet …'
+  ));
+  el('resetGrinder').addEventListener('click', () => openConfirmOverlay(
+    'Mühlenreinigung reset?',
+    'Dadurch werden Zeitpunkt und Zähler seit der letzten Mühlenreinigung zurückgesetzt.',
+    CMD.maintenanceResetGrinder,
+    'Reset Mühle gesendet …'
+  ));
+  el('resetFilter').addEventListener('click', () => openConfirmOverlay(
+    'Filterwechsel reset?',
+    'Dadurch werden Zeitpunkt und Zähler seit dem letzten Filterwechsel zurückgesetzt.',
+    CMD.maintenanceResetFilter,
+    'Reset Filter gesendet …'
+  ));
+  el('gefaessList').addEventListener('click', handleGefaessListClick);
+}
 
-connect();
+function bindOverlayHandlers() {
+  el('confirmCancel').addEventListener('click', closeConfirmOverlay);
+  el('confirmOk').addEventListener('click', confirmPendingAction);
+  el('confirmOverlay').addEventListener('click', e => {
+    if (e.target === el('confirmOverlay')) closeConfirmOverlay();
+  });
+  el('wizardOverlay').addEventListener('click', e => {
+    if (e.target === el('wizardOverlay')) closeWizardOverlay();
+  });
+  document.addEventListener('keydown', handleGlobalKeyDown);
+}
+
+function startClientTimers() {
+  setInterval(function maintenanceClientTick() {
+    if (!lastState) return;
+    renderMaintenance(lastState.maintenance);
+  }, 1000);
+
+  setInterval(function stopwatchClientTick() {
+    renderStopwatch();
+  }, 100);
+}
+
+function initWebUi() {
+  bindDashboardHandlers();
+  bindSettingsHandlers();
+  bindOverlayHandlers();
+  startClientTimers();
+  connect();
+}
 
 window.addEventListener('beforeunload', () => {
   if (isWebSocketReady() && !wizardEndSent) {
     ws.send(JSON.stringify({ cmd: CMD.wizardEnd }));
   }
 });
+
+initWebUi();
 </script>
 </body>
 </html>)rawliteral";

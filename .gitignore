@@ -35,6 +35,7 @@ include/wifi_secrets.h
 include/secrets.h
 src/wifi_secrets.h
 src/secrets.h
+Bitte beim Upload zu GIT und zu ChatGPT beachten.txt
 
 # Beispiel-Dateien bleiben erlaubt
 !include/wifi_secrets_example.h

@@ -326,7 +326,7 @@ const float maxWeightST = 25.0;
 float calFactor = 1;
 float setWeightCalibration = 200.0;
 float oldsetWeightCalibration = 200.0;
-const float minWeightCalibration = 50.0;
+const float minWeightCalibration = 1.0;
 const float maxWeightCalibration = 800.0;
 int menuItemPos = 3;                                                 // startet auf Punkt Tara im Root-Menue
 bool autoDetect = 0;
@@ -942,9 +942,7 @@ static bool selectSiebtraegerFromWeb(byte index)
     RefreshTFTCursor();
   }
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putShort("savedSelST", selectedST);
-  preferences.end();
+  coffeeStorageSaveSelectedSiebtraeger(preferences, selectedST);
 
   updateCoffeeAppStateFromGlobals();
   coffeeWebBroadcastState(appState);
@@ -961,9 +959,7 @@ static bool setSelectedSiebtraegerWeightFromWeb(float weight_g)
   oldsetWeightST[selectedST] = weight_g;
   stringifySetWeight();
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putBytes("svdSetWeightST", setWeightST, sizeof(setWeightST));
-  preferences.end();
+  coffeeStorageSaveSiebtraegerSetWeights(preferences, setWeightST, sizeof(setWeightST));
 
   if (displayOff == 0) {
     RefreshTFTSetWeightST();
@@ -982,9 +978,7 @@ static void applyAutodetectRuntime(bool enabled, bool persist)
   statusReadyToSave = 0;
 
   if (persist) {
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putBool("savedAutoDetect", autoDetect);
-    preferences.end();
+    coffeeStorageSaveAutodetect(preferences, autoDetect);
   }
 
   debug("autodetect = ");
@@ -1046,9 +1040,7 @@ static bool setCalibrationWeightFromWeb(float weight_g)
   oldsetWeightCalibration = weight_g;
   CalibrateSetWeight();
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putFloat("savedCalWeight", setWeightCalibration);
-  preferences.end();
+  coffeeStorageSaveCalibrationWeight(preferences, setWeightCalibration);
 
   debug("SetWeightCalibration saved = ");
   debugln(setWeightCalibration);
@@ -1067,9 +1059,7 @@ static bool applyCalibrationFromWeb()
   CalibrateFactor();
   LoadCell.setCalFactor(calFactor);
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putFloat("savedCalFact", calFactor);
-  preferences.end();
+  coffeeStorageSaveCalibrationFactor(preferences, calFactor);
 
   debug("CalibrationFactor saved = ");
   debugln(calFactor);
@@ -1094,9 +1084,7 @@ static bool selectGefaessFromWeb(byte index)
   menuItemsOfPage[15][0] = gefaess[selectedGefaess];
   menuItemsOfPage[23][0] = gefaess[selectedGefaess];
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putShort("savedSelGef", selectedGefaess);
-  preferences.end();
+  coffeeStorageSaveSelectedGefaess(preferences, selectedGefaess);
 
   debug("Selected Gefaess = ");
   debugln(selectedGefaess);
@@ -1118,9 +1106,7 @@ static bool saveSelectedGefaessWeightFromWeb()
 
   weightGefaess[selectedGefaess] = actualWeight;
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putBytes("savedWeightGef", weightGefaess, sizeof(weightGefaess));
-  preferences.end();
+  coffeeStorageSaveGefaessWeights(preferences, weightGefaess, sizeof(weightGefaess));
 
   debug("Selected Gefaess = ");
   debug(selectedGefaess);
@@ -1144,9 +1130,7 @@ static bool deleteGefaessWeightFromWeb(byte index)
 
   weightGefaess[index] = 0.0f;
 
-  preferences.begin("savedValues", RW_MODE);
-  preferences.putBytes("savedWeightGef", weightGefaess, sizeof(weightGefaess));
-  preferences.end();
+  coffeeStorageSaveGefaessWeights(preferences, weightGefaess, sizeof(weightGefaess));
 
   debug("Gefaess geloescht = ");
   debugln(index);
@@ -1232,6 +1216,7 @@ static constexpr const char* CMD_RESTART_DEVICE = "restart_device";
 static constexpr const char* PREFIX_SELECT_SIEBTRAEGER = "select_siebtraeger_";
 static constexpr const char* PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT = "set_selected_siebtraeger_weight_";
 static constexpr const char* PREFIX_SCALE_CALIBRATION_SET_WEIGHT = "scale_calibration_set_weight_";
+static constexpr const char* PREFIX_SCALE_CALIBRATION_APPLY_WEIGHT = "scale_calibration_apply_";
 static constexpr const char* PREFIX_SELECT_GEFAESS = "select_gefaess_";
 static constexpr const char* PREFIX_DELETE_GEFAESS = "delete_gefaess_";
 static constexpr const char* PREFIX_SET_STATS_TOTALS = "set_stats_totals_";
@@ -1308,6 +1293,15 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
 static bool handleWebWizardCommand(const char* cmd, bool& handled)
 {
   handled = true;
+
+  if (cmdStartsWith(cmd, PREFIX_SCALE_CALIBRATION_APPLY_WEIGHT)) {
+    beginWebWizardCore();
+    const float weight_g = atof(cmd + strlen(PREFIX_SCALE_CALIBRATION_APPLY_WEIGHT));
+    if (!setCalibrationWeightFromWeb(weight_g)) {
+      return false;
+    }
+    return applyCalibrationFromWeb();
+  }
 
   if (cmdEquals(cmd, CMD_SCALE_CALIBRATION_APPLY)) {
     beginWebWizardCore();

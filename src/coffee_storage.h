@@ -36,3 +36,33 @@ void coffeeStorageSaveMaintenanceTimestamp(
   Preferences& preferences,
   const char* key,
   uint32_t timestamp);
+
+void coffeeStorageSaveSelectedSiebtraeger(
+  Preferences& preferences,
+  uint16_t selectedST);
+
+void coffeeStorageSaveSiebtraegerSetWeights(
+  Preferences& preferences,
+  const float* setWeightST,
+  size_t byteCount);
+
+void coffeeStorageSaveAutodetect(
+  Preferences& preferences,
+  bool autoDetect);
+
+void coffeeStorageSaveCalibrationWeight(
+  Preferences& preferences,
+  float setWeightCalibration);
+
+void coffeeStorageSaveCalibrationFactor(
+  Preferences& preferences,
+  float calFactor);
+
+void coffeeStorageSaveSelectedGefaess(
+  Preferences& preferences,
+  uint16_t selectedGefaess);
+
+void coffeeStorageSaveGefaessWeights(
+  Preferences& preferences,
+  const float* weightGefaess,
+  size_t byteCount);
