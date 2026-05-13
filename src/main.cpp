@@ -2972,9 +2972,7 @@ if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
      const float doseWeight = getLastDoseWeight();
      if (doseWeight > SAVE_MIN_DOSE_G) {
        addCoffeeStatsDose(doseWeight);
-       preferences.begin("savedValues", RW_MODE);// Preferences: Stats
        persistCoffeeStats();
-       preferences.end();
      }
      setSaveReady(false);
      statusSwitchSaveWeightFell = 0;
@@ -3727,9 +3725,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     debug(" = ");
     debugln(menuItemsOfPage[0][1]);
     
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putShort("savedSelST", selectedST);
-    preferences.end();  
+    coffeeStorageSaveSelectedSiebtraeger(preferences, selectedST);
     debugln("Selected ST saved");
 
     callOfFunctionTerminated = 1;
@@ -3745,9 +3741,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     
     callFunctionOfPage[4] = 0;
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putBytes("svdSetWeightST", setWeightST, sizeof(setWeightST) );
-    preferences.end();  
+    coffeeStorageSaveSiebtraegerSetWeights(preferences, setWeightST, sizeof(setWeightST));
     debugln("Mahlgewichte saved");
     callOfFunctionTerminated = 1;
   }
@@ -3788,9 +3782,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
       callFunctionOfPage[7] = 0;
       autoDetect = 1; 
       measurementAutoDetectReady = true;
-      preferences.begin("savedValues", RW_MODE);
-      preferences.putBool ("savedAutoDetect", autoDetect);
-      preferences.end();
+      coffeeStorageSaveAutodetect(preferences, autoDetect);
       debug("autodetect = ");
       debugln(autoDetect);                       
       callOfFunctionTerminated = 1;
@@ -3803,9 +3795,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
       autoDetect = 0;
      
       measurementAutoDetectReady = false;
-      preferences.begin("savedValues", RW_MODE);
-      preferences.putBool ("savedAutoDetect", autoDetect);
-      preferences.end();
+      coffeeStorageSaveAutodetect(preferences, autoDetect);
       debug("autodetect = ");
       debugln(autoDetect);
       callOfFunctionTerminated = 1;
@@ -3838,9 +3828,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     
     callFunctionOfPage[15] = 0;
     weightGefaess[selectedGefaess] = actualWeight;
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putBytes("savedWeightGef", weightGefaess, sizeof(weightGefaess) );
-    preferences.end(); 
+    coffeeStorageSaveGefaessWeights(preferences, weightGefaess, sizeof(weightGefaess));
     debug("Selected Gefaess = ");
     debug(selectedGefaess);
     debug(" = ");
@@ -3878,9 +3866,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   {
     callFunctionOfPage[10] = 0;
     CalibrateSetWeight();
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putFloat("savedCalWeight", setWeightCalibration);
-    preferences.end();  
+    coffeeStorageSaveCalibrationWeight(preferences, setWeightCalibration);
     debug("SetWeightCalibration saved = ");
     debugln(setWeightCalibration);
     callOfFunctionTerminated = 1;
@@ -3891,9 +3877,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     
     callFunctionOfPage[16] = 0;
     CalibrateFactor();
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putFloat("savedCalFact", calFactor);
-    preferences.end();  
+    coffeeStorageSaveCalibrationFactor(preferences, calFactor);
     debug("CalibrationFactor saved = ");
     debugln(calFactor);
     callOfFunctionTerminated = 1;
