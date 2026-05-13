@@ -1,5 +1,6 @@
 #include "coffee_web.h"
 #include <ArduinoJson.h>
+#include <SPIFFS.h>
 
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
@@ -17,6 +18,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Single-Dose-Kaffeewaage</title>
+  <link rel="manifest" href="/manifest.json?v=1">
+  <link rel="icon" href="/favicon.ico?v=1">
+  <link rel="apple-touch-icon" href="/icon-192.png?v=1">
+  <meta name="theme-color" content="#92400e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
   <style>
     /* ===== Basis / Layout ===== */
     :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: #f3f4f6; }
@@ -1057,6 +1065,28 @@ initWebUi();
 </body>
 </html>)rawliteral";
 
+static const char PWA_MANIFEST_JSON[] PROGMEM = R"rawliteral({
+  "name": "Kaffeewaage",
+  "short_name": "Waage",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#92400e",
+  "icons": [
+    {
+      "src": "/icon-192.png?v=1",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png?v=1",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+})rawliteral";
+
 // =============================================================================
 // C++: HTTP / WebSocket / State-Serialisierung
 // =============================================================================
@@ -1169,8 +1199,20 @@ void coffeeWebBegin(AsyncWebServer& server)
     }
   });
 
+  server.on("/manifest.json", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send_P(200, "application/manifest+json", PWA_MANIFEST_JSON);
+  });
+
+  server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/kaffeewaage-192.png", "image/png");
+  });
+
+  server.on("/icon-512.png", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/kaffeewaage-512.png", "image/png");
+  });
+
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(204);
+    request->send(SPIFFS, "/kaffeewaage.ico", "image/x-icon");
   });
 
   server.addHandler(&ws);

@@ -1553,10 +1553,15 @@ void onRootRequest(AsyncWebServerRequest *request) {
 
 void initWebServer() {
     server.on("/", onRootRequest);
-    server.serveStatic("/", SPIFFS, "/");
     coffeeWebSetCommandHandler(handleCoffeeWebCommand);
     coffeeWebBegin(server);
     coffeeOtaBegin(server);
+
+    // Static-Dateien erst nach den expliziten Handlern registrieren.
+    // Sonst kann der Catch-all-Static-Handler z.B. /manifest.json,
+    // /icon-192.png oder /favicon.ico abfangen, bevor die PWA-Handler greifen.
+    server.serveStatic("/", SPIFFS, "/");
+
     server.begin();
 }
 
