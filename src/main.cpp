@@ -379,22 +379,13 @@ unsigned long lastTimeAutoDetectPostTara = 0;
 // - Nach jedem Auto-Tara wird kurz gewartet, damit actualWeight auf den neuen Nullpunkt einschwingen kann.
 // - Autodetect AUS: Manuelles Tara gibt Save frei; Abheben sperrt Save und tariert automatisch.
 
-//bool statusswitchGrindfell = 0;
-//bool statusswitchGrindrose = 0;
 bool statusSwitchSaveWeightFell = 0;
 bool statusSwitchSaveWeightRose = 0;
 bool statuscompareWeight = 0;
-//float grindLatency = 0.25;                            // Es fällt nach dem Abschalten ja noch etwas aus der Mündung! Empirischer Wert.
-//bool statusrelaisGrind = 0;                          // Wenn relaisGrind = LOW --> 1
-//bool statusnormalGrind = 0;
-//bool statusadditionalGrind = 0;
 bool loadCellInitializing = false;
 volatile bool taraRequest = false;
 unsigned long lastTimeTFTActualWeight = 0;
 int delayTimeTFTActualWeight = 50;
-//bool newLoadCellDataReady = false;
-
-
 
 bool ifpathWifi = 0;
 bool ifpathWifiLogo = 0;
@@ -479,8 +470,6 @@ float oldWeightDisplayOff = 0;
 bool statusReadyToSave = 0;
 float lastDoseWeightCandidate = 0.0f;
 
-//unsigned long lastTimePrintTime = 0;
-//int delayTimePrintTime = 1000;
 tm timeinfo;
 time_t now;
 const char* NTP_SERVER = "de.pool.ntp.org";
@@ -1502,9 +1491,6 @@ void printLocalTime()
     return;
   }
   epocheTimeStamp = time(&now);
-  //Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
-  //Serial.println(epocheTimeStamp);
-
 }
 
 //##############################################################
@@ -1537,24 +1523,6 @@ void updateStopWatchForDisplay()
 // Einträge Datum, Sekunden, Minuten und Stunden werden komplett neu gezeichnet 
 void RedrawTFTStopWatch(){
   updateStopWatchForDisplay();
-  /*char stopWatchZehntelChar[4];
-  char stopWatchSSChar[4];
-  char stopWatchMMChar[4];
-  char stopWatchHHChar[4];
-  char stopWatchAllesChar[20];*/
-
-  /*String stopWatchZehntelString = String(stopWatchZehntel);
-  String stopWatchSSString = String(stopWatchSS) + '.';
-  String stopWatchMMString = String(stopWatchMM) + ':';
-  String stopWatchHHString = String(stopWatchHH) + ':';*/
-
-  /*sprintf(stopWatchZehntelChar, "%i", stopWatchZehntel);
-  sprintf(stopWatchSSChar, "%i", stopWatchSS);
-  sprintf(stopWatchMMChar, "%i", stopWatchMM);
-  sprintf(stopWatchHHChar, "%i", stopWatchHH);*/
-
-  //stopWatchAsString = (stopWatchMM < 10 ? "0" : "") + String(stopWatchMM) + (stopWatchMM < 10 ? "0" : "") + String(stopWatchMM) + (stopWatchSS < 10 ? "0" : "") + String(stopWatchSS) + String(stopWatchZehntel);
-  //stopWatchAsString = (stopWatchHH < 10 ? "0" : "") + stopWatchHHString + (stopWatchMM < 10 ? "0" : "") + stopWatchMMString + (stopWatchSS < 10 ? "0" : "") + stopWatchSSString + stopWatchZehntelString;
   char stopWatchAllesChar[22];
   sprintf(stopWatchAllesChar, "%02d:%02d:%02d.%i\n", stopWatchHH, stopWatchMM, stopWatchSS, stopWatchZehntel); //https://cplusplus.com/reference/cstdio/sprintf/
   oldStopWatchHH = stopWatchHH;                                                                                //https://cplusplus.com/reference/cstdio/printf/
@@ -1565,32 +1533,19 @@ void RedrawTFTStopWatch(){
   tft.setTextDatum(TR_DATUM); // Set datum to Top Right
   tft.setFreeFont(FSS12);                 // Select the font MonoSpace 9pt
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  //tft.drawString(stopWatchAsString,170,72,GFXFF);
   tft.drawString(stopWatchAllesChar,170,72,GFXFF);
 }
 
 void RefreshTFTStopWatch(){
 	
 updateStopWatchForDisplay();
-/*String stopWatchZehntelString = String(stopWatchZehntel);
-String stopWatchSSString = String(stopWatchSS) + ".";
-String stopWatchMMString = String(stopWatchMM) + ":";
-String stopWatchHHString = String(stopWatchHH) + ":";*/
-
-/*char stopWatchZehntelChar[4];
-  char stopWatchSSChar[4];
-  char stopWatchMMChar[4];
-  char stopWatchHHChar[4];
-  char stopWatchAllesChar[20];*/
 
 if(oldStopWatchHH != stopWatchHH){
-   //stopWatchAsString = (stopWatchHH < 10 ? "0" : "") + stopWatchHHString + (stopWatchMM < 10 ? "0" : "") + stopWatchMMString + (stopWatchSS < 10 ? "0" : "") + stopWatchSSString + stopWatchZehntelString;
    char stopWatchAllesChar[22];
    sprintf(stopWatchAllesChar, "%02d:%02d:%02d.%i\n", stopWatchHH, stopWatchMM, stopWatchSS, stopWatchZehntel);
    tft.setTextDatum(TR_DATUM); // Set datum to Top Right
   tft.setFreeFont(FSS12);                 // Select the font MonoSpace 12pt
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  //tft.drawString(stopWatchAsString,170,72,GFXFF);
   tft.drawString(stopWatchAllesChar,170,72,GFXFF);
    oldStopWatchHH = stopWatchHH;
    oldStopWatchMM = stopWatchMM;
@@ -1605,7 +1560,6 @@ if(oldStopWatchMM != stopWatchMM && oldStopWatchHH == stopWatchHH){
    tft.setTextDatum(TR_DATUM); // Set datum to Top Right
   tft.setFreeFont(FSS12);                 // Select the font MonoSpace 9pt
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  //tft.drawString(stopWatchAsString,170,72,GFXFF);
   tft.drawString(stopWatchAllesChar,170,72,GFXFF);
    oldStopWatchMM = stopWatchMM;
    oldStopWatchSS = stopWatchSS;
@@ -1619,8 +1573,7 @@ if(oldStopWatchSS != stopWatchSS && oldStopWatchMM == stopWatchMM && oldStopWatc
    tft.setTextDatum(TR_DATUM); // Set datum to Top Right
    tft.setFreeFont(FSS12);                 // Select the font MonoSpace 9pt
    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-   //tft.drawString(stopWatchAsString,170,72,GFXFF);
-   tft.drawString(stopWatchAllesChar,170,72,GFXFF);
+    tft.drawString(stopWatchAllesChar,170,72,GFXFF);
    oldStopWatchSS = stopWatchSS;
    oldStopWatchZehntel = stopWatchZehntel;
 }
@@ -1633,7 +1586,6 @@ if(oldStopWatchZehntel != stopWatchZehntel && oldStopWatchSS == stopWatchSS && o
    tft.setTextDatum(TR_DATUM); // Set datum to Top Right
   tft.setFreeFont(FSS12);                 // Select the font MonoSpace 9pt
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  //tft.drawString(stopWatchAsString,170,72,GFXFF);
   tft.drawString(stopWatchAllesChar,170,72,GFXFF);
    oldStopWatchZehntel = stopWatchZehntel;
 }
@@ -3093,12 +3045,6 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
           debug("MenueItem selected: "); //DEBUGGING: print which mode has been selected
           debugln(encoderPos); //DEBUGGING: print which mode has been selected
         }
-        /*
-        else {
-          debugln("Back-Button released"); // DEBUGGING: print that button has been opened
-          buttonPressedbuttonMiddle = 0;
-        }
-        */
       }  // end if debounce time up
     } // end of state change
   
@@ -3121,12 +3067,6 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
           buttonReleasedbuttonRight = 1;
           
         }
-        /*
-        else {
-          debugln("Back-Button released"); // DEBUGGING: print that button has been opened
-          buttonPressedbuttonMiddle = 0;
-        }
-        */
       }  // end if debounce time up
     } // end of state change
   
@@ -3193,11 +3133,6 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
     //#############################
     if  (pageID == 4)
     {
-      // encoderIncrement = encoderPos - oldEncPos;   Ist aus dem alten Code. Hier wird das Increment gleich übergeben.
-      ////debugln(encoderPos);
-
-        
-          //debug(encoderPos,DEC);
           debug("Increment = ");
           debug(encoderIncrement);
           setWeightST[selectedST] = oldsetWeightST[selectedST] + (encoderIncrement / 10);
@@ -3487,22 +3422,9 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
 
   if (callFunctionOfPage[0] == 1)
   {
-    if (menuItemPos == 2 /*&& statusrelaisGrind == 0*/)
+    if (menuItemPos == 2)
     { 
       callFunctionOfPage[0] = 0;
-      
-      /*
-      taraRequest = true;
-      RefreshTFTTaraWait();
-      debugln("doTara");
-      doTara();                              //taraRequest = false; ist in doTara() enthalten
-      if (taraRequest == false)
-      {
-        
-        callOfFunctionTerminated = 1;
-        RefreshTFTTaraFinished();
-      }
-      */
       callOfFunctionTerminated = 1;
     }
     else 
@@ -3676,73 +3598,6 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   if (callFunctionOfPage[8] == 1)
   { 
     callFunctionOfPage[8] = 0;
-    /*if (menuItemPos == 0)
-    {
-      if(!getLocalTime(&timeinfo, 0))
-    {
-    debugln("Failed to obtain time");
-    return;
-    }
-      if (lastTimeMuehlenReinigungNTP + delayTimeMuehlenReinigung >= time(&now))
-      {
-        tageBisMuehlenReinigung = (delayTimeMuehlenReinigung - (time(&now) - lastTimeMuehlenReinigungNTP))/86400;
-        menuentryTageReinigung = String("Reinigung in          ");
-        menuItemsOfPage[11][0] = menuentryTageReinigung;
-        DrawTFTTageBisReinigungMuehle();
-      }
-      if (lastTimeMuehlenReinigungNTP + delayTimeMuehlenReinigung < time(&now))
-      {
-        tageBisMuehlenReinigung = (time(&now) - (lastTimeMuehlenReinigungNTP + delayTimeMuehlenReinigung))/86400;
-        menuentryTageReinigung = String("faellig seit              ");
-        menuItemsOfPage[11][0] = menuentryTageReinigung;
-        DrawTFTTageBisReinigungMuehle();
-      }
-      
-    }
-    if (menuItemPos == 1)
-    {
-      if(!getLocalTime(&timeinfo, 0))
-    {
-    debugln("Failed to obtain time");
-    return;
-    }
-    if (lastTimeKaffeemReinigungNTP + delayTimeKaffeemReinigung >= time(&now))
-    {
-      tageBisKaffeemReinigung = (delayTimeKaffeemReinigung - (time(&now) - lastTimeKaffeemReinigungNTP))/86400;
-      menuentryTageReinigung = String("Reinigung in          ");
-      menuItemsOfPage[12][0] = menuentryTageReinigung;
-      DrawTFTTageBisReinigungKaffeem();
-    }
-    if (lastTimeKaffeemReinigungNTP + delayTimeKaffeemReinigung < time(&now))
-    {
-      tageBisKaffeemReinigung = (time(&now) - (lastTimeKaffeemReinigungNTP + delayTimeKaffeemReinigung))/86400;
-      menuentryTageReinigung = String("faellig seit              ");
-      menuItemsOfPage[12][0] = menuentryTageReinigung;
-      DrawTFTTageBisReinigungKaffeem();
-    }
-    }
-    if (menuItemPos == 2)
-    {
-      if(!getLocalTime(&timeinfo, 0))
-    {
-    debugln("Failed to obtain time");
-    return;
-    }
-      if (lastTimeFilterWechselNTP + delayTimeFilterWechsel >= time(&now))
-      {
-        tageBisFilterwechsel = (delayTimeFilterWechsel - (time(&now) - lastTimeFilterWechselNTP))/86400;
-        menuentryTageReinigung = String("Wechsel in             ");
-        menuItemsOfPage[13][0] = menuentryTageReinigung;
-        DrawTFTTageBisFilterwechsel();
-      }
-      if (lastTimeFilterWechselNTP + delayTimeFilterWechsel < time(&now))
-      {
-        tageBisFilterwechsel = (time(&now) - (lastTimeFilterWechselNTP + delayTimeFilterWechsel))/86400;
-        menuentryTageReinigung = String("faellig seit              ");
-        menuItemsOfPage[13][0] = menuentryTageReinigung;
-        DrawTFTTageBisFilterwechsel();
-      }
-    }*/
     callOfFunctionTerminated = 1;
   }
 
@@ -4044,17 +3899,6 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   
   RefreshTFTTime();
   
-  /*if (millis() - lastTimePrintTime > delayTimePrintTime)
-  {
-     printLocalTime();
-     lastTimePrintTime = millis();
-
-  }
-  */
-
-
- 
-
  if (WiFi.status() == WL_CONNECTED)
  {
   statuswlanConnected = 1;
