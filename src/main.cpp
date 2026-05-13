@@ -4078,110 +4078,36 @@ void setup()
 
 
 // ############################################
-// Read/Update savedValues with Preference
+// Read/Update savedValues with Preferences
 // ############################################
-  preferences.begin("savedValues", RO_MODE);
-  bool tpInit = preferences.isKey("nvsInitialised");       // Test for the existence
-                                                           // of the "already initialized" key.
-  if (tpInit == false) {
-   // If tpInit is 'false', the key "nvsInit" does not yet exist therefore this
-   //  must be our first-time run. We need to set up our Preferences namespace keys. So...
-   preferences.end();                             // close the namespace in RO mode and...
-   preferences.begin("savedValues", RW_MODE);        //  reopen it in RW mode.
-
-
-      // The .begin() method created the "STCPrefs" namespace and since this is our
-      //  first-time run we will create
-      //  our keys and store the initial "factory default" values.
-      preferences.putBytes("savedWeightST", weightST, sizeof(weightST) ); 
-      preferences.putBytes("savedWeightTri", weightTrichter, sizeof(weightTrichter) );
-      preferences.putBytes("savedWeightGef", weightGefaess, sizeof(weightGefaess) );
-      preferences.putBytes("svdSetWeightST", setWeightST, sizeof(setWeightST) );
-      preferences.putFloat("savedCalFact", calFactor);
-      preferences.putShort("savedSelST", selectedST);
-      preferences.putShort("savedSelGef", selectedGefaess);
-      preferences.putBool ("savedAutoDetect", autoDetect);
-      preferences.putFloat("savedCalWeight", setWeightCalibration);
-      preferences.putFloat("grndWghtFrvr", groundWeightForever);
-      preferences.putFloat("grndWghtCln", groundWeightSinceClean);
-      preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
-      preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
-      preferences.putULong("shotsFrvr", shotCounterForever);
-      preferences.putULong("shotsCln", shotCounterSinceClean);
-      preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
-      preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
-      preferences.putULong("lstMhlRngng", lastTimeMuehlenReinigungNTP);
-      preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
-      preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
-      //preferences.putFloat("grnLatency", grindLatency);
-      
-
-      preferences.putBool("nvsInitialised", true);          // Create the "already initialized"
-                                                            //  key and store a value.
-
-      // The "factory defaults" are created and stored so...
-      preferences.end();                                //  Close the namespace in RW mode and...
-      preferences.begin("savedValues", RO_MODE);        //  reopen it in RO mode so the setup code outside this first-time run 'if' block
-                                                        //  can retrieve the run-time values from the "STCPrefs" namespace.
-   }
-  
-   // Retrieve the operational parameters from the namespace
-   // and save them into their run-time variables.
-   preferences.getBytes("savedWeightST", weightST, preferences.getBytesLength("savedWeightST"));
-   preferences.getBytes("savedWeightTri", weightTrichter, preferences.getBytesLength("savedWeightTri"));
-   preferences.getBytes("svdSetWeightST", setWeightST, preferences.getBytesLength("svdSetWeightST"));
-   preferences.getBytes("savedWeightGef", weightGefaess, preferences.getBytesLength("savedWeightGef"));
-   calFactor                   = preferences.getFloat("savedCalFact");
-   selectedST                  = preferences.getShort("savedSelST");
-   selectedGefaess             = preferences.getShort("savedSelGef");
-   autoDetect                  = preferences.getBool("savedAutoDetect");
-   setWeightCalibration        = preferences.getFloat("savedCalWeight");
-   groundWeightForever         = preferences.getFloat("grndWghtFrvr", preferences.getULong("grndWghtFrvr", 0));
-   groundWeightSinceClean      = preferences.getFloat("grndWghtCln", preferences.getULong("grndWghtCln", 0));
-   groundWeightSinceMachineClean = preferences.getFloat("grndWghtKffm", 0.0f);
-   groundWeightSinceFilterChange = preferences.getFloat("grndWghtFlt", 0.0f);
-   shotCounterForever          = preferences.getULong("shotsFrvr", 0); 
-   shotCounterSinceClean       = preferences.getULong("shotsCln", 0);
-   shotCounterSinceMachineClean = preferences.getULong("shotsKffm", 0);
-   shotCounterSinceFilterChange = preferences.getULong("shotsFlt", 0);
-   bool statsV2Initialised      = preferences.getBool("statsV2Init", false);
-   lastTimeMuehlenReinigungNTP = preferences.getULong("lstMhlRngng", 0);
-   lastTimeKaffeemReinigungNTP = preferences.getULong("lstKffmRngng", 0);
-   lastTimeFilterWechselNTP    = preferences.getULong("lstFltwchsl", 0);
-   //grindLatency                = preferences.getFloat("grnLatency", 0.25);
-
-   //bool testprint = preferences.getBool("nvsInitialised");
-   debug("Nonvolatile Storage (NVS) initialized = ");
-   debugln(tpInit);
-  // All done. Last run state (or the factory default) is now restored.
-   preferences.end();                                      // Close our preferences namespace.
-
-   // Migration for stats fields added after the original counter system:
-   // Do not initialise machine/filter counters from total counters. If a previous
-   // firmware build already stored that wrong fallback, correct it once here.
-   if (!statsV2Initialised) {
-    groundWeightSinceMachineClean = 0.0f;
-    groundWeightSinceFilterChange = 0.0f;
-    shotCounterSinceMachineClean = 0;
-    shotCounterSinceFilterChange = 0;
-
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putFloat("grndWghtKffm", groundWeightSinceMachineClean);
-    preferences.putFloat("grndWghtFlt", groundWeightSinceFilterChange);
-    preferences.putULong("shotsKffm", shotCounterSinceMachineClean);
-    preferences.putULong("shotsFlt", shotCounterSinceFilterChange);
-    preferences.putBool("statsV2Init", true);
-    preferences.end();
-   }
-
-   /*if (grindLatency>2 || grindLatency<0)
-   {
-    grindLatency = 0.25;
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putFloat("grnLatency", grindLatency);
-    preferences.end();
-   }*/
-
+  const bool nvsInitialised = coffeeStorageLoadOrInit(
+    preferences,
+    weightST,
+    sizeof(weightST),
+    weightTrichter,
+    sizeof(weightTrichter),
+    weightGefaess,
+    sizeof(weightGefaess),
+    setWeightST,
+    sizeof(setWeightST),
+    calFactor,
+    selectedST,
+    selectedGefaess,
+    autoDetect,
+    setWeightCalibration,
+    groundWeightForever,
+    groundWeightSinceClean,
+    groundWeightSinceMachineClean,
+    groundWeightSinceFilterChange,
+    shotCounterForever,
+    shotCounterSinceClean,
+    shotCounterSinceMachineClean,
+    shotCounterSinceFilterChange,
+    lastTimeMuehlenReinigungNTP,
+    lastTimeKaffeemReinigungNTP,
+    lastTimeFilterWechselNTP);
+  debug("Nonvolatile Storage (NVS) initialized = ");
+  debugln(nvsInitialised);
 
   // #######################
   // Rotary encoder section of setup

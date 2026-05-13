@@ -66,3 +66,31 @@ void coffeeStorageSaveGefaessWeights(
   Preferences& preferences,
   const float* weightGefaess,
   size_t byteCount);
+
+
+bool coffeeStorageLoadOrInit(
+  Preferences& preferences,
+  float* weightST,
+  size_t weightSTByteCount,
+  float* weightTrichter,
+  size_t weightTrichterByteCount,
+  float* weightGefaess,
+  size_t weightGefaessByteCount,
+  float* setWeightST,
+  size_t setWeightSTByteCount,
+  float& calFactor,
+  uint8_t& selectedST,
+  uint8_t& selectedGefaess,
+  bool& autoDetect,
+  float& setWeightCalibration,
+  float& groundWeightForever,
+  float& groundWeightSinceClean,
+  float& groundWeightSinceMachineClean,
+  float& groundWeightSinceFilterChange,
+  uint32_t& shotCounterForever,
+  uint32_t& shotCounterSinceClean,
+  uint32_t& shotCounterSinceMachineClean,
+  uint32_t& shotCounterSinceFilterChange,
+  uint32_t& lastTimeMuehlenReinigungNTP,
+  uint32_t& lastTimeKaffeemReinigungNTP,
+  uint32_t& lastTimeFilterWechselNTP);
