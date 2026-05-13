@@ -2833,128 +2833,8 @@ void RefreshTFTDisplay()
 // Funktionen 
 //##############################################################
 
-/*
-void Grinding(){
-  //###############################
-// switchGrind wird gedrückt
-// 5 Fälle:
-// 1. Normales Mahlen starten: actualWeight < setWeight - 0.5 und statusrelaisGrind = 0 --> Relais wird angeschaltet bis actualWeight >= setWeight
-// 2. Unterbrechen des Mahlens: actualWeight < setWeight und switchGrind wird nochmal gedrückt und statusrelaisGrind = 1 --> Relais wird ausgeschaltet
-// 3. Nachmahlen, wenn Gewicht schon erreicht ist: actualWeight >= setWeight - 0.5 und switchGrind wird gedrückt und statusrelaisGrind = 0 --> Relais wird angeschaltet, solange switchGrind gedrückt wird
-// 4. Ausschalten Nachmahlen: actualWeight >= setWeight und switchGrind wird losgelassen und statusrelaisGrind = 1 --> Relais wird ausgeschaltet
-// 5. Ausschalten, wenn Gewicht erreicht ist: actualWeight >= setWeight und statusswitchGrindfell = 0 und statusrelaisGrind = 1 --> Relais wird ausgeschaltet
 
 
-if (buttonPressedbuttonRight)
-{ 
-  statusswitchGrindfell = 1;
-  buttonPressedbuttonRight = 0;                                                  // reset the button status so one press results in one action
-  statusswitchGrindrose = 0;
-} 
-
-if (buttonReleasedbuttonRight)
-{
-  statusswitchGrindrose = 1;
-  buttonReleasedbuttonRight = 0;
-}
-
-if (pageID == 0)
-{
- if (statusswitchGrindfell == 1 && statusrelaisGrind == 0)
- { 
-  // Fall 1: Normales Mahlen starten
-  if (actualWeight < setWeightST[selectedST] - 0.5)
-  {
-  startWeightGrinding = actualWeight;
-  
-  digitalWrite(relayMuehle, LOW);
-  debugln("Fall 1: Normales Mahlen");
-  statusrelaisGrind = 1;
-  statusswitchGrindfell = 0;
-  statusnormalGrind = 1;
-  RefreshFooter();
-  
-  }
-  // Fall 3: manuelles Nachmahlen
-  else
-  { 
-  startWeightGrinding = actualWeight;
-  digitalWrite(relayMuehle, LOW);
-  debugln("Fall 3: Nachmahlen gestartet");
-  statusrelaisGrind = 1;
-  statusswitchGrindfell = 0;
-  statusadditionalGrind = 1;
-  } 
- }
-}
-// Fall 2: Manuelles Unterbrechen des Mahlens
-if (pageID == 0)
-{
- if (actualWeight < setWeightST[selectedST] && statusswitchGrindfell == 1 && statusrelaisGrind == 1)
- {
-  digitalWrite(relayMuehle, HIGH);
-  debugln("Fall 2: Normales Mahlen manuell unterbrochen");
-  statusrelaisGrind = 0;
-  statusswitchGrindfell = 0;
-  statusnormalGrind = 0;
-  RefreshFooter();
-  lastTimeGrindingMeasurement = millis();
-  ifPathGrindingMeasurement = 1;                              // wird am Ende von Grinding() auf null gesetzt
- }
-}
-// Fall 4 Nachmahlen ausschalten
-if (pageID == 0)
-{
- if (actualWeight >= setWeightST[selectedST] && statusswitchGrindrose == 1 && statusrelaisGrind == 1 && statusadditionalGrind == 1)
- {
-  digitalWrite(relayMuehle, HIGH);
-  debugln("Fall 4: Nachmahlen beendet");
-  statusrelaisGrind = 0;
-  statusadditionalGrind = 0;
-  lastTimeGrindingMeasurement = millis();
-  ifPathGrindingMeasurement = 1;                              // wird am Ende von Grinding() auf null gesetzt  
- } 
-}
-// Fall 5: ausschalten, wenn Gewicht erreicht ist, muss auf jeder Seite passieren.
-if ((actualWeight >= (setWeightST[selectedST] - grindLatency)) && statusrelaisGrind == 1 && statusnormalGrind ==1)
-{ digitalWrite(relayMuehle, HIGH);
-  debugln("Fall 5: Gewicht erreicht");
-  statusrelaisGrind = 0;
-  statusnormalGrind = 0;
-  RefreshFooter();
-  lastTimeGrindingMeasurement = millis();
-  ifPathGrindingMeasurement = 1;                              // wird am Ende von Grinding() auf null gesetzt
-  if (actualWeight >= (setWeightST[selectedST] - 1))                // Shot wird erst gezählt, wenn mehr als setWeight -1 Gramm gemahlen worden sind.
-  {
-  shotCounterForever++;
-  shotCounterSinceClean++;
-  preferences.begin("savedValues", RW_MODE);// Preferences: ShotCounter
-  preferences.putULong ("shotsFrvr", shotCounterForever);
-  preferences.putULong ("shotsCln", shotCounterSinceClean);
-  preferences.end();
-  }
-} 
-
-if (millis()-lastTimeGrindingMeasurement >= delayTimeGrindingMeasurement && ifPathGrindingMeasurement == 1)
-{
-  stopWeightGrinding = actualWeight;
-  groundWeightForever = groundWeightForever + stopWeightGrinding - startWeightGrinding;
-  groundWeightSinceClean = groundWeightSinceClean + stopWeightGrinding - startWeightGrinding;
-  float newGrindLatency = grindLatency + stopWeightGrinding - setWeightST[selectedST];
-  if (newGrindLatency<=2 && newGrindLatency >=0)                                              // Absicherung: Wenn die neue grindLatency größer als 2 Gramm ist, nichts tun
-  {grindLatency = newGrindLatency;}
-  if (newGrindLatency>2 || newGrindLatency<0)
-  {grindLatency = 0.25;}
-  ifPathGrindingMeasurement = 0;
-  
-  preferences.begin("savedValues", RW_MODE);// Preferences: groundWeight
-  preferences.putULong ("grndWghtFrvr", groundWeightForever);
-  preferences.putULong ("grndWghtCln", groundWeightSinceClean);// in Preferences speichern
-  preferences.putFloat ("grnLatency", grindLatency);
-  preferences.end();
-}
-}
-*/
 
 void saveGrindResult(){
 
@@ -3763,10 +3643,6 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     debug(selectedGefaess);
     debug(" = ");
     debugln(menuItemsOfPage[0][1]);
-    //preferences.begin("savedValues", RW_MODE);
-    //preferences.putShort("savedSelGef", selectedGefaess);
-    //preferences.end(); 
-    //debugln("selected Gefaess saved");
     callOfFunctionTerminated = 1;
   }
   if (callFunctionOfPage[6] == 1)
@@ -3843,23 +3719,6 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     callOfFunctionTerminated = 1;
   }
 
-  /*if (callFunctionOfPage[9] == 1)  War das Auflegen des Trichters
-  {
-    
-    callFunctionOfPage[9] = 0;
-    weightTrichter[selectedST] = actualWeight - weightST[selectedST];
-    preferences.begin("savedValues", RW_MODE);
-    preferences.putBytes("savedWeightTri", weightTrichter, sizeof(weightTrichter) );
-    preferences.end();
-    debug("Selected ST = ");
-    debug(selectedST);
-    debug(" = ");
-    debugln(menuItemsOfPage[0][1]);
-    debug("Gewicht Trichter: ");
-    debugln(weightTrichter[selectedST]);
-    
-    callOfFunctionTerminated = 1;
-  }*/
 
   if (callFunctionOfPage[23] == 1)
   {
