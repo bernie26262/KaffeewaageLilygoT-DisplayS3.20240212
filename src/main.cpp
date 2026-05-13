@@ -3792,7 +3792,6 @@ void setup()
   oldsetWeightST[3] = setWeightST[3];
 
   pageID = 0;
-  //menuItemPos = 3;
   encoderPos = 3;
   oldEncPos = 3;
   encoderPosChanged = true;
