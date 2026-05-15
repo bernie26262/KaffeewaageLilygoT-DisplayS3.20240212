@@ -180,7 +180,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <div id="timerPage" class="page hidden">
   <section class="card">
     <div class="label">Stoppuhr</div>
-    <div class="value" id="stopwatch">00:00.0</div>
+    <div class="value" id="stopwatch">00:00:00:0</div>
     <div class="grid" style="margin-top: 12px;">
       <button id="swToggle" disabled>Start / Stop</button>
       <button id="swReset" disabled>Reset</button>
@@ -357,12 +357,26 @@ const fmtG = v => {
 };
 const fmtKg = g => (Number(g || 0) / 1000).toFixed(2);
 const fmtWholeG = g => String(Math.round(Number(g || 0)));
-const fmtTime = ms => {
+const pad2 = n => String(Math.max(0, Math.floor(Number(n) || 0))).padStart(2, '0');
+const fmtStopwatchTime = ms => {
   ms = Number(ms || 0);
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
   const d = Math.floor((ms % 1000) / 100);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${d}`;
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}:${d}`;
+};
+const fmtDayClockDuration = seconds => {
+  const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
+  const days = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const clock = `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+  if (days === 1) return `1 Tag, ${clock}`;
+  if (days > 1) return `${days} Tage, ${clock}`;
+  return clock;
 };
 const fmtDateTime = (epoch, valid) => {
   if (!valid || !epoch) return 'nicht synchronisiert';
@@ -371,16 +385,7 @@ const fmtDateTime = (epoch, valid) => {
     hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
 };
-const fmtUptime = ms => {
-  let sec = Math.floor(Number(ms || 0) / 1000);
-  const d = Math.floor(sec / 86400); sec %= 86400;
-  const h = Math.floor(sec / 3600); sec %= 3600;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  if (d > 0) return `${d} d ${h} h ${m} min`;
-  if (h > 0) return `${h} h ${m} min`;
-  return `${m} min ${s} s`;
-};
+const fmtUptime = ms => fmtDayClockDuration(Math.floor(Number(ms || 0) / 1000));
 
 // ===== Navigation / Log =====
 function addLog(msg) {
@@ -690,17 +695,7 @@ function openStatsTotalsWizard() {
 
 // ===== Wartung =====
 function fmtDuration(seconds) {
-  const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-
-  const dayLabel = days === 1 ? 'Tag' : 'Tagen';
-  const hourLabel = hours === 1 ? 'Stunde' : 'Stunden';
-  const minuteLabel = minutes === 1 ? 'Minute' : 'Minuten';
-  const secondLabel = secs === 1 ? 'Sekunde' : 'Sekunden';
-  return `${days} ${dayLabel}, ${hours} ${hourLabel}, ${minutes} ${minuteLabel}, ${secs} ${secondLabel}`;
+  return fmtDayClockDuration(seconds);
 }
 
 function maintenanceLine(label, secondsToDue) {
@@ -834,7 +829,7 @@ function currentStopwatchMs() {
 }
 
 function renderStopwatch() {
-  el('stopwatch').textContent = fmtTime(currentStopwatchMs());
+  el('stopwatch').textContent = fmtStopwatchTime(currentStopwatchMs());
   el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
 }
 
