@@ -58,6 +58,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .autodetect-led.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.18), 0 0 10px rgba(34,197,94,.65); }
     .weight { font-size: 4rem; line-height: 1; font-weight: 750; letter-spacing: -0.06em; margin: 12px 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
     .weight .unit { font-size: 2rem; letter-spacing: 0; margin-left: 6px; }
+    .scale-controls { display: grid; gap: 12px; margin-top: 14px; }
+    .scale-target-row, .scale-select-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .scale-target-row .label, .scale-select-row .label { min-width: 92px; }
     .weight-footer { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
     .weight-info { min-width: 0; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -85,6 +88,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
     .dashboard-settings-list { gap: 4px; margin-top: 6px; line-height: 1.25; }
     .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
+    .settings-section { display: grid; gap: 10px; }
+    .settings-section-title { margin: 4px 2px 0; color: #6b7280; font-size: .82rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .settings-section-hint { margin: -2px 2px 2px; color: #6b7280; font-size: .86rem; }
     .gefaess-list { display: grid; gap: 8px; margin-top: 10px; }
     .gefaess-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #f3f4f6; }
     .gefaess-row:last-child { border-bottom: 0; }
@@ -131,32 +137,38 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <section class="card">
     <div class="label">Gewicht</div>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
-    <div class="weight-footer">
-      <div class="weight-info small">
-        <span style="display:none">Status: <b><span id="status">---</span></b></span>
-        Siebträger:
+    <span style="display:none">Status: <b><span id="status">---</span></b></span>
+
+    <div class="scale-controls">
+      <div class="scale-target-row small">
+        <span class="label">Sollgewicht</span>
+        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
+        <span>g</span>
+        <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem;">Speichern</button>
+      </div>
+
+      <div class="button-row">
+        <button id="tare" class="compact secondary">Tara</button>
+        <button id="save" class="compact" disabled>Save Dose</button>
+      </div>
+
+      <div class="autodetect-row small" style="margin-bottom: 0; padding-bottom: 0; border-bottom: 0;">
+        <span>Autodetect</span>
+        <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
+          <span id="autodetectLed" class="autodetect-led"></span>
+          <span id="autodetectStatus">---</span>
+        </button>
+      </div>
+
+      <div class="scale-select-row small">
+        <span class="label">Siebträger</span>
         <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
           <option value="0">Bodenloser ST</option>
           <option value="1">1er-Siebträger</option>
           <option value="2">2er-Siebträger</option>
           <option value="3">Custom-ST</option>
-        </select><br>
-        Sollgewicht:
-        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
-        g
-        <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem; margin-left: 6px;">Speichern</button>
+        </select>
       </div>
-      <div class="button-row">
-        <button id="tare" class="compact secondary">Tara</button>
-        <button id="save" class="compact" disabled>Save Dose</button>
-      </div>
-    </div>
-    <div class="autodetect-row small" style="margin-top: 14px; margin-bottom: 0; padding-top: 10px; padding-bottom: 0; border-top: 1px solid #f3f4f6; border-bottom: 0;">
-      <span>Autodetect</span>
-      <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
-        <span id="autodetectLed" class="autodetect-led"></span>
-        <span id="autodetectStatus">---</span>
-      </button>
     </div>
   </section>
   </div>
@@ -204,55 +216,65 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="settingsPage" class="page hidden">
-  <section id="maintenanceDetailCard" class="card maintenance ok show">
-    <div class="stats-title">Wartung</div>
-    <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
-    <ul class="maintenance-list" id="maintenanceDetailList"></ul>
-    <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
-    <div class="settings-actions">
-      <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
-      <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
-      <button id="resetFilter" class="secondary">Filter gewechselt</button>
-    </div>
-  </section>
+  <div class="settings-section">
+    <div class="settings-section-title">Wartung</div>
+    <div class="settings-section-hint">Häufig genutzte Wartungsanzeigen und Reset-Funktionen.</div>
+    <section id="maintenanceDetailCard" class="card maintenance ok show">
+      <div class="stats-title">Wartung</div>
+      <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
+      <ul class="maintenance-list" id="maintenanceDetailList"></ul>
+      <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
+      <div class="settings-actions">
+        <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
+        <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
+        <button id="resetFilter" class="secondary">Filter gewechselt</button>
+      </div>
+    </section>
+  </div>
 
-  <section class="card">
-    <div class="stats-title">Gesamtwerte</div>
-    <div class="small">Gesamtzahl Shots und Gesamtgewicht Mahlgut manuell korrigieren.</div>
-    <div class="settings-list small" style="margin-top: 12px;">
-      <div>Gesamtzahl Shots: <b id="statsTotalShotsView">0</b></div>
-      <div>Gesamtgewicht Mahlgut: <b id="statsTotalGroundView">0,0 g</b></div>
-    </div>
-    <div class="settings-actions" style="margin-top: 12px;">
-      <button id="openStatsTotals" class="secondary">Gesamtwerte ändern</button>
-    </div>
-  </section>
+  <div class="settings-section">
+    <div class="settings-section-title">Waage & Gefäße</div>
+    <section class="card">
+      <div class="stats-title">Waage kalibrieren</div>
+      <div class="small">Geführter Assistent zum Tarieren, Eingeben des Kalibriergewichts und Speichern des Kalibrierfaktors.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
+      </div>
+    </section>
 
-  <section class="card">
-    <div class="stats-title">Waage kalibrieren</div>
-    <div class="small">Geführter Assistent zum Tarieren, Eingeben des Kalibriergewichts und Speichern des Kalibrierfaktors.</div>
-    <div class="settings-actions" style="margin-top: 12px;">
-      <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
-    </div>
-  </section>
+    <section class="card">
+      <div class="stats-title">Gefäße einmessen</div>
+      <div class="small">Gespeicherte Gefäßgewichte für Autodetect.</div>
+      <div id="gefaessList" class="gefaess-list"></div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openMeasureGefaess" class="secondary">Gefäß einmessen</button>
+      </div>
+    </section>
+  </div>
 
-  <section class="card">
-    <div class="stats-title">Gefäße einmessen</div>
-    <div class="small">Gespeicherte Gefäßgewichte für Autodetect.</div>
-    <div id="gefaessList" class="gefaess-list"></div>
-    <div class="settings-actions" style="margin-top: 12px;">
-      <button id="openMeasureGefaess" class="secondary">Gefäß einmessen</button>
-    </div>
-  </section>
+  <div class="settings-section">
+    <div class="settings-section-title">System / OTA</div>
+    <section class="card">
+      <div class="stats-title">Gesamtwerte</div>
+      <div class="small">Gesamtzahl Shots und Gesamtgewicht Mahlgut manuell korrigieren.</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>Gesamtzahl Shots: <b id="statsTotalShotsView">0</b></div>
+        <div>Gesamtgewicht Mahlgut: <b id="statsTotalGroundView">0,0 g</b></div>
+      </div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openStatsTotals" class="secondary">Gesamtwerte ändern</button>
+      </div>
+    </section>
 
-  <section class="card">
-    <div class="stats-title">System</div>
-    <div class="small">Firmware-Update und Neustart.</div>
-    <div class="settings-actions" style="margin-top: 12px;">
-      <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
-      <button id="restartDevice" class="danger">ESP32 neu starten</button>
-    </div>
-  </section>
+    <section class="card">
+      <div class="stats-title">System</div>
+      <div class="small">Firmware-Update und Neustart.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
+        <button id="restartDevice" class="danger">ESP32 neu starten</button>
+      </div>
+    </section>
+  </div>
 
   </div>
 
