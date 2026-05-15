@@ -94,6 +94,29 @@ pio run -e KaffeewaageLilygoT-DisplayS3_20240212 -t buildfs
 4. per Button neu starten
 5. Icon-/Manifest-URLs pruefen
 
+
+### OTA-Dateinamen-Schutz
+
+Falsche Datei im Firmware-Feld:
+
+1. `spiffs.bin` oder `littlefs.bin` im Firmware-Feld auswaehlen
+2. Erwartung: Meldung `Firmware: falsche Datei gewaehlt. Erwartet: firmware.bin.`
+3. Upload-Klick
+4. Erwartung: Upload wird clientseitig blockiert
+
+Falsche Datei im SPIFFS-Feld:
+
+1. `firmware.bin` im SPIFFS-/Dateisystem-Feld auswaehlen
+2. Erwartung: Meldung `SPIFFS: falsche Datei gewaehlt. Erwartet: spiffs.bin oder littlefs.bin.`
+3. Upload-Klick
+4. Erwartung: Upload wird clientseitig blockiert
+
+Serverseitiger Schutz:
+
+- Falls ein Upload die WebUI-Pruefung umgehen wuerde, muss der ESP mit HTTP 400 antworten.
+- Firmware-Endpunkt akzeptiert nur `firmware.bin`.
+- Dateisystem-Endpunkt akzeptiert nur `spiffs.bin` oder `littlefs.bin`.
+
 ## Storage-/Preferences-Test
 
 Nach Storage-Aenderungen pruefen:

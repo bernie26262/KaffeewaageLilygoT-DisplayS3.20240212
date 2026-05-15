@@ -88,6 +88,29 @@ Sie bietet getrennte Uploads fuer:
 
 Nach erfolgreichem Upload wird kein automatischer Neustart ausgefuehrt. Dadurch kann erst geprueft werden, ob der Upload erfolgreich war. Danach wird per Button neu gestartet.
 
+## OTA-Dateinamen-Schutz
+
+Die OTA-Seite prueft die ausgewaehlten Dateinamen doppelt:
+
+1. clientseitig in der WebUI direkt bei der Dateiauswahl und erneut beim Upload-Klick
+2. ESP-seitig im Upload-Handler, bevor `Update.begin(...)` aufgerufen wird
+
+Erlaubte Dateinamen:
+
+| Upload-Feld | erlaubte Datei |
+|---|---|
+| Firmware | `firmware.bin` |
+| SPIFFS/Dateisystem | `spiffs.bin` oder `littlefs.bin` |
+
+Bei falschem Dateinamen wird der Upload blockiert. ESP-seitig antwortet der Handler mit HTTP 400 und einer erklaerenden Meldung. Dadurch wird verhindert, dass versehentlich `spiffs.bin` als Firmware oder `firmware.bin` als Dateisystem-Image geschrieben wird.
+
+Details und Testfaelle stehen in:
+
+```text
+docs/ota_filename_validation.md
+```
+
+
 ## Firmware bauen
 
 ```powershell

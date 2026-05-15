@@ -6,6 +6,8 @@
 
 static bool otaRebootRequested = false;
 static unsigned long otaRebootRequestMs = 0;
+static bool otaUploadRejected = false;
+static String otaUploadRejectReason;
 
 static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -29,6 +31,7 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
     code { background: #edf2f7; padding: 2px 5px; border-radius: 4px; }
     progress { width: 100%; height: 22px; margin-top: 12px; }
     .status { min-height: 1.4em; margin-top: 10px; font-weight: bold; }
+    .file-check { min-height: 1.4em; margin-top: 6px; font-size: 0.92rem; }
     .reboot-panel { display: none; border: 1px solid #bbf7d0; border-radius: 10px; padding: 16px; margin: 16px 0; background: #f0fdf4; }
     .reboot-panel.visible { display: block; }
     .ok { color: #047857; }
@@ -44,8 +47,9 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
     <div class="card">
       <h2>Firmware aktualisieren</h2>
       <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/firmware.bin</code></p>
-      <form class="ota-form" method="POST" action="/update/firmware" enctype="multipart/form-data" data-label="Firmware">
+      <form class="ota-form" method="POST" action="/update/firmware" enctype="multipart/form-data" data-label="Firmware" data-expected="firmware.bin">
         <input type="file" name="update" accept=".bin" required>
+        <div class="file-check"></div>
         <button class="danger" type="submit">Firmware hochladen</button>
         <progress value="0" max="100" hidden></progress>
         <div class="status"></div>
@@ -55,8 +59,9 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
     <div class="card">
       <h2>Dateisystem aktualisieren</h2>
       <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/spiffs.bin</code></p>
-      <form class="ota-form" method="POST" action="/update/filesystem" enctype="multipart/form-data" data-label="SPIFFS">
+      <form class="ota-form" method="POST" action="/update/filesystem" enctype="multipart/form-data" data-label="SPIFFS" data-expected="spiffs.bin,littlefs.bin">
         <input type="file" name="update" accept=".bin" required>
+        <div class="file-check"></div>
         <button type="submit">SPIFFS hochladen</button>
         <progress value="0" max="100" hidden></progress>
         <div class="status"></div>
@@ -77,6 +82,39 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
     function setStatus(el, text, cls) {
       el.textContent = text;
       el.className = 'status ' + (cls || '');
+    }
+
+    function setFileCheck(el, text, cls) {
+      if (!el) return;
+      el.textContent = text;
+      el.className = 'file-check ' + (cls || '');
+    }
+
+    function expectedNamesFor(form) {
+      return (form.dataset.expected || '')
+        .split(',')
+        .map(function(name) { return name.trim().toLowerCase(); })
+        .filter(Boolean);
+    }
+
+    function validateSelectedFile(form, fileInput, fileCheck) {
+      var names = expectedNamesFor(form);
+      var file = fileInput.files && fileInput.files[0];
+      var label = form.dataset.label || 'Update';
+
+      if (!file) {
+        setFileCheck(fileCheck, '', '');
+        return false;
+      }
+
+      var selected = (file.name || '').toLowerCase();
+      if (names.indexOf(selected) === -1) {
+        setFileCheck(fileCheck, label + ': falsche Datei gewaehlt. Erwartet: ' + names.join(' oder ') + '.', 'err');
+        return false;
+      }
+
+      setFileCheck(fileCheck, label + ': Datei passt (' + file.name + ').', 'ok');
+      return true;
     }
 
     var rebootButton = document.getElementById('reboot-button');
@@ -105,17 +143,28 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
     }
 
     document.querySelectorAll('.ota-form').forEach(function(form) {
+      var fileInput = form.querySelector('input[type=file]');
+      var button = form.querySelector('button');
+      var progress = form.querySelector('progress');
+      var status = form.querySelector('.status');
+      var fileCheck = form.querySelector('.file-check');
+      var label = form.dataset.label || 'Update';
+
+      fileInput.addEventListener('change', function() {
+        validateSelectedFile(form, fileInput, fileCheck);
+      });
+
       form.addEventListener('submit', function(e) {
         e.preventDefault();
 
-        var fileInput = form.querySelector('input[type=file]');
-        var button = form.querySelector('button');
-        var progress = form.querySelector('progress');
-        var status = form.querySelector('.status');
-        var label = form.dataset.label || 'Update';
-
         if (!fileInput.files.length) {
-          setStatus(status, 'Bitte zuerst eine Datei auswählen.', 'err');
+          setStatus(status, 'Bitte zuerst eine .bin-Datei auswaehlen.', 'err');
+          setFileCheck(fileCheck, '', '');
+          return;
+        }
+
+        if (!validateSelectedFile(form, fileInput, fileCheck)) {
+          setStatus(status, label + '-Upload blockiert: falsche Datei ausgewaehlt.', 'err');
           return;
         }
 
@@ -174,10 +223,25 @@ static void onUpdateRequest(AsyncWebServerRequest *request) {
 }
 
 static void onUpdateFinished(AsyncWebServerRequest *request) {
+  if (otaUploadRejected) {
+    const String message = otaUploadRejectReason.length()
+      ? otaUploadRejectReason
+      : String("Update abgelehnt: falscher Dateiname.");
+    otaUploadRejected = false;
+    otaUploadRejectReason = String();
+
+    AsyncWebServerResponse *response = request->beginResponse(400, "text/plain", message);
+    response->addHeader("Connection", "close");
+    request->send(response);
+    return;
+  }
+
   const bool ok = !Update.hasError();
-  request->send(200, "text/plain", ok
+  AsyncWebServerResponse *response = request->beginResponse(ok ? 200 : 500, "text/plain", ok
     ? "Update erfolgreich eingespielt. Neustart erforderlich."
     : "Update fehlgeschlagen. Details siehe serieller Monitor.");
+  response->addHeader("Connection", "close");
+  request->send(response);
 }
 
 static void onUpdateRebootRequest(AsyncWebServerRequest *request) {
@@ -187,14 +251,38 @@ static void onUpdateRebootRequest(AsyncWebServerRequest *request) {
   coffeeOtaRequestReboot();
 }
 
+static bool isExpectedOtaFilename(const String& filename, const char* expected1, const char* expected2 = nullptr) {
+  String lower = filename;
+  lower.toLowerCase();
+  return lower == expected1 || (expected2 && lower == expected2);
+}
+
+static void rejectOtaUpload(const String& filename, const String& expected) {
+  otaUploadRejected = true;
+  otaUploadRejectReason = String("Update abgelehnt: falsche Datei '") + filename + "'. Erwartet: " + expected + ".";
+  Serial.println(otaUploadRejectReason);
+}
+
 static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
   (void)request;
   if (index == 0) {
+    otaUploadRejected = false;
+    otaUploadRejectReason = String();
+
+    if (!isExpectedOtaFilename(filename, "firmware.bin")) {
+      rejectOtaUpload(filename, "firmware.bin");
+      return;
+    }
+
     Serial.print("Firmware update started: ");
     Serial.println(filename);
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
       Update.printError(Serial);
     }
+  }
+
+  if (otaUploadRejected) {
+    return;
   }
 
   if (!Update.hasError()) {
@@ -216,12 +304,24 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
 static void handleFilesystemUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
   (void)request;
   if (index == 0) {
+    otaUploadRejected = false;
+    otaUploadRejectReason = String();
+
+    if (!isExpectedOtaFilename(filename, "spiffs.bin", "littlefs.bin")) {
+      rejectOtaUpload(filename, "spiffs.bin oder littlefs.bin");
+      return;
+    }
+
     Serial.print("SPIFFS update started: ");
     Serial.println(filename);
     SPIFFS.end();
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
       Update.printError(Serial);
     }
+  }
+
+  if (otaUploadRejected) {
+    return;
   }
 
   if (!Update.hasError()) {

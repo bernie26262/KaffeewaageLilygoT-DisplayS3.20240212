@@ -87,6 +87,7 @@ Details stehen im Ordner `docs/`:
 
 - `docs/architecture.md`
 - `docs/webui-pwa-ota.md`
+- `docs/ota_filename_validation.md`
 - `docs/storage.md`
 - `docs/test-plan.md`
 
@@ -96,6 +97,7 @@ Bereits erledigt:
 
 - PWA-/Homescreen-Icons integriert
 - OTA-Komponente ausgelagert
+- OTA-Dateinamen-Schutz fuer Firmware- und SPIFFS-Uploads integriert
 - Storage-Komponente eingefuehrt
 - alte direkte Preferences-Kommentarreste aus `main.cpp` entfernt
 - alter Kaninchenheizung-Web-Placeholder-Processor entfernt
