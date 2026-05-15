@@ -92,6 +92,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .gefaess-missing { color: #6b7280; }
     .page { display: grid; gap: 14px; }
     .page.hidden { display: none; }
+    .tab-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+    .tab-button { width: 100%; min-width: 0; padding: 11px 8px; border-radius: 14px; font-size: .92rem; background: #e5e7eb; color: #374151; }
+    .tab-button.active { background: #92400e; color: #fff; }
     .nav-button { width: auto; min-width: 150px; padding: 10px 14px; font-size: .95rem; }
     /* ===== Overlay / Wizard ===== */
     .modal-backdrop { position: fixed; inset: 0; display: none; place-items: center; padding: 18px; background: rgba(17, 24, 39, .55); z-index: 1000; }
@@ -105,7 +108,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .wizard-note { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 12px; margin: 12px 0; font-size: .92rem; color: #374151; }
     .wizard-note.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
     .danger { background: #dc2626; }
-    @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .weight { font-size: 3.4rem; } button.compact, .button-row, .nav-button { width: 100%; } .modal-actions { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .grid, .stats-grid { grid-template-columns: 1fr; } .tab-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); } .weight { font-size: 3.4rem; } button.compact, .button-row, .nav-button { width: 100%; } .modal-actions { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -115,15 +118,17 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <span id="ws" class="pill">WS getrennt</span>
   </section>
 
-  <div id="dashboardPage" class="page">
   <section class="card">
-    <div class="autodetect-row small">
-      <span>Autodetect</span>
-      <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
-        <span id="autodetectLed" class="autodetect-led"></span>
-        <span id="autodetectStatus">---</span>
-      </button>
-    </div>
+    <nav class="tab-nav" aria-label="Hauptnavigation">
+      <button class="tab-button active" type="button" data-tab="scalePage">Waage</button>
+      <button class="tab-button" type="button" data-tab="timerPage">Stoppuhr</button>
+      <button class="tab-button" type="button" data-tab="statsPage">Statistik</button>
+      <button class="tab-button" type="button" data-tab="settingsPage">Einstellungen</button>
+    </nav>
+  </section>
+
+  <div id="scalePage" class="page">
+  <section class="card">
     <div class="label">Gewicht</div>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
     <div class="weight-footer">
@@ -146,13 +151,17 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="save" class="compact" disabled>Save Dose</button>
       </div>
     </div>
+    <div class="autodetect-row small" style="margin-top: 14px; margin-bottom: 0; padding-top: 10px; padding-bottom: 0; border-top: 1px solid #f3f4f6; border-bottom: 0;">
+      <span>Autodetect</span>
+      <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
+        <span id="autodetectLed" class="autodetect-led"></span>
+        <span id="autodetectStatus">---</span>
+      </button>
+    </div>
   </section>
+  </div>
 
-  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
-    <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
-    <ul class="maintenance-list" id="maintenanceList"></ul>
-  </section>
-
+  <div id="timerPage" class="page hidden">
   <section class="card">
     <div class="label">Stoppuhr</div>
     <div class="value" id="stopwatch">00:00.0</div>
@@ -160,6 +169,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <button id="swToggle" disabled>Start / Stop</button>
       <button id="swReset" disabled>Reset</button>
     </div>
+  </section>
+  </div>
+
+  <div id="statsPage" class="page hidden">
+  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
+    <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
+    <ul class="maintenance-list" id="maintenanceList"></ul>
   </section>
 
   <section class="card">
@@ -183,21 +199,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div>Datum/Zeit: <b class="mono" id="datetime">---</b></div>
       <div>Uptime: <b class="mono" id="uptime">---</b></div>
       <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="stats-title">Einstellungen</div>
-    <div class="settings-list dashboard-settings-list small">
-      <div>Wartung zurücksetzen</div>
-      <div>Waage kalibrieren</div>
-      <div>Gefäße einmessen</div>
-      <div>Gesamtwerte bearbeiten</div>
-      <div>OTA-Update</div>
-      <div>Neustart</div>
-    </div>
-    <div class="button-row" style="margin-top: 12px;">
-      <button id="openSettings" class="nav-button secondary">Einstellungen öffnen</button>
     </div>
   </section>
   </div>
@@ -253,9 +254,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </div>
   </section>
 
-  <div class="button-row">
-    <button id="backDashboard" class="nav-button">Zurück zum Dashboard</button>
-  </div>
   </div>
 
   <div id="confirmOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
@@ -356,9 +354,15 @@ function addLog(msg) {
   el('log').textContent = `${now}  ${msg}`;
 }
 
-function showSettings(show) {
-  el('dashboardPage').classList.toggle('hidden', show);
-  el('settingsPage').classList.toggle('hidden', !show);
+function showTab(targetPageId) {
+  ['scalePage', 'timerPage', 'statsPage', 'settingsPage'].forEach(pageId => {
+    el(pageId).classList.toggle('hidden', pageId !== targetPageId);
+  });
+  document.querySelectorAll('.tab-button').forEach(button => {
+    const active = button.dataset.tab === targetPageId;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-current', active ? 'page' : 'false');
+  });
 
   // Beim Seitenwechsel immer oben starten.
   // Sonst bleibt die Scrollposition der vorherigen Seite erhalten.
@@ -989,9 +993,13 @@ function bindDashboardHandlers() {
   el('autodetectToggle').addEventListener('click', handleAutodetectToggleClick);
 }
 
+function bindNavigationHandlers() {
+  document.querySelectorAll('.tab-button').forEach(button => {
+    button.addEventListener('click', () => showTab(button.dataset.tab));
+  });
+}
+
 function bindSettingsHandlers() {
-  el('openSettings').addEventListener('click', () => showSettings(true));
-  el('backDashboard').addEventListener('click', () => showSettings(false));
   el('openCalibrate').addEventListener('click', openCalibrationWizard);
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
@@ -1048,6 +1056,7 @@ function startClientTimers() {
 
 function initWebUi() {
   bindDashboardHandlers();
+  bindNavigationHandlers();
   bindSettingsHandlers();
   bindOverlayHandlers();
   startClientTimers();
