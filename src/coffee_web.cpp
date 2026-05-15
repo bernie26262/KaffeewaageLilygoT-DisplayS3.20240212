@@ -133,7 +133,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
     <div class="weight-footer">
       <div class="weight-info small">
-        Status: <b><span id="status">---</span></b><br>
+        <span style="display:none">Status: <b><span id="status">---</span></b></span>
         Siebträger:
         <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
           <option value="0">Bodenloser ST</option>
