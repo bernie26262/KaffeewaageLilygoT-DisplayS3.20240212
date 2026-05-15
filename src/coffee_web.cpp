@@ -89,6 +89,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .dashboard-settings-list { gap: 4px; margin-top: 6px; line-height: 1.25; }
     .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
     .settings-section { display: grid; gap: 10px; }
+    .settings-section.hidden { display: none; }
+    .settings-subnav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .settings-tab-button { width: 100%; min-width: 0; padding: 10px 8px; border-radius: 14px; font-size: .86rem; background: #e5e7eb; color: #374151; }
+    .settings-tab-button.active { background: #92400e; color: #fff; }
     .settings-section-title { margin: 4px 2px 0; color: #6b7280; font-size: .82rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
     .settings-section-hint { margin: -2px 2px 2px; color: #6b7280; font-size: .86rem; }
     .gefaess-list { display: grid; gap: 8px; margin-top: 10px; }
@@ -128,7 +132,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <nav class="tab-nav" aria-label="Hauptnavigation">
       <button class="tab-button active" type="button" data-tab="scalePage">Waage</button>
       <button class="tab-button" type="button" data-tab="timerPage">Stoppuhr</button>
-      <button class="tab-button" type="button" data-tab="statsPage">Statistik</button>
+      <button class="tab-button" type="button" data-tab="statsPage">Daten</button>
       <button class="tab-button" type="button" data-tab="settingsPage">Einstellungen</button>
     </nav>
   </section>
@@ -216,7 +220,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="settingsPage" class="page hidden">
-  <div class="settings-section">
+  <section class="card">
+    <nav class="settings-subnav" aria-label="Einstellungen">
+      <button class="settings-tab-button active" type="button" data-settings-tab="settingsMaintenancePanel">Wartung</button>
+      <button class="settings-tab-button" type="button" data-settings-tab="settingsScalePanel">Waage & Gefäße</button>
+      <button class="settings-tab-button" type="button" data-settings-tab="settingsSystemPanel">System / OTA</button>
+    </nav>
+  </section>
+
+  <div id="settingsMaintenancePanel" class="settings-section">
     <div class="settings-section-title">Wartung</div>
     <div class="settings-section-hint">Häufig genutzte Wartungsanzeigen und Reset-Funktionen.</div>
     <section id="maintenanceDetailCard" class="card maintenance ok show">
@@ -232,7 +244,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </section>
   </div>
 
-  <div class="settings-section">
+  <div id="settingsScalePanel" class="settings-section hidden">
     <div class="settings-section-title">Waage & Gefäße</div>
     <section class="card">
       <div class="stats-title">Waage kalibrieren</div>
@@ -252,7 +264,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </section>
   </div>
 
-  <div class="settings-section">
+  <div id="settingsSystemPanel" class="settings-section hidden">
     <div class="settings-section-title">System / OTA</div>
     <section class="card">
       <div class="stats-title">Gesamtwerte</div>
@@ -389,6 +401,17 @@ function showTab(targetPageId) {
   // Beim Seitenwechsel immer oben starten.
   // Sonst bleibt die Scrollposition der vorherigen Seite erhalten.
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
+function showSettingsTab(targetPanelId) {
+  ['settingsMaintenancePanel', 'settingsScalePanel', 'settingsSystemPanel'].forEach(panelId => {
+    el(panelId).classList.toggle('hidden', panelId !== targetPanelId);
+  });
+  document.querySelectorAll('.settings-tab-button').forEach(button => {
+    const active = button.dataset.settingsTab === targetPanelId;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-current', active ? 'page' : 'false');
+  });
 }
 
 // ===== Bestaetigungs-Overlay =====
@@ -1018,6 +1041,9 @@ function bindDashboardHandlers() {
 function bindNavigationHandlers() {
   document.querySelectorAll('.tab-button').forEach(button => {
     button.addEventListener('click', () => showTab(button.dataset.tab));
+  });
+  document.querySelectorAll('.settings-tab-button').forEach(button => {
+    button.addEventListener('click', () => showSettingsTab(button.dataset.settingsTab));
   });
 }
 
