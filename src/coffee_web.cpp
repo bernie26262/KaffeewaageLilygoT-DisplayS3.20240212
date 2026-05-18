@@ -2,6 +2,8 @@
 #include <ArduinoJson.h>
 #include <SPIFFS.h>
 
+#include "coffee_wifi.h"
+
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
 
@@ -468,6 +470,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <section class="card">
       <div class="stats-title">System</div>
       <div class="small">Firmware-Update und Neustart.</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>WLAN: <b id="wifiStatus">---</b></div>
+        <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
+        <div>Quelle: <b id="wifiCredentialSource">---</b></div>
+        <div>Gespeichert in NVS: <b id="wifiStoredCredentials">---</b></div>
+      </div>
       <div class="settings-actions" style="margin-top: 12px;">
         <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
         <button id="restartDevice" class="danger">ESP32 neu starten</button>
@@ -1082,6 +1090,10 @@ function renderStatsAndSystem(s) {
   setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));
   setText('uptime', fmtUptime(s.system?.uptime_ms));
   setText('ip', s.system?.ip || location.hostname);
+  setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
+  setText('wifiSsid', s.system?.wifi_ssid || '---');
+  setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
+  setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
 }
 
 function renderActionAvailability(s) {
@@ -1528,6 +1540,9 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi"] = s.system.wifi_connected;
   doc["system"]["ip"] = s.system.ip;
   doc["system"]["uptime_ms"] = s.system.uptime_ms;
+  doc["system"]["wifi_ssid"] = coffeeWifiCurrentSsid();
+  doc["system"]["wifi_credential_source"] = coffeeWifiCredentialSourceLabel();
+  doc["system"]["wifi_stored_credentials"] = coffeeWifiUsingStoredCredentials();
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
 

@@ -16,11 +16,15 @@ bool activeCredentialsLoaded = false;
 bool readStoredCredentials(CoffeeWifiCredentials& credentials)
 {
   Preferences prefs;
-  prefs.begin(WIFI_PREF_NAMESPACE, true);
-  const String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, true)) {
+    return false;
+  }
+
+  String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
   const String password = prefs.getString(WIFI_PREF_KEY_PASS, "");
   prefs.end();
 
+  ssid.trim();
   if (ssid.length() == 0) {
     return false;
   }
@@ -28,6 +32,7 @@ bool readStoredCredentials(CoffeeWifiCredentials& credentials)
   credentials.ssid = ssid;
   credentials.password = password;
   credentials.fromPreferences = true;
+  credentials.source = CoffeeWifiCredentialSource::Preferences;
   return true;
 }
 
@@ -37,6 +42,9 @@ CoffeeWifiCredentials fallbackCredentials()
   credentials.ssid = WIFI_SSID;
   credentials.password = WIFI_PASS;
   credentials.fromPreferences = false;
+  credentials.source = credentials.ssid.length() > 0
+                         ? CoffeeWifiCredentialSource::WifiSecrets
+                         : CoffeeWifiCredentialSource::None;
   return credentials;
 }
 
@@ -68,7 +76,8 @@ bool coffeeWifiHasStoredCredentials()
 
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
 {
-  const String trimmedSsid = ssid;
+  String trimmedSsid = ssid;
+  trimmedSsid.trim();
   if (trimmedSsid.length() == 0) {
     return false;
   }
@@ -85,9 +94,55 @@ bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
   activeCredentials.ssid = trimmedSsid;
   activeCredentials.password = password;
   activeCredentials.fromPreferences = true;
+  activeCredentials.source = CoffeeWifiCredentialSource::Preferences;
   activeCredentialsLoaded = true;
 
   return ssidBytes > 0 && (password.length() == 0 || passBytes > 0);
+}
+
+bool coffeeWifiClearCredentials()
+{
+  Preferences prefs;
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+    return false;
+  }
+
+  const bool ssidRemoved = prefs.remove(WIFI_PREF_KEY_SSID);
+  const bool passRemoved = prefs.remove(WIFI_PREF_KEY_PASS);
+  prefs.end();
+
+  activeCredentialsLoaded = false;
+  activeCredentials = CoffeeWifiCredentials{};
+
+  return ssidRemoved || passRemoved;
+}
+
+CoffeeWifiCredentialSource coffeeWifiCredentialSource()
+{
+  return ensureActiveCredentials().source;
+}
+
+const char* coffeeWifiCredentialSourceLabel()
+{
+  switch (coffeeWifiCredentialSource()) {
+    case CoffeeWifiCredentialSource::Preferences:
+      return "NVS/Preferences";
+    case CoffeeWifiCredentialSource::WifiSecrets:
+      return "wifi_secrets.h";
+    case CoffeeWifiCredentialSource::None:
+    default:
+      return "none";
+  }
+}
+
+String coffeeWifiStatusSummary()
+{
+  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
+  String summary = "SSID='";
+  summary += credentials.ssid;
+  summary += "', source=";
+  summary += coffeeWifiCredentialSourceLabel();
+  return summary;
 }
 
 void coffeeWifiBegin()

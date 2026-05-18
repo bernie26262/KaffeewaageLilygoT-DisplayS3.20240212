@@ -2,10 +2,17 @@
 
 #include <Arduino.h>
 
+enum class CoffeeWifiCredentialSource {
+  None,
+  Preferences,
+  WifiSecrets
+};
+
 struct CoffeeWifiCredentials {
   String ssid;
   String password;
   bool fromPreferences = false;
+  CoffeeWifiCredentialSource source = CoffeeWifiCredentialSource::None;
 };
 
 // Phase 1: WLAN-Zugangsdaten zentral verwalten.
@@ -14,6 +21,10 @@ struct CoffeeWifiCredentials {
 bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials);
 bool coffeeWifiHasStoredCredentials();
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password);
+bool coffeeWifiClearCredentials();
+CoffeeWifiCredentialSource coffeeWifiCredentialSource();
+const char* coffeeWifiCredentialSourceLabel();
+String coffeeWifiStatusSummary();
 void coffeeWifiBegin();
 void coffeeWifiReconnect();
 String coffeeWifiCurrentSsid();

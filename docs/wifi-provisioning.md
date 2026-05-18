@@ -87,13 +87,15 @@ Optional spaeter:
 
 Die WLAN-Daten sollen in NVS/Preferences gespeichert werden.
 
-Moegliche Keys:
+Aktuelle Phase-1/1b-Keys im Modul `coffee_wifi`:
 
 ```text
-wifiSsid
-wifiPass
-wifiConfigured
+Namespace: coffee_wifi
+ssid
+pass
 ```
+
+Eine separate `wifiConfigured`-Markierung ist derzeit nicht noetig. Eine nicht-leere SSID gilt als gespeicherte WLAN-Konfiguration.
 
 Langfristig sollte diese Logik nicht in `main.cpp` wachsen, sondern in ein eigenes Modul ausgelagert werden, z.B.:
 
@@ -102,12 +104,17 @@ src/coffee_wifi.h
 src/coffee_wifi.cpp
 ```
 
-Dieses Modul koennte enthalten:
+Dieses Modul enthaelt in Phase 1/1b bereits:
 
 - Laden der gespeicherten WLAN-Daten
+- Fallback auf `wifi_secrets.h`
 - Speichern neuer WLAN-Daten
 - Loeschen der WLAN-Daten
+- Quelle der aktiven Zugangsdaten als Statusinformation
 - Start der normalen WLAN-Verbindung
+
+Noch nicht enthalten:
+
 - Start des Setup-Access-Points
 - Webserver-Routen fuer das Provisioning
 
@@ -187,13 +194,14 @@ Damit sind die technischen Voraussetzungen vorhanden.
 
 Empfohlene schrittweise Umsetzung:
 
-1. Neues Modul `coffee_wifi` anlegen.
-2. WLAN-Zugangsdaten aus NVS laden.
-3. Wenn keine Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
-4. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
-5. Nach Speichern neu starten oder WLAN-Verbindung neu aufbauen.
-6. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-7. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+1. Neues Modul `coffee_wifi` anlegen. ✅
+2. WLAN-Zugangsdaten aus NVS laden und bei fehlenden Daten auf `wifi_secrets.h` zurueckfallen. ✅
+3. Speichern/Loeschen/Status der Zugangsdaten vorbereiten, ohne AP/WebUI bereits umzubauen. ✅
+4. Wenn keine Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
+5. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
+6. Nach Speichern neu starten oder WLAN-Verbindung neu aufbauen.
+7. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+8. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 

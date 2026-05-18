@@ -537,7 +537,7 @@ void initSPIFFS() {
 void initWiFi() {
   coffeeWifiBegin();
   debug("WiFi connect started: ");
-  debugln(coffeeWifiCurrentSsid());
+  debugln(coffeeWifiStatusSummary());
 }
 
 void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info){
@@ -545,8 +545,8 @@ void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info){
 }
 
 void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info){
-  debug("WiFi connected to ");
-  debugln(coffeeWifiCurrentSsid());
+  debug("WiFi connected with ");
+  debugln(coffeeWifiStatusSummary());
   debug("IP address: ");
   debugln(WiFi.localIP());
 }
