@@ -87,15 +87,16 @@ Optional spaeter:
 
 Die WLAN-Daten sollen in NVS/Preferences gespeichert werden.
 
-Aktuelle Phase-1/1b-Keys im Modul `coffee_wifi`:
+Aktuelle Keys im Modul `coffee_wifi`:
 
 ```text
 Namespace: coffee_wifi
 ssid
 pass
+active
 ```
 
-Eine separate `wifiConfigured`-Markierung ist derzeit nicht noetig. Eine nicht-leere SSID gilt als gespeicherte WLAN-Konfiguration.
+Nach dem Phase-2a-Rueckschritt gilt: Eine nicht-leere SSID bedeutet nur, dass NVS-Daten vorhanden sind. Automatisch verwendet werden sie nur, wenn zusaetzlich `active=true` gesetzt ist. Der aktuelle sichere Entwicklungsstand setzt `active` beim Speichern bewusst nicht automatisch auf `true`.
 
 Langfristig sollte diese Logik nicht in `main.cpp` wachsen, sondern in ein eigenes Modul ausgelagert werden, z.B.:
 
@@ -108,15 +109,16 @@ Dieses Modul enthaelt in Phase 1/1b bereits:
 
 - Laden der gespeicherten WLAN-Daten
 - Fallback auf `wifi_secrets.h`
-- Speichern neuer WLAN-Daten
+- Speichern neuer WLAN-Daten als vorbereitete, noch nicht automatisch aktive Daten
 - Loeschen der WLAN-Daten
 - Quelle der aktiven Zugangsdaten als Statusinformation
+- Anzeige, ob NVS-Daten vorhanden sind
 - Start der normalen WLAN-Verbindung
 
 Noch nicht enthalten:
 
 - Start des Setup-Access-Points
-- Webserver-Routen fuer das Provisioning
+- Webserver-Routen fuer Speichern/Aktivieren des Provisionings
 
 ## Webserver und Routen
 
@@ -197,19 +199,22 @@ Empfohlene schrittweise Umsetzung:
 1. Neues Modul `coffee_wifi` anlegen. ✅
 2. WLAN-Zugangsdaten aus NVS laden und bei fehlenden Daten auf `wifi_secrets.h` zurueckfallen. ✅
 3. Speichern/Loeschen/Status der Zugangsdaten vorbereiten, ohne AP/WebUI bereits umzubauen. ✅
-4. Wenn keine Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
-5. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
-6. Nach Speichern neu starten oder WLAN-Verbindung neu aufbauen.
-7. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-8. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+4. Nach Phase-2a-Test: NVS-Daten nicht mehr ungeschuetzt automatisch aktivieren, sondern nur noch mit `active`-Marker. ✅
+5. Sichere Diagnose-/Loeschfunktion in der WebUI bereitstellen.
+6. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
+7. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
+8. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
+9. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+10. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 
 Fuer die Entwicklung sollte der Umbau vorsichtig erfolgen:
 
 - `wifi_secrets.h` zunaechst als Fallback behalten.
-- Wenn NVS-Daten vorhanden sind, diese bevorzugen.
-- Wenn keine NVS-Daten vorhanden sind, optional noch die alten Secrets nutzen oder Setup-AP starten.
+- NVS-Daten nur verwenden, wenn sie explizit als aktiv/validiert markiert sind.
+- Nicht aktive NVS-Daten duerfen die Erreichbarkeit ueber `wifi_secrets.h` nicht blockieren.
+- Wenn keine aktiven NVS-Daten vorhanden sind, optional noch die alten Secrets nutzen oder Setup-AP starten.
 - Erst nach erfolgreichen Tests die fest einkompilierten Secrets entfernen.
 
 So bleibt das aktuell verbaute Geraet erreichbar und das Risiko eines OTA-Lockouts bleibt gering.

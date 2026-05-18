@@ -474,9 +474,11 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <div>WLAN: <b id="wifiStatus">---</b></div>
         <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
         <div>Quelle: <b id="wifiCredentialSource">---</b></div>
-        <div>Gespeichert in NVS: <b id="wifiStoredCredentials">---</b></div>
+        <div>NVS-Daten vorhanden: <b id="wifiStoredCredentials">---</b></div>
       </div>
+      <div class="small" style="margin-top: 10px;">Aktuell werden gespeicherte NVS-WLAN-Daten noch nicht automatisch aktiviert. Die Waage nutzt weiter die angezeigte Quelle.</div>
       <div class="settings-actions" style="margin-top: 12px;">
+        <button id="clearWifiCredentials" class="secondary">NVS-WLAN-Daten löschen</button>
         <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
         <button id="restartDevice" class="danger">ESP32 neu starten</button>
       </div>
@@ -634,6 +636,10 @@ function confirmPendingAction() {
   if (!pendingConfirm) return;
   const action = pendingConfirm;
   closeConfirmOverlay();
+  if (action.cmd === 'clear_wifi_credentials_webui') {
+    clearWifiCredentials();
+    return;
+  }
   sendCommand(action.cmd, action.logText);
 }
 
@@ -1163,6 +1169,21 @@ function sendTargetWeight() {
   sendCommand(`set_selected_siebtraeger_weight_${value.toFixed(1)}`, `Sollgewicht gesendet: ${value.toFixed(1)} g`);
 }
 
+async function clearWifiCredentials() {
+  try {
+    addLog('NVS-WLAN-Daten löschen …');
+    const response = await fetch('/api/wifi/credentials', { method: 'DELETE' });
+    if (!response.ok) {
+      addLog(`Fehler beim Löschen der NVS-WLAN-Daten: HTTP ${response.status}`);
+      return;
+    }
+    const data = await response.json();
+    addLog(data.message || 'NVS-WLAN-Daten gelöscht. Bitte ESP32 neu starten.');
+  } catch (err) {
+    addLog('Fehler beim Löschen der NVS-WLAN-Daten');
+  }
+}
+
 function handleSaveClick() {
   if (lastState?.status?.save_ready) {
     sendCommand(CMD.saveDose, 'Save gesendet …');
@@ -1249,6 +1270,12 @@ function bindSettingsHandlers() {
   el('openCalibrate').addEventListener('click', openCalibrationWizard);
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
+  el('clearWifiCredentials').addEventListener('click', () => openConfirmOverlay(
+    'NVS-WLAN-Daten löschen?',
+    'Gespeicherte WLAN-Daten in NVS/Preferences werden gelöscht. Die aktuelle Verbindung über wifi_secrets.h bleibt bis zum Neustart unverändert.',
+    'clear_wifi_credentials_webui',
+    'NVS-WLAN-Daten löschen …'
+  ));
   el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
   el('restartDevice').addEventListener('click', () => openConfirmOverlay(
     'ESP32 wirklich neu starten?',
@@ -1454,6 +1481,17 @@ void coffeeWebBegin(AsyncWebServer& server)
     }
   });
 
+  server.on("/api/wifi/credentials", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+    const bool ok = coffeeWifiClearCredentials();
+    StaticJsonDocument<192> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok ? "NVS-WLAN-Daten gelöscht. Bitte ESP32 neu starten." : "NVS nicht erreichbar.";
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 500, "application/json", out);
+  });
+
   server.on("/manifest.json", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send_P(200, "application/manifest+json", PWA_MANIFEST_JSON);
   });
@@ -1542,7 +1580,8 @@ static String buildStateJson(const AppState& s)
   doc["system"]["uptime_ms"] = s.system.uptime_ms;
   doc["system"]["wifi_ssid"] = coffeeWifiCurrentSsid();
   doc["system"]["wifi_credential_source"] = coffeeWifiCredentialSourceLabel();
-  doc["system"]["wifi_stored_credentials"] = coffeeWifiUsingStoredCredentials();
+  doc["system"]["wifi_stored_credentials"] = coffeeWifiHasStoredCredentials();
+  doc["system"]["wifi_stored_credentials_active"] = coffeeWifiStoredCredentialsAreActive();
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
 

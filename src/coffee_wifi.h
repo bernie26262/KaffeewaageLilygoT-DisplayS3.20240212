@@ -15,11 +15,13 @@ struct CoffeeWifiCredentials {
   CoffeeWifiCredentialSource source = CoffeeWifiCredentialSource::None;
 };
 
-// Phase 1: WLAN-Zugangsdaten zentral verwalten.
-// - bevorzugt gespeicherte Daten aus NVS/Preferences nutzen
-// - wenn keine gespeicherten Daten vorhanden sind, unverändert auf wifi_secrets.h zurückfallen
+// WLAN-Zugangsdaten zentral verwalten.
+// Sicherheitsstand nach Phase-2a-Test:
+// - gespeicherte NVS-Daten nur verwenden, wenn sie explizit als aktiv markiert sind
+// - sonst unverändert auf wifi_secrets.h zurückfallen
 bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials);
 bool coffeeWifiHasStoredCredentials();
+bool coffeeWifiStoredCredentialsAreActive();
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password);
 bool coffeeWifiClearCredentials();
 CoffeeWifiCredentialSource coffeeWifiCredentialSource();
