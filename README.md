@@ -11,6 +11,7 @@ Das Projekt kombiniert:
 - OTA-Update fuer Firmware und SPIFFS-Dateisystem
 - persistente Einstellungen ueber NVS/Preferences
 - PWA-/Homescreen-Integration fuer Smartphone/Tablet
+- HMI-orientiertes Bedienkonzept als Basis fuer eine spaetere Touch-Display-Version
 
 ## Aktueller Architekturstand
 
@@ -86,7 +87,9 @@ Wichtige Routen:
 Details stehen im Ordner `docs/`:
 
 - `docs/architecture.md`
+- `docs/hmi-ui-concept.md`
 - `docs/webui-pwa-ota.md`
+- `docs/wifi-provisioning.md`
 - `docs/ota_filename_validation.md`
 - `docs/storage.md`
 - `docs/test-plan.md`

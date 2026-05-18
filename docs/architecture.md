@@ -46,6 +46,20 @@ Enthaelt die Update-Seite `/update` mit getrenntem Upload fuer:
 
 Der ESP rebootet nach Upload nicht automatisch. Der Neustart erfolgt per Button.
 
+
+### Zukuenftiges Modul: `coffee_wifi.cpp/.h`
+
+Die WLAN-Konfiguration soll langfristig nicht mehr ueber fest einkompilierte `wifi_secrets.h` erfolgen, sondern ueber WLAN-Provisioning mit temporaerem Setup-Access-Point.
+
+Geplantes Ziel:
+
+- WLAN-Daten in NVS/Preferences speichern
+- bei fehlenden oder ungueltigen WLAN-Daten einen Setup-Access-Point starten
+- einfache Einrichtungsseite zum Speichern von SSID und Passwort bereitstellen
+- `wifi_secrets.h` zunaechst als Entwicklungs-/Fallback-Option behalten und spaeter aus dem normalen Build entfernen
+
+Details stehen in `docs/wifi-provisioning.md`.
+
 ### `coffee_storage.cpp/.h`
 
 Buendelt die persistenten NVS-/Preferences-Zugriffe.
