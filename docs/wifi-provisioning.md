@@ -115,6 +115,13 @@ Dieses Modul enthaelt in Phase 1/1b bereits:
 - Anzeige, ob NVS-Daten vorhanden sind
 - Start der normalen WLAN-Verbindung
 
+Phase 2b ergaenzt eine sichere WebUI-Speicherfunktion:
+
+- SSID und Passwort koennen in NVS abgelegt werden.
+- Der Key `active` bleibt dabei bewusst `false`.
+- Die aktive Verbindung bleibt daher weiterhin bei `wifi_secrets.h`, solange keine spaetere Validierungslogik `active=true` setzt.
+- Nach dem Speichern sollte die WebUI anzeigen: `NVS-Daten vorhanden: ja`, aber weiterhin `Quelle: wifi_secrets.h`.
+
 Noch nicht enthalten:
 
 - Start des Setup-Access-Points
@@ -200,12 +207,13 @@ Empfohlene schrittweise Umsetzung:
 2. WLAN-Zugangsdaten aus NVS laden und bei fehlenden Daten auf `wifi_secrets.h` zurueckfallen. ✅
 3. Speichern/Loeschen/Status der Zugangsdaten vorbereiten, ohne AP/WebUI bereits umzubauen. ✅
 4. Nach Phase-2a-Test: NVS-Daten nicht mehr ungeschuetzt automatisch aktivieren, sondern nur noch mit `active`-Marker. ✅
-5. Sichere Diagnose-/Loeschfunktion in der WebUI bereitstellen.
-6. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
-7. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
-8. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
-9. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-10. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+5. Sichere Diagnose-/Loeschfunktion in der WebUI bereitstellen. ✅
+6. WLAN-Daten ueber die normale WebUI in NVS speichern, aber noch nicht automatisch aktivieren. ✅
+7. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
+8. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
+9. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
+10. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+11. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 

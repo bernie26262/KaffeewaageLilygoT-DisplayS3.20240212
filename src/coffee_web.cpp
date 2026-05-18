@@ -195,6 +195,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .stat-row span:last-child { font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
     .ip-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(148,163,184,.18); }
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
+    .wifi-form { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(148,163,184,.18); }
+    .wifi-form label { display: grid; gap: 5px; color: var(--muted); font-size: .9rem; }
+    .wifi-form input { width: 100%; box-sizing: border-box; }
+    .wifi-form-note { color: var(--muted); font-size: .86rem; line-height: 1.35; }
     .dashboard-settings-list { gap: 4px; margin-top: 6px; line-height: 1.25; }
     .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
     .settings-section { display: grid; gap: 10px; }
@@ -477,6 +481,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <div>NVS-Daten vorhanden: <b id="wifiStoredCredentials">---</b></div>
       </div>
       <div class="small" style="margin-top: 10px;">Aktuell werden gespeicherte NVS-WLAN-Daten noch nicht automatisch aktiviert. Die Waage nutzt weiter die angezeigte Quelle.</div>
+      <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
+        <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
+        <div class="wifi-form-note">Speichert SSID und Passwort nur in NVS/Preferences. Die Daten werden noch nicht automatisch verwendet und blockieren die Verbindung über wifi_secrets.h nicht.</div>
+        <label><span>SSID</span><input id="wifiSetupSsid" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
+        <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
+        <div class="settings-actions">
+          <button id="saveWifiCredentials" class="secondary" type="submit">NVS-WLAN-Daten speichern</button>
+        </div>
+      </form>
       <div class="settings-actions" style="margin-top: 12px;">
         <button id="clearWifiCredentials" class="secondary">NVS-WLAN-Daten löschen</button>
         <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
@@ -1169,6 +1182,43 @@ function sendTargetWeight() {
   sendCommand(`set_selected_siebtraeger_weight_${value.toFixed(1)}`, `Sollgewicht gesendet: ${value.toFixed(1)} g`);
 }
 
+async function saveWifiCredentials(e) {
+  e.preventDefault();
+
+  const ssidInput = el('wifiSetupSsid');
+  const passwordInput = el('wifiSetupPassword');
+  const ssid = ssidInput.value.trim();
+  const password = passwordInput.value;
+
+  if (!ssid) {
+    addLog('Bitte WLAN-Name/SSID eintragen');
+    ssidInput.focus();
+    return;
+  }
+
+  try {
+    addLog('NVS-WLAN-Daten speichern …');
+    const body = new URLSearchParams();
+    body.set('ssid', ssid);
+    body.set('password', password);
+
+    const response = await fetch('/api/wifi/credentials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+    if (!response.ok) {
+      addLog(`Fehler beim Speichern der NVS-WLAN-Daten: HTTP ${response.status}`);
+      return;
+    }
+    const data = await response.json();
+    addLog(data.message || 'NVS-WLAN-Daten gespeichert. Sie werden noch nicht automatisch verwendet.');
+    passwordInput.value = '';
+  } catch (err) {
+    addLog('Fehler beim Speichern der NVS-WLAN-Daten');
+  }
+}
+
 async function clearWifiCredentials() {
   try {
     addLog('NVS-WLAN-Daten löschen …');
@@ -1270,6 +1320,7 @@ function bindSettingsHandlers() {
   el('openCalibrate').addEventListener('click', openCalibrationWizard);
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
+  el('wifiCredentialsForm').addEventListener('submit', saveWifiCredentials);
   el('clearWifiCredentials').addEventListener('click', () => openConfirmOverlay(
     'NVS-WLAN-Daten löschen?',
     'Gespeicherte WLAN-Daten in NVS/Preferences werden gelöscht. Die aktuelle Verbindung über wifi_secrets.h bleibt bis zum Neustart unverändert.',
@@ -1479,6 +1530,35 @@ void coffeeWebBegin(AsyncWebServer& server)
       }
       return;
     }
+  });
+
+  server.on("/api/wifi/credentials", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("ssid", true)) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "SSID fehlt.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const String ssid = request->getParam("ssid", true)->value();
+    const String password = request->hasParam("password", true)
+                              ? request->getParam("password", true)->value()
+                              : String();
+    const bool ok = coffeeWifiSaveCredentials(ssid, password);
+
+    StaticJsonDocument<224> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok
+                       ? "NVS-WLAN-Daten gespeichert. Sie werden noch nicht automatisch verwendet."
+                       : "NVS-WLAN-Daten konnten nicht gespeichert werden.";
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 400, "application/json", out);
   });
 
   server.on("/api/wifi/credentials", HTTP_DELETE, [](AsyncWebServerRequest* request) {
