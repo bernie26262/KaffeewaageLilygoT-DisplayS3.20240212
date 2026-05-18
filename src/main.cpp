@@ -201,7 +201,7 @@ const String headerOfPageID[] =
 { "Single-Dose-Waage        ",   // 0
   "Einstellungen             ",  // 1
   "Siebtraeger               ",  // 2
-  "Stoppuhr                 ", // 3
+  "Stoppuhr                   ", // 3
   "Soll einstellen            ",   // 4
   "Gefaess messen 1/4       " ,  // 5
   "Kalibrieren 1/3          ",   // 6
@@ -2394,8 +2394,12 @@ void RefreshTFTSetWeightST()
 
 void stringifyActualWeight()
 {
-  dtostrf(actualWeight,7,1,actualWeightAsChar);
-    actualWeightAsString = "  " + String(actualWeightAsChar) + " g   ";
+  float displayWeight = actualWeight;
+  if (displayWeight < 0.0f && displayWeight > -0.5f) {
+    displayWeight = 0.0f;
+  }
+  dtostrf(displayWeight,7,1,actualWeightAsChar);
+  actualWeightAsString = "  " + String(actualWeightAsChar) + " g   ";
 }
 
 void RefreshTFTActualWeight()
