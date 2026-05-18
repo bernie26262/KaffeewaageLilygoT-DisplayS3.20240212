@@ -35,7 +35,7 @@
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 #include "time.h"
-#include "wifi_secrets.h"
+#include "coffee_wifi.h"
 #include "app_state.h"
 #include "coffee_web.h"
 #include "coffee_ota.h"
@@ -535,9 +535,9 @@ void initSPIFFS() {
 // ----------------------------------------------------------------------------
 
 void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  debugln("WiFi connect started");
+  coffeeWifiBegin();
+  debug("WiFi connect started: ");
+  debugln(coffeeWifiCurrentSsid());
 }
 
 void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info){
@@ -546,7 +546,7 @@ void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info){
 
 void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info){
   debug("WiFi connected to ");
-  debugln(WIFI_SSID);
+  debugln(coffeeWifiCurrentSsid());
   debug("IP address: ");
   debugln(WiFi.localIP());
 }
@@ -556,7 +556,7 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info){
   debug("WiFi lost connection. Reason: ");
   debugln(info.wifi_sta_disconnected.reason);
   debugln("Trying to Reconnect");
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  coffeeWifiReconnect();
 }
 
 // ----------------------------------------------------------------------------
