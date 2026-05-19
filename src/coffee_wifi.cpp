@@ -231,12 +231,12 @@ const char* coffeeWifiCredentialSourceLabel()
 {
   switch (coffeeWifiCredentialSource()) {
     case CoffeeWifiCredentialSource::Preferences:
-      return "NVS/Preferences";
+      return "gespeicherte WLAN-Daten";
     case CoffeeWifiCredentialSource::WifiSecrets:
-      return "wifi_secrets.h";
+      return "Standard-WLAN aus Firmware";
     case CoffeeWifiCredentialSource::None:
     default:
-      return "none";
+      return "keine Quelle";
   }
 }
 

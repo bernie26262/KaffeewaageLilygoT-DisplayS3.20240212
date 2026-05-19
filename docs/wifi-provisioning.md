@@ -85,7 +85,7 @@ Optional spaeter:
 
 ## Speicherung
 
-Die WLAN-Daten sollen in NVS/Preferences gespeichert werden.
+Die WLAN-Daten sollen intern in NVS/Preferences gespeichert werden. In der WebUI wird dafuer der nutzerfreundliche Begriff `gespeicherte WLAN-Daten` verwendet.
 
 Aktuelle Keys im Modul `coffee_wifi`:
 
@@ -96,7 +96,18 @@ pass
 active
 ```
 
-Nach dem Phase-2a-Rueckschritt gilt: Eine nicht-leere SSID bedeutet nur, dass NVS-Daten vorhanden sind. Automatisch verwendet werden sie nur, wenn zusaetzlich `active=true` gesetzt ist. Der aktuelle sichere Entwicklungsstand setzt `active` beim Speichern bewusst nicht automatisch auf `true`.
+Nach dem Phase-2a-Rueckschritt gilt: Eine nicht-leere SSID bedeutet nur, dass gespeicherte WLAN-Daten vorhanden sind. Automatisch verwendet werden sie nur, wenn zusaetzlich `active=true` gesetzt ist. Der sichere Entwicklungsstand setzt `active` beim Speichern bewusst nicht automatisch auf `true`.
+
+Die WebUI soll keine technischen Begriffe wie `NVS` oder `wifi_secrets.h` anzeigen. Stattdessen gelten diese Anzeigen:
+
+```text
+NVS/Preferences        -> gespeicherte WLAN-Daten
+wifi_secrets.h         -> Standard-WLAN aus Firmware
+NVS-Daten vorhanden    -> Gespeicherte WLAN-Daten
+NVS-Daten aktiv        -> Gespeicherte WLAN-Daten aktiv
+```
+
+Das echte WLAN-Passwort wird nicht an die WebUI gesendet. Die WebUI zeigt nur `Gespeichertes Passwort: vorhanden`.
 
 Langfristig sollte diese Logik nicht in `main.cpp` wachsen, sondern in ein eigenes Modul ausgelagert werden, z.B.:
 
@@ -108,26 +119,26 @@ src/coffee_wifi.cpp
 Dieses Modul enthaelt in Phase 1/1b bereits:
 
 - Laden der gespeicherten WLAN-Daten
-- Fallback auf `wifi_secrets.h`
+- Fallback auf `wifi_secrets.h` / in der WebUI: `Standard-WLAN aus Firmware`
 - Speichern neuer WLAN-Daten als vorbereitete, noch nicht automatisch aktive Daten
 - Loeschen der WLAN-Daten
 - Quelle der aktiven Zugangsdaten als Statusinformation
-- Anzeige, ob NVS-Daten vorhanden sind
+- Anzeige, ob gespeicherte WLAN-Daten vorhanden sind
 - Start der normalen WLAN-Verbindung
 
 Phase 2b ergaenzt eine sichere WebUI-Speicherfunktion:
 
-- SSID und Passwort koennen in NVS abgelegt werden.
+- SSID und Passwort koennen intern in NVS abgelegt werden.
 - Der Key `active` bleibt dabei bewusst `false`.
-- Die aktive Verbindung bleibt daher weiterhin bei `wifi_secrets.h`, solange keine spaetere Validierungslogik `active=true` setzt.
-- Nach dem Speichern sollte die WebUI anzeigen: `NVS-Daten vorhanden: ja`, aber weiterhin `Quelle: wifi_secrets.h`.
+- Die aktive Verbindung bleibt daher weiterhin beim Standard-WLAN aus der Firmware, solange keine spaetere Validierungslogik `active=true` setzt.
+- Nach dem Speichern sollte die WebUI anzeigen: `Gespeicherte WLAN-Daten: ja`, aber weiterhin `Quelle: Standard-WLAN aus Firmware`.
 
 Phase 2c ergaenzt eine explizite Aktivierung:
 
-- NVS-Daten koennen bewusst aktiviert oder deaktiviert werden.
-- Aktivierte NVS-Daten werden erst nach Neustart verwendet.
-- Falls die Verbindung mit aktivierten NVS-Daten scheitert, wird der Active-Marker geloescht und temporaer auf `wifi_secrets.h` zurueckgefallen.
-- Dadurch soll ein OTA-/WebUI-Lockout durch falsche NVS-Daten verhindert werden.
+- Gespeicherte WLAN-Daten koennen bewusst aktiviert oder deaktiviert werden.
+- Aktivierte gespeicherte WLAN-Daten werden erst nach Neustart verwendet.
+- Falls die Verbindung mit aktivierten gespeicherten WLAN-Daten scheitert, wird der Active-Marker geloescht und temporaer auf das Standard-WLAN aus der Firmware zurueckgefallen.
+- Dadurch soll ein OTA-/WebUI-Lockout durch falsche gespeicherte WLAN-Daten verhindert werden.
 
 Noch nicht enthalten:
 
@@ -213,10 +224,10 @@ Empfohlene schrittweise Umsetzung:
 1. Neues Modul `coffee_wifi` anlegen. ✅
 2. WLAN-Zugangsdaten aus NVS laden und bei fehlenden Daten auf `wifi_secrets.h` zurueckfallen. ✅
 3. Speichern/Loeschen/Status der Zugangsdaten vorbereiten, ohne AP/WebUI bereits umzubauen. ✅
-4. Nach Phase-2a-Test: NVS-Daten nicht mehr ungeschuetzt automatisch aktivieren, sondern nur noch mit `active`-Marker. ✅
+4. Nach Phase-2a-Test: gespeicherte WLAN-Daten nicht mehr ungeschuetzt automatisch aktivieren, sondern nur noch mit `active`-Marker. ✅
 5. Sichere Diagnose-/Loeschfunktion in der WebUI bereitstellen. ✅
 6. WLAN-Daten ueber die normale WebUI in NVS speichern, aber noch nicht automatisch aktivieren. ✅
-7. NVS-Daten explizit aktivieren/deaktivieren und bei Verbindungsfehler automatisch auf `wifi_secrets.h` zurueckfallen. ✅
+7. Gespeicherte WLAN-Daten explizit aktivieren/deaktivieren und bei Verbindungsfehler automatisch auf das Standard-WLAN aus der Firmware zurueckfallen. ✅
 8. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
 9. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
 10. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
@@ -228,9 +239,9 @@ Empfohlene schrittweise Umsetzung:
 Fuer die Entwicklung sollte der Umbau vorsichtig erfolgen:
 
 - `wifi_secrets.h` zunaechst als Fallback behalten.
-- NVS-Daten nur verwenden, wenn sie explizit als aktiv/validiert markiert sind.
-- Nicht aktive NVS-Daten duerfen die Erreichbarkeit ueber `wifi_secrets.h` nicht blockieren.
-- Wenn keine aktiven NVS-Daten vorhanden sind, optional noch die alten Secrets nutzen oder Setup-AP starten.
+- Gespeicherte WLAN-Daten nur verwenden, wenn sie explizit als aktiv/validiert markiert sind.
+- Nicht aktive gespeicherte WLAN-Daten duerfen die Erreichbarkeit ueber das Standard-WLAN aus der Firmware nicht blockieren.
+- Wenn keine aktiven gespeicherten WLAN-Daten vorhanden sind, optional noch das Standard-WLAN aus der Firmware nutzen oder Setup-AP starten.
 - Erst nach erfolgreichen Tests die fest einkompilierten Secrets entfernen.
 
 So bleibt das aktuell verbaute Geraet erreichbar und das Risiko eines OTA-Lockouts bleibt gering.
