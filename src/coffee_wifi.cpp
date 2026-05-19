@@ -17,6 +17,8 @@ bool activeCredentialsLoaded = false;
 bool storedCredentialsKnown = false;
 bool storedCredentialsAvailable = false;
 bool storedCredentialsActive = false;
+String storedCredentialsSsid;
+bool storedCredentialsPasswordAvailable = false;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
 uint8_t activeCredentialsDisconnects = 0;
@@ -33,6 +35,8 @@ void refreshStoredCredentialsCache()
   Preferences prefs;
   storedCredentialsAvailable = false;
   storedCredentialsActive = false;
+  storedCredentialsSsid = String();
+  storedCredentialsPasswordAvailable = false;
 
   if (!prefs.begin(WIFI_PREF_NAMESPACE, true)) {
     storedCredentialsKnown = true;
@@ -40,8 +44,11 @@ void refreshStoredCredentialsCache()
   }
 
   String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
+  const String password = prefs.getString(WIFI_PREF_KEY_PASS, "");
   ssid.trim();
+  storedCredentialsSsid = ssid;
   storedCredentialsAvailable = ssid.length() > 0;
+  storedCredentialsPasswordAvailable = storedCredentialsAvailable && password.length() > 0;
   storedCredentialsActive = storedCredentialsAvailable && prefs.getBool(WIFI_PREF_KEY_ACTIVE, false);
   prefs.end();
 
@@ -133,8 +140,13 @@ bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
     return false;
   }
 
+  String passwordToStore = password;
+  if (passwordToStore.length() == 0 && prefs.isKey(WIFI_PREF_KEY_PASS)) {
+    passwordToStore = prefs.getString(WIFI_PREF_KEY_PASS, "");
+  }
+
   const size_t ssidBytes = prefs.putString(WIFI_PREF_KEY_SSID, trimmedSsid);
-  const size_t passBytes = prefs.putString(WIFI_PREF_KEY_PASS, password);
+  const size_t passBytes = prefs.putString(WIFI_PREF_KEY_PASS, passwordToStore);
 
   // Sicherheitsentscheidung nach Phase-2a-Test:
   // Neu gespeicherte Credentials werden zunaechst nur abgelegt, aber nicht
@@ -145,7 +157,23 @@ bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
 
   refreshStoredCredentialsCache();
 
-  return ssidBytes > 0 && (password.length() == 0 || passBytes > 0) && activeBytes > 0;
+  return ssidBytes > 0 && (passwordToStore.length() == 0 || passBytes > 0) && activeBytes > 0;
+}
+
+String coffeeWifiStoredSsid()
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return storedCredentialsSsid;
+}
+
+bool coffeeWifiStoredPasswordAvailable()
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return storedCredentialsPasswordAvailable;
 }
 
 bool coffeeWifiSetStoredCredentialsActive(bool active)

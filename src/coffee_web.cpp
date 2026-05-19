@@ -481,12 +481,16 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <div>NVS-Daten vorhanden: <b id="wifiStoredCredentials">---</b></div>
         <div>NVS-Daten aktiv: <b id="wifiStoredCredentialsActive">---</b></div>
       </div>
+      <div class="settings-list small" style="margin-top: 10px;">
+        <div>Gespeicherte SSID: <b class="mono" id="wifiStoredSsid">---</b></div>
+        <div>Gespeichertes Passwort: <b id="wifiStoredPasswordStatus">---</b></div>
+      </div>
       <div class="small" style="margin-top: 10px;">Gespeicherte NVS-WLAN-Daten werden nur nach expliziter Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, fällt die Waage automatisch auf wifi_secrets.h zurück.</div>
       <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
         <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
         <div class="wifi-form-note">Speichert SSID und Passwort nur in NVS/Preferences. Die Daten werden erst verwendet, wenn sie danach bewusst aktiviert werden.</div>
         <label><span>SSID</span><input id="wifiSetupSsid" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
-        <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
+        <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="Leer lassen, um gespeichertes Passwort zu behalten"></label>
         <div class="settings-actions">
           <button id="saveWifiCredentials" class="secondary" type="submit">NVS-WLAN-Daten speichern</button>
         </div>
@@ -1125,6 +1129,23 @@ function renderStatsAndSystem(s) {
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
   setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
+
+  const storedSsid = s.system?.wifi_stored_ssid || '';
+  const storedPassword = !!s.system?.wifi_stored_password;
+  setText('wifiStoredSsid', storedSsid || '---');
+  setText('wifiStoredPasswordStatus', storedPassword ? 'vorhanden' : 'nicht gespeichert');
+
+  const ssidInput = el('wifiSetupSsid');
+  if (ssidInput && document.activeElement !== ssidInput && !ssidInput.value && storedSsid) {
+    ssidInput.value = storedSsid;
+  }
+
+  const passwordInput = el('wifiSetupPassword');
+  if (passwordInput) {
+    passwordInput.placeholder = storedPassword
+      ? 'Leer lassen, um gespeichertes Passwort zu behalten'
+      : 'WLAN-Passwort';
+  }
 }
 
 function renderActionAvailability(s) {
@@ -1231,6 +1252,16 @@ async function saveWifiCredentials(e) {
     if (typeof data.active === 'boolean') {
       setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
     }
+    if (typeof data.stored_ssid === 'string') {
+      setText('wifiStoredSsid', data.stored_ssid || '---');
+      if (data.stored_ssid) ssidInput.value = data.stored_ssid;
+    }
+    if (typeof data.stored_password === 'boolean') {
+      setText('wifiStoredPasswordStatus', data.stored_password ? 'vorhanden' : 'nicht gespeichert');
+      passwordInput.placeholder = data.stored_password
+        ? 'Leer lassen, um gespeichertes Passwort zu behalten'
+        : 'WLAN-Passwort';
+    }
     passwordInput.value = '';
   } catch (err) {
     addLog('Fehler beim Speichern der NVS-WLAN-Daten');
@@ -1253,6 +1284,16 @@ async function clearWifiCredentials() {
     if (typeof data.active === 'boolean') {
       setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
     }
+    if (typeof data.stored_ssid === 'string') {
+      setText('wifiStoredSsid', data.stored_ssid || '---');
+      el('wifiSetupSsid').value = data.stored_ssid || '';
+    }
+    if (typeof data.stored_password === 'boolean') {
+      setText('wifiStoredPasswordStatus', data.stored_password ? 'vorhanden' : 'nicht gespeichert');
+      el('wifiSetupPassword').placeholder = data.stored_password
+        ? 'Leer lassen, um gespeichertes Passwort zu behalten'
+        : 'WLAN-Passwort';
+    }
   } catch (err) {
     addLog('Fehler beim Löschen der NVS-WLAN-Daten');
   }
@@ -1273,6 +1314,12 @@ async function setWifiCredentialsActive(active) {
     }
     if (typeof data.active === 'boolean') {
       setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
+    }
+    if (typeof data.stored_ssid === 'string') {
+      setText('wifiStoredSsid', data.stored_ssid || '---');
+    }
+    if (typeof data.stored_password === 'boolean') {
+      setText('wifiStoredPasswordStatus', data.stored_password ? 'vorhanden' : 'nicht gespeichert');
     }
   } catch (err) {
     addLog('Fehler beim Ändern der NVS-WLAN-Aktivierung');
@@ -1603,6 +1650,8 @@ void coffeeWebBegin(AsyncWebServer& server)
                          : "NVS-WLAN konnte nicht aktiviert werden. Sind Daten gespeichert?";
       doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
       doc["active"] = coffeeWifiStoredCredentialsAreActive();
+      doc["stored_ssid"] = coffeeWifiStoredSsid();
+      doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
 
       String out;
       serializeJson(doc, out);
@@ -1619,6 +1668,8 @@ void coffeeWebBegin(AsyncWebServer& server)
                          : "NVS-WLAN konnte nicht deaktiviert werden.";
       doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
       doc["active"] = coffeeWifiStoredCredentialsAreActive();
+      doc["stored_ssid"] = coffeeWifiStoredSsid();
+      doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
 
       String out;
       serializeJson(doc, out);
@@ -1650,6 +1701,8 @@ void coffeeWebBegin(AsyncWebServer& server)
                        : "NVS-WLAN-Daten konnten nicht gespeichert werden.";
     doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
     doc["active"] = coffeeWifiStoredCredentialsAreActive();
+    doc["stored_ssid"] = coffeeWifiStoredSsid();
+    doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
 
     String out;
     serializeJson(doc, out);
@@ -1665,6 +1718,8 @@ void coffeeWebBegin(AsyncWebServer& server)
                        : "NVS-WLAN konnte nicht aktiviert werden. Sind Daten gespeichert?";
     doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
     doc["active"] = coffeeWifiStoredCredentialsAreActive();
+    doc["stored_ssid"] = coffeeWifiStoredSsid();
+    doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
 
     String out;
     serializeJson(doc, out);
@@ -1680,6 +1735,8 @@ void coffeeWebBegin(AsyncWebServer& server)
                        : "NVS-WLAN konnte nicht deaktiviert werden.";
     doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
     doc["active"] = coffeeWifiStoredCredentialsAreActive();
+    doc["stored_ssid"] = coffeeWifiStoredSsid();
+    doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
 
     String out;
     serializeJson(doc, out);
@@ -1693,6 +1750,8 @@ void coffeeWebBegin(AsyncWebServer& server)
     doc["message"] = ok ? "NVS-WLAN-Daten gelöscht. Bitte ESP32 neu starten." : "NVS nicht erreichbar.";
     doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
     doc["active"] = coffeeWifiStoredCredentialsAreActive();
+    doc["stored_ssid"] = coffeeWifiStoredSsid();
+    doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
 
     String out;
     serializeJson(doc, out);
@@ -1789,6 +1848,8 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi_credential_source"] = coffeeWifiCredentialSourceLabel();
   doc["system"]["wifi_stored_credentials"] = coffeeWifiHasStoredCredentials();
   doc["system"]["wifi_stored_credentials_active"] = coffeeWifiStoredCredentialsAreActive();
+  doc["system"]["wifi_stored_ssid"] = coffeeWifiStoredSsid();
+  doc["system"]["wifi_stored_password"] = coffeeWifiStoredPasswordAvailable();
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
 

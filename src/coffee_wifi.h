@@ -22,6 +22,8 @@ struct CoffeeWifiCredentials {
 bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials);
 bool coffeeWifiHasStoredCredentials();
 bool coffeeWifiStoredCredentialsAreActive();
+String coffeeWifiStoredSsid();
+bool coffeeWifiStoredPasswordAvailable();
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password);
 bool coffeeWifiSetStoredCredentialsActive(bool active);
 bool coffeeWifiClearCredentials();
