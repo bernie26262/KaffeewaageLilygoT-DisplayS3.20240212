@@ -296,7 +296,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       box-shadow: 0 24px 70px rgba(0,0,0,.48);
     }
     .modal-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 8px; }
-    .modal-text { color: var(--muted-2); margin-bottom: 16px; }
+    .modal-text { color: var(--muted-2); margin-bottom: 16px; white-space: pre-line; }
     .modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .wizard-field { display: grid; gap: 6px; margin: 12px 0; }
     .wizard-field input, .wizard-field select { width: 100%; box-sizing: border-box; padding: 11px 12px; font-size: 1rem; }
@@ -484,6 +484,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div class="settings-list small" style="margin-top: 10px;">
         <div>Gespeicherte SSID: <b class="mono" id="wifiStoredSsid">---</b></div>
         <div>Gespeichertes Passwort: <b id="wifiStoredPasswordStatus">---</b></div>
+        <div>Setup-WLAN: <b id="wifiSetupApStatus">aus</b></div>
+        <div>Setup-Adresse: <b class="mono" id="wifiSetupApAddress">---</b></div>
       </div>
       <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, nutzt die Waage automatisch wieder das Standard-WLAN aus der Firmware.</div>
       <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
@@ -499,6 +501,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="activateWifiCredentials" class="secondary">Gespeicherte WLAN-Daten verwenden</button>
         <button id="deactivateWifiCredentials" class="secondary">Standard-WLAN verwenden</button>
         <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
+        <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
+        <button id="stopWifiSetupAp" class="secondary">Setup-WLAN stoppen</button>
         <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
         <button id="restartDevice" class="danger">ESP32 neu starten</button>
       </div>
@@ -639,21 +643,45 @@ function showSettingsTab(targetPanelId) {
 }
 
 // ===== Bestaetigungs-Overlay =====
+function resetConfirmOverlayButtons() {
+  el('confirmCancel').style.display = '';
+  el('confirmOk').classList.add('danger');
+  el('confirmOk').classList.remove('secondary');
+  el('confirmOk').textContent = 'Ok';
+}
+
 function openConfirmOverlay(title, text, cmd, logText) {
   pendingConfirm = { cmd, logText };
+  resetConfirmOverlayButtons();
   el('confirmTitle').textContent = title;
   el('confirmText').textContent = text;
   el('confirmOverlay').classList.add('show');
   el('confirmCancel').focus();
 }
 
+function openInfoOverlay(title, text) {
+  pendingConfirm = null;
+  el('confirmCancel').style.display = 'none';
+  el('confirmOk').classList.remove('danger');
+  el('confirmOk').classList.add('secondary');
+  el('confirmOk').textContent = 'OK';
+  el('confirmTitle').textContent = title;
+  el('confirmText').textContent = text;
+  el('confirmOverlay').classList.add('show');
+  el('confirmOk').focus();
+}
+
 function closeConfirmOverlay() {
   el('confirmOverlay').classList.remove('show');
   pendingConfirm = null;
+  resetConfirmOverlayButtons();
 }
 
 function confirmPendingAction() {
-  if (!pendingConfirm) return;
+  if (!pendingConfirm) {
+    closeConfirmOverlay();
+    return;
+  }
   const action = pendingConfirm;
   closeConfirmOverlay();
   if (action.cmd === 'clear_wifi_credentials_webui') {
@@ -1129,6 +1157,8 @@ function renderStatsAndSystem(s) {
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
   setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
+  setText('wifiSetupApStatus', s.system?.wifi_setup_ap_active ? 'an' : 'aus');
+  setText('wifiSetupApAddress', s.system?.wifi_setup_ap_active ? `WLAN: ${s.system?.wifi_setup_ap_ssid || 'Waagen-Setup'} / ${s.system?.wifi_setup_ap_ip || '192.168.4.1'}` : '---');
 
   const storedSsid = s.system?.wifi_stored_ssid || '';
   const storedPassword = !!s.system?.wifi_stored_password;
@@ -1326,6 +1356,38 @@ async function setWifiCredentialsActive(active) {
   }
 }
 
+async function setWifiSetupApEnabled(enabled) {
+  try {
+    addLog(enabled ? 'Setup-WLAN starten …' : 'Setup-WLAN stoppen …');
+    const response = await fetch(enabled ? '/api/wifi/setup-ap/start' : '/api/wifi/setup-ap/stop', { method: 'POST' });
+    if (!response.ok) {
+      const message = `Fehler beim ${enabled ? 'Starten' : 'Stoppen'} des Setup-WLANs: HTTP ${response.status}`;
+      addLog(message);
+      openInfoOverlay('Setup-WLAN Fehler', message);
+      return;
+    }
+    const data = await response.json();
+    addLog(data.message || (enabled ? 'Setup-WLAN gestartet.' : 'Setup-WLAN gestoppt.'));
+    if (typeof data.active === 'boolean') {
+      const ssid = data.ssid || 'Waagen-Setup';
+      const ip = data.ip || '192.168.4.1';
+      setText('wifiSetupApStatus', data.active ? 'an' : 'aus');
+      setText('wifiSetupApAddress', data.active ? `WLAN: ${ssid} / ${ip}` : '---');
+      if (data.active) {
+        openInfoOverlay('Setup-WLAN gestartet', `WLAN: ${ssid}
+Adresse: ${ip}
+Normale WebUI bleibt im Heim-WLAN erreichbar.`);
+      } else {
+        openInfoOverlay('Setup-WLAN gestoppt', 'Das Setup-WLAN wurde beendet. Die normale WebUI bleibt im Heim-WLAN erreichbar.');
+      }
+    }
+  } catch (err) {
+    const message = enabled ? 'Fehler beim Starten des Setup-WLANs' : 'Fehler beim Stoppen des Setup-WLANs';
+    addLog(message);
+    openInfoOverlay('Setup-WLAN Fehler', message);
+  }
+}
+
 function handleSaveClick() {
   if (lastState?.status?.save_ready) {
     sendCommand(CMD.saveDose, 'Save gesendet …');
@@ -1431,6 +1493,8 @@ function bindSettingsHandlers() {
     'clear_wifi_credentials_webui',
     'Gespeicherte WLAN-Daten löschen …'
   ));
+  el('startWifiSetupAp').addEventListener('click', () => setWifiSetupApEnabled(true));
+  el('stopWifiSetupAp').addEventListener('click', () => setWifiSetupApEnabled(false));
   el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
   el('restartDevice').addEventListener('click', () => openConfirmOverlay(
     'ESP32 wirklich neu starten?',
@@ -1524,6 +1588,67 @@ static const char PWA_MANIFEST_JSON[] PROGMEM = R"rawliteral({
   ]
 })rawliteral";
 
+static const char WIFI_SETUP_HTML[] PROGMEM = R"rawliteral(<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WLAN einrichten</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #f4f7fb; background: #061018; }
+    body { margin: 0; min-height: 100vh; padding: 18px; background: linear-gradient(180deg, #0b111b 0%, #061018 100%); }
+    main { max-width: 520px; margin: 0 auto; display: grid; gap: 14px; }
+    .card { background: #101b27; border: 1px solid rgba(148,163,184,.24); border-radius: 22px; padding: 18px; box-shadow: 0 18px 48px rgba(0,0,0,.32); }
+    h1 { margin: 0 0 8px; font-size: 1.35rem; }
+    p { color: #c4ccd8; line-height: 1.45; }
+    label { display: grid; gap: 6px; margin: 12px 0; color: #9aa8b8; }
+    input { box-sizing: border-box; width: 100%; border: 1px solid rgba(148,163,184,.38); border-radius: 12px; padding: 11px 12px; font: inherit; background: #0b1520; color: #f4f7fb; }
+    button { width: 100%; border: 1px solid rgba(85,195,66,.36); border-radius: 16px; padding: 14px; font-size: 1rem; font-weight: 750; background: linear-gradient(180deg, #55c342, #3fa72d); color: #f8fff8; cursor: pointer; }
+    button.secondary { margin-top: 10px; background: #1a2533; border-color: rgba(85,195,66,.46); }
+    .log { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: #0b1520; border: 1px solid rgba(148,163,184,.24); color: #c4ccd8; min-height: 1.2em; }
+    .hint { font-size: .92rem; color: #9aa8b8; }
+  </style>
+</head>
+<body>
+<main>
+  <section class="card">
+    <h1>WLAN einrichten</h1>
+    <p>Verbunden mit <b>Waagen-Setup</b>. Trage hier das WLAN ein, mit dem sich die Waage künftig verbinden soll.</p>
+    <form id="wifiSetupForm" autocomplete="off">
+      <label>SSID / WLAN-Name<input id="ssid" name="ssid" type="text" required placeholder="WLAN-Name"></label>
+      <label>Passwort<input id="password" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
+      <button type="submit">Speichern und verwenden</button>
+    </form>
+    <button id="reboot" class="secondary" type="button">ESP32 neu starten</button>
+    <p class="hint">Nach dem Speichern werden die Daten aktiviert. Starte die Waage danach neu. Wenn die Verbindung scheitert, nutzt sie automatisch wieder das Standard-WLAN aus der Firmware.</p>
+    <div id="log" class="log"></div>
+  </section>
+</main>
+<script>
+const log = document.getElementById('log');
+document.getElementById('wifiSetupForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = new URLSearchParams();
+  body.set('ssid', document.getElementById('ssid').value.trim());
+  body.set('password', document.getElementById('password').value);
+  log.textContent = 'Speichere WLAN-Daten …';
+  try {
+    const res = await fetch('/api/wifi/setup', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    const data = await res.json();
+    log.textContent = data.message || (res.ok ? 'Gespeichert. Bitte ESP32 neu starten.' : 'Fehler beim Speichern.');
+  } catch (err) {
+    log.textContent = 'Fehler beim Speichern der WLAN-Daten.';
+  }
+});
+document.getElementById('reboot').addEventListener('click', async () => {
+  log.textContent = 'Neustart angefordert …';
+  try { await fetch('/update/reboot', { method: 'POST' }); } catch (err) {}
+});
+</script>
+</body>
+</html>)rawliteral";
+
+
 // =============================================================================
 // C++: HTTP / WebSocket / State-Serialisierung
 // =============================================================================
@@ -1539,11 +1664,28 @@ static const char* appStatusLabel(AppStatusMode mode)
   }
 }
 
+static bool isSetupApHost(AsyncWebServerRequest* request)
+{
+  if (!request || !coffeeWifiSetupApActive()) {
+    return false;
+  }
+
+  const String host = request->host();
+  const String setupIp = coffeeWifiSetupApIp();
+  return setupIp.length() > 0 && host.startsWith(setupIp);
+}
+
 void coffeeWebHandleRoot(AsyncWebServerRequest* request)
 {
   if (!request) {
     return;
   }
+
+  if (isSetupApHost(request)) {
+    request->send_P(200, "text/html", WIFI_SETUP_HTML);
+    return;
+  }
+
   request->send_P(200, "text/html", INDEX_HTML);
 }
 
@@ -1634,6 +1776,72 @@ void coffeeWebBegin(AsyncWebServer& server)
       }
       return;
     }
+  });
+
+  server.on("/wifi-setup", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send_P(200, "text/html", WIFI_SETUP_HTML);
+  });
+
+  server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {
+    const bool ok = coffeeWifiStartSetupAp();
+    StaticJsonDocument<192> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok ? "Setup-WLAN gestartet: Waagen-Setup / 192.168.4.1" : "Setup-WLAN konnte nicht gestartet werden.";
+    doc["active"] = coffeeWifiSetupApActive();
+    doc["ssid"] = coffeeWifiSetupApSsid();
+    doc["ip"] = coffeeWifiSetupApIp();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 500, "application/json", out);
+  });
+
+  server.on("/api/wifi/setup-ap/stop", HTTP_POST, [](AsyncWebServerRequest* request) {
+    const bool ok = coffeeWifiStopSetupAp();
+    StaticJsonDocument<192> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok ? "Setup-WLAN gestoppt." : "Setup-WLAN konnte nicht gestoppt werden.";
+    doc["active"] = coffeeWifiSetupApActive();
+    doc["ssid"] = coffeeWifiSetupApSsid();
+    doc["ip"] = coffeeWifiSetupApIp();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 500, "application/json", out);
+  });
+
+  server.on("/api/wifi/setup", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("ssid", true)) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "SSID fehlt.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const String ssid = request->getParam("ssid", true)->value();
+    const String password = request->hasParam("password", true)
+                              ? request->getParam("password", true)->value()
+                              : String();
+    const bool saved = coffeeWifiSaveCredentials(ssid, password);
+    const bool activated = saved && coffeeWifiSetStoredCredentialsActive(true);
+
+    StaticJsonDocument<224> doc;
+    doc["ok"] = saved && activated;
+    doc["message"] = (saved && activated)
+                       ? "WLAN-Daten gespeichert und aktiviert. Bitte ESP32 neu starten."
+                       : "WLAN-Daten konnten nicht gespeichert oder aktiviert werden.";
+    doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+    doc["active"] = coffeeWifiStoredCredentialsAreActive();
+    doc["stored_ssid"] = coffeeWifiStoredSsid();
+    doc["stored_password"] = coffeeWifiStoredPasswordAvailable();
+
+    String out;
+    serializeJson(doc, out);
+    request->send((saved && activated) ? 200 : 400, "application/json", out);
   });
 
   server.on("/api/wifi/credentials", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -1850,6 +2058,9 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi_stored_credentials_active"] = coffeeWifiStoredCredentialsAreActive();
   doc["system"]["wifi_stored_ssid"] = coffeeWifiStoredSsid();
   doc["system"]["wifi_stored_password"] = coffeeWifiStoredPasswordAvailable();
+  doc["system"]["wifi_setup_ap_active"] = coffeeWifiSetupApActive();
+  doc["system"]["wifi_setup_ap_ssid"] = coffeeWifiSetupApSsid();
+  doc["system"]["wifi_setup_ap_ip"] = coffeeWifiSetupApIp();
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
 

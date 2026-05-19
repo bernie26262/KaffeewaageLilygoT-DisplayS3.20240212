@@ -38,7 +38,7 @@ Beim Start versucht die Waage, sich mit gespeicherten WLAN-Zugangsdaten zu verbi
 - Beispiel-SSID:
 
 ```text
-Kaffeewaage-Setup
+Waagen-Setup
 ```
 
 - Der Nutzer verbindet sich mit diesem WLAN.
@@ -62,8 +62,9 @@ Empfohlenes Verhalten:
 
 ```text
 WLAN einrichten
-Netz: Kaffeewaage-Setup
-Adresse: 192.168.4.1
+WLAN: Waagen-Setup
+Browser öffnen:
+192.168.4.1
 ```
 
 ## Einrichtungsseite
@@ -160,6 +161,22 @@ POST /wifi/clear
 
 Im normalen Betriebsmodus kann eine WLAN-Seite spaeter unter Einstellungen / System angeboten werden.
 
+
+### Phase 3a: Manueller Setup-Access-Point
+
+Der manuelle Setup-AP ist als sicherer Zwischenschritt vor einem echten Captive Portal gedacht. Er wird bewusst gestartet und laeuft parallel zur bestehenden WLAN-Verbindung im Modus `WIFI_AP_STA`. Dadurch bleiben WebUI und OTA im normalen WLAN erreichbar, waehrend das Setup-WLAN getestet werden kann.
+
+```text
+AP-SSID: Waagen-Setup
+AP-IP:   192.168.4.1
+Setup-Seite: http://192.168.4.1/
+Alternativ:  http://192.168.4.1/wifi-setup
+```
+
+Die Setup-Seite speichert SSID und Passwort in Preferences/NVS und aktiviert diese gespeicherten WLAN-Daten fuer den naechsten Neustart. Das echte WLAN-Passwort wird weiterhin nicht im Klartext an die WebUI zurueckgegeben.
+
+Dieser Schritt ist noch kein echtes Captive Portal: Es gibt noch keine DNS-Umleitung und kein automatisches Smartphone-Popup.
+
 ## Captive-Portal-Option
 
 Ein vollstaendiges Captive Portal ist komfortabel, aber nicht zwingend fuer den ersten Schritt.
@@ -191,19 +208,29 @@ Auf dem lokalen HMI wird OTA nicht benoetigt, weil Firmware- und Dateisystem-Upd
 
 Stattdessen ist fuer ein eigenstaendiges Geraet ein WLAN-Einrichtungsmodus wichtig.
 
-Im HMI sollte es daher unter Einstellungen / System eine Funktion geben:
+Fuer das HMI ist `pageID = 22` als Seite `WLAN / Netzwerk` reserviert. Nach aktuellem Layout stehen dort maximal fuenf Textzeilen zur Verfuegung. Die Seite soll daher nur Status und kurze Hilfe anzeigen, keine WLAN-Passworteingabe.
+
+Beispiel Normalbetrieb:
 
 ```text
-WLAN einrichten
+WLAN verbunden
+Quelle: gespeicherte Daten
+SSID: FRITZ!Box 6490 Cable
+IP: 192.168.11.83
+Setup ueber WebUI
 ```
 
-oder:
+Beispiel Setup-AP aktiv:
 
 ```text
-Setup-WLAN starten
+WLAN-Setup aktiv
+Mit Handy verbinden:
+WLAN: Waagen-Setup
+Browser oeffnen:
+192.168.4.1
 ```
 
-Damit kann der Nutzer das Geraet ohne erneutes Kompilieren in sein eigenes WLAN bringen.
+Damit kann der Nutzer das Geraet ohne erneutes Kompilieren in sein eigenes WLAN bringen; die eigentliche Eingabe erfolgt ueber Smartphone/Tablet in der WebUI.
 
 ## Umsetzbarkeit im aktuellen LilyGO T-Display S3 Projekt
 
@@ -228,11 +255,12 @@ Empfohlene schrittweise Umsetzung:
 5. Sichere Diagnose-/Loeschfunktion in der WebUI bereitstellen. ✅
 6. WLAN-Daten ueber die normale WebUI in NVS speichern, aber noch nicht automatisch aktivieren. ✅
 7. Gespeicherte WLAN-Daten explizit aktivieren/deaktivieren und bei Verbindungsfehler automatisch auf das Standard-WLAN aus der Firmware zurueckfallen. ✅
-8. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
-9. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
-10. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
-11. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-12. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+8. Manuellen Setup-Access-Point `Waagen-Setup` bereitstellen. ✅
+9. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen. ✅
+10. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Waagen-Setup` automatisch starten.
+11. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
+12. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+13. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 

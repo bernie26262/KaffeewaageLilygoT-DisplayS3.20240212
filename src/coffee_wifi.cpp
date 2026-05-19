@@ -11,6 +11,7 @@ constexpr const char* WIFI_PREF_NAMESPACE = "coffee_wifi";
 constexpr const char* WIFI_PREF_KEY_SSID = "ssid";
 constexpr const char* WIFI_PREF_KEY_PASS = "pass";
 constexpr const char* WIFI_PREF_KEY_ACTIVE = "active";
+constexpr const char* WIFI_SETUP_AP_SSID = "Waagen-Setup";
 
 CoffeeWifiCredentials activeCredentials;
 bool activeCredentialsLoaded = false;
@@ -19,6 +20,7 @@ bool storedCredentialsAvailable = false;
 bool storedCredentialsActive = false;
 String storedCredentialsSsid;
 bool storedCredentialsPasswordAvailable = false;
+bool setupApActive = false;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
 uint8_t activeCredentialsDisconnects = 0;
@@ -253,7 +255,7 @@ String coffeeWifiStatusSummary()
 void coffeeWifiBegin()
 {
   const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(setupApActive ? WIFI_AP_STA : WIFI_STA);
   WiFi.setSleep(false);
   resetActiveConnectionAttempt();
   WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
@@ -303,4 +305,47 @@ String coffeeWifiCurrentSsid()
 bool coffeeWifiUsingStoredCredentials()
 {
   return ensureActiveCredentials().fromPreferences;
+}
+
+
+const char* coffeeWifiSetupApSsid()
+{
+  return WIFI_SETUP_AP_SSID;
+}
+
+bool coffeeWifiStartSetupAp()
+{
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
+  setupApActive = ok;
+  return ok;
+}
+
+bool coffeeWifiStopSetupAp()
+{
+  // softAPdisconnect(true) kann auf manchen ESP32-Arduino-Versionen false
+  // liefern, obwohl der AP danach bereits beendet bzw. nicht mehr aktiv ist.
+  // Stoppen soll daher idempotent sein: Der Bediener erwartet, dass der
+  // Setup-AP danach aus ist, nicht dass ein bereits deaktivierter AP als
+  // Fehler gemeldet wird.
+  WiFi.softAPdisconnect(true);
+  delay(50);
+  setupApActive = false;
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  return true;
+}
+
+bool coffeeWifiSetupApActive()
+{
+  return setupApActive;
+}
+
+String coffeeWifiSetupApIp()
+{
+  if (!setupApActive) {
+    return String();
+  }
+  return WiFi.softAPIP().toString();
 }

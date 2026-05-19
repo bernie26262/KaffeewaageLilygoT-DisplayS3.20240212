@@ -35,3 +35,8 @@ void coffeeWifiMarkConnected();
 void coffeeWifiReconnect();
 String coffeeWifiCurrentSsid();
 bool coffeeWifiUsingStoredCredentials();
+const char* coffeeWifiSetupApSsid();
+bool coffeeWifiStartSetupAp();
+bool coffeeWifiStopSetupAp();
+bool coffeeWifiSetupApActive();
+String coffeeWifiSetupApIp();
