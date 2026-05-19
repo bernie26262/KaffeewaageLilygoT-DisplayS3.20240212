@@ -122,10 +122,17 @@ Phase 2b ergaenzt eine sichere WebUI-Speicherfunktion:
 - Die aktive Verbindung bleibt daher weiterhin bei `wifi_secrets.h`, solange keine spaetere Validierungslogik `active=true` setzt.
 - Nach dem Speichern sollte die WebUI anzeigen: `NVS-Daten vorhanden: ja`, aber weiterhin `Quelle: wifi_secrets.h`.
 
+Phase 2c ergaenzt eine explizite Aktivierung:
+
+- NVS-Daten koennen bewusst aktiviert oder deaktiviert werden.
+- Aktivierte NVS-Daten werden erst nach Neustart verwendet.
+- Falls die Verbindung mit aktivierten NVS-Daten scheitert, wird der Active-Marker geloescht und temporaer auf `wifi_secrets.h` zurueckgefallen.
+- Dadurch soll ein OTA-/WebUI-Lockout durch falsche NVS-Daten verhindert werden.
+
 Noch nicht enthalten:
 
 - Start des Setup-Access-Points
-- Webserver-Routen fuer Speichern/Aktivieren des Provisionings
+- Verbindungstest vor dem Setzen von `active=true`
 
 ## Webserver und Routen
 
@@ -209,11 +216,12 @@ Empfohlene schrittweise Umsetzung:
 4. Nach Phase-2a-Test: NVS-Daten nicht mehr ungeschuetzt automatisch aktivieren, sondern nur noch mit `active`-Marker. ✅
 5. Sichere Diagnose-/Loeschfunktion in der WebUI bereitstellen. ✅
 6. WLAN-Daten ueber die normale WebUI in NVS speichern, aber noch nicht automatisch aktivieren. ✅
-7. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
-8. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
-9. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
-10. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-11. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+7. NVS-Daten explizit aktivieren/deaktivieren und bei Verbindungsfehler automatisch auf `wifi_secrets.h` zurueckfallen. ✅
+8. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Kaffeewaage-Setup` starten.
+9. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen.
+10. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
+11. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+12. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 

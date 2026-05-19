@@ -1,5 +1,6 @@
 #include "coffee_wifi.h"
 
+#include <Arduino.h>
 #include <Preferences.h>
 #include <WiFi.h>
 
@@ -16,6 +17,16 @@ bool activeCredentialsLoaded = false;
 bool storedCredentialsKnown = false;
 bool storedCredentialsAvailable = false;
 bool storedCredentialsActive = false;
+uint32_t activeCredentialsConnectStartedMs = 0;
+bool activeCredentialsGotIp = false;
+uint8_t activeCredentialsDisconnects = 0;
+
+void resetActiveConnectionAttempt()
+{
+  activeCredentialsConnectStartedMs = millis();
+  activeCredentialsGotIp = false;
+  activeCredentialsDisconnects = 0;
+}
 
 void refreshStoredCredentialsCache()
 {
@@ -137,6 +148,30 @@ bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
   return ssidBytes > 0 && (password.length() == 0 || passBytes > 0) && activeBytes > 0;
 }
 
+bool coffeeWifiSetStoredCredentialsActive(bool active)
+{
+  Preferences prefs;
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+    return false;
+  }
+
+  String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
+  ssid.trim();
+  if (active && ssid.length() == 0) {
+    prefs.end();
+    refreshStoredCredentialsCache();
+    return false;
+  }
+
+  const size_t activeBytes = prefs.putBool(WIFI_PREF_KEY_ACTIVE, active);
+  prefs.end();
+
+  activeCredentialsLoaded = false;
+  activeCredentials = CoffeeWifiCredentials{};
+  refreshStoredCredentialsCache();
+  return activeBytes > 0;
+}
+
 bool coffeeWifiClearCredentials()
 {
   Preferences prefs;
@@ -191,12 +226,44 @@ void coffeeWifiBegin()
 {
   const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  resetActiveConnectionAttempt();
   WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+}
+
+void coffeeWifiMarkConnected()
+{
+  activeCredentialsGotIp = true;
+  activeCredentialsDisconnects = 0;
 }
 
 void coffeeWifiReconnect()
 {
   const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
+
+  // Sicherheitsnetz fuer Phase 2c:
+  // Aktivierte NVS-Daten werden nicht mehr beim ersten Disconnect sofort
+  // deaktiviert. Einige ESP32-/Router-Kombinationen erzeugen waehrend des
+  // frischen Verbindungsaufbaus kurze Disconnect-Events, obwohl die Daten
+  // korrekt sind. Erst wenn innerhalb eines Zeitfensters gar keine IP geholt
+  // wurde, wird der Active-Marker geloescht und dauerhaft auf wifi_secrets.h
+  // zurueckgefallen.
+  if (credentials.source == CoffeeWifiCredentialSource::Preferences) {
+    activeCredentialsDisconnects++;
+    const uint32_t elapsedMs = millis() - activeCredentialsConnectStartedMs;
+    if (!activeCredentialsGotIp && elapsedMs >= 20000UL) {
+      coffeeWifiSetStoredCredentialsActive(false);
+      activeCredentials = fallbackCredentials();
+      activeCredentialsLoaded = true;
+      resetActiveConnectionAttempt();
+      WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+      return;
+    }
+
+    WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+    return;
+  }
+
   WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
 }
 

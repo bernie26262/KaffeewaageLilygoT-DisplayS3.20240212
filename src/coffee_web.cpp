@@ -479,11 +479,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
         <div>Quelle: <b id="wifiCredentialSource">---</b></div>
         <div>NVS-Daten vorhanden: <b id="wifiStoredCredentials">---</b></div>
+        <div>NVS-Daten aktiv: <b id="wifiStoredCredentialsActive">---</b></div>
       </div>
-      <div class="small" style="margin-top: 10px;">Aktuell werden gespeicherte NVS-WLAN-Daten noch nicht automatisch aktiviert. Die Waage nutzt weiter die angezeigte Quelle.</div>
+      <div class="small" style="margin-top: 10px;">Gespeicherte NVS-WLAN-Daten werden nur nach expliziter Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, fällt die Waage automatisch auf wifi_secrets.h zurück.</div>
       <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
         <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
-        <div class="wifi-form-note">Speichert SSID und Passwort nur in NVS/Preferences. Die Daten werden noch nicht automatisch verwendet und blockieren die Verbindung über wifi_secrets.h nicht.</div>
+        <div class="wifi-form-note">Speichert SSID und Passwort nur in NVS/Preferences. Die Daten werden erst verwendet, wenn sie danach bewusst aktiviert werden.</div>
         <label><span>SSID</span><input id="wifiSetupSsid" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
         <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
         <div class="settings-actions">
@@ -491,6 +492,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         </div>
       </form>
       <div class="settings-actions" style="margin-top: 12px;">
+        <button id="activateWifiCredentials" class="secondary">NVS-WLAN aktivieren</button>
+        <button id="deactivateWifiCredentials" class="secondary">NVS-WLAN deaktivieren</button>
         <button id="clearWifiCredentials" class="secondary">NVS-WLAN-Daten löschen</button>
         <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
         <button id="restartDevice" class="danger">ESP32 neu starten</button>
@@ -651,6 +654,14 @@ function confirmPendingAction() {
   closeConfirmOverlay();
   if (action.cmd === 'clear_wifi_credentials_webui') {
     clearWifiCredentials();
+    return;
+  }
+  if (action.cmd === 'activate_wifi_credentials_webui') {
+    setWifiCredentialsActive(true);
+    return;
+  }
+  if (action.cmd === 'deactivate_wifi_credentials_webui') {
+    setWifiCredentialsActive(false);
     return;
   }
   sendCommand(action.cmd, action.logText);
@@ -1113,6 +1124,7 @@ function renderStatsAndSystem(s) {
   setText('wifiSsid', s.system?.wifi_ssid || '---');
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
+  setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
 }
 
 function renderActionAvailability(s) {
@@ -1213,6 +1225,12 @@ async function saveWifiCredentials(e) {
     }
     const data = await response.json();
     addLog(data.message || 'NVS-WLAN-Daten gespeichert. Sie werden noch nicht automatisch verwendet.');
+    if (typeof data.stored_credentials === 'boolean') {
+      setText('wifiStoredCredentials', data.stored_credentials ? 'ja' : 'nein');
+    }
+    if (typeof data.active === 'boolean') {
+      setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
+    }
     passwordInput.value = '';
   } catch (err) {
     addLog('Fehler beim Speichern der NVS-WLAN-Daten');
@@ -1229,8 +1247,35 @@ async function clearWifiCredentials() {
     }
     const data = await response.json();
     addLog(data.message || 'NVS-WLAN-Daten gelöscht. Bitte ESP32 neu starten.');
+    if (typeof data.stored_credentials === 'boolean') {
+      setText('wifiStoredCredentials', data.stored_credentials ? 'ja' : 'nein');
+    }
+    if (typeof data.active === 'boolean') {
+      setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
+    }
   } catch (err) {
     addLog('Fehler beim Löschen der NVS-WLAN-Daten');
+  }
+}
+
+async function setWifiCredentialsActive(active) {
+  try {
+    addLog(active ? 'NVS-WLAN aktivieren …' : 'NVS-WLAN deaktivieren …');
+    const response = await fetch(active ? '/api/wifi/credentials/activate' : '/api/wifi/credentials/deactivate', { method: 'POST' });
+    if (!response.ok) {
+      addLog(`Fehler beim Ändern der NVS-WLAN-Aktivierung: HTTP ${response.status}`);
+      return;
+    }
+    const data = await response.json();
+    addLog(data.message || 'NVS-WLAN-Aktivierung geändert. Bitte ESP32 neu starten.');
+    if (typeof data.stored_credentials === 'boolean') {
+      setText('wifiStoredCredentials', data.stored_credentials ? 'ja' : 'nein');
+    }
+    if (typeof data.active === 'boolean') {
+      setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
+    }
+  } catch (err) {
+    addLog('Fehler beim Ändern der NVS-WLAN-Aktivierung');
   }
 }
 
@@ -1321,6 +1366,18 @@ function bindSettingsHandlers() {
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
   el('wifiCredentialsForm').addEventListener('submit', saveWifiCredentials);
+  el('activateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
+    'NVS-WLAN aktivieren?',
+    'Beim nächsten Neustart versucht die Waage, die gespeicherten NVS-WLAN-Daten zu verwenden. Wenn das fehlschlägt, fällt sie automatisch auf wifi_secrets.h zurück.',
+    'activate_wifi_credentials_webui',
+    'NVS-WLAN aktivieren …'
+  ));
+  el('deactivateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
+    'NVS-WLAN deaktivieren?',
+    'Beim nächsten Neustart nutzt die Waage wieder sicher wifi_secrets.h. Gespeicherte NVS-WLAN-Daten bleiben erhalten.',
+    'deactivate_wifi_credentials_webui',
+    'NVS-WLAN deaktivieren …'
+  ));
   el('clearWifiCredentials').addEventListener('click', () => openConfirmOverlay(
     'NVS-WLAN-Daten löschen?',
     'Gespeicherte WLAN-Daten in NVS/Preferences werden gelöscht. Die aktuelle Verbindung über wifi_secrets.h bleibt bis zum Neustart unverändert.',
@@ -1533,6 +1590,42 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/api/wifi/credentials", HTTP_POST, [](AsyncWebServerRequest* request) {
+    // AsyncWebServer matched this handler also for the longer URLs
+    // /api/wifi/credentials/activate and /api/wifi/credentials/deactivate on the device.
+    // Dispatch those cases explicitly before treating the request as a credentials-save call.
+    const String requestUrl = request->url();
+    if (requestUrl.endsWith("/activate")) {
+      const bool ok = coffeeWifiSetStoredCredentialsActive(true);
+      StaticJsonDocument<224> doc;
+      doc["ok"] = ok;
+      doc["message"] = ok
+                         ? "NVS-WLAN aktiviert. Bitte ESP32 neu starten."
+                         : "NVS-WLAN konnte nicht aktiviert werden. Sind Daten gespeichert?";
+      doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+      doc["active"] = coffeeWifiStoredCredentialsAreActive();
+
+      String out;
+      serializeJson(doc, out);
+      request->send(ok ? 200 : 400, "application/json", out);
+      return;
+    }
+
+    if (requestUrl.endsWith("/deactivate")) {
+      const bool ok = coffeeWifiSetStoredCredentialsActive(false);
+      StaticJsonDocument<224> doc;
+      doc["ok"] = ok;
+      doc["message"] = ok
+                         ? "NVS-WLAN deaktiviert. Bitte ESP32 neu starten."
+                         : "NVS-WLAN konnte nicht deaktiviert werden.";
+      doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+      doc["active"] = coffeeWifiStoredCredentialsAreActive();
+
+      String out;
+      serializeJson(doc, out);
+      request->send(ok ? 200 : 500, "application/json", out);
+      return;
+    }
+
     if (!request->hasParam("ssid", true)) {
       StaticJsonDocument<160> doc;
       doc["ok"] = false;
@@ -1555,10 +1648,42 @@ void coffeeWebBegin(AsyncWebServer& server)
     doc["message"] = ok
                        ? "NVS-WLAN-Daten gespeichert. Sie werden noch nicht automatisch verwendet."
                        : "NVS-WLAN-Daten konnten nicht gespeichert werden.";
+    doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+    doc["active"] = coffeeWifiStoredCredentialsAreActive();
 
     String out;
     serializeJson(doc, out);
     request->send(ok ? 200 : 400, "application/json", out);
+  });
+
+  server.on("/api/wifi/credentials/activate", HTTP_POST, [](AsyncWebServerRequest* request) {
+    const bool ok = coffeeWifiSetStoredCredentialsActive(true);
+    StaticJsonDocument<224> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok
+                       ? "NVS-WLAN aktiviert. Bitte ESP32 neu starten."
+                       : "NVS-WLAN konnte nicht aktiviert werden. Sind Daten gespeichert?";
+    doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+    doc["active"] = coffeeWifiStoredCredentialsAreActive();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 400, "application/json", out);
+  });
+
+  server.on("/api/wifi/credentials/deactivate", HTTP_POST, [](AsyncWebServerRequest* request) {
+    const bool ok = coffeeWifiSetStoredCredentialsActive(false);
+    StaticJsonDocument<224> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok
+                       ? "NVS-WLAN deaktiviert. Bitte ESP32 neu starten."
+                       : "NVS-WLAN konnte nicht deaktiviert werden.";
+    doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+    doc["active"] = coffeeWifiStoredCredentialsAreActive();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 500, "application/json", out);
   });
 
   server.on("/api/wifi/credentials", HTTP_DELETE, [](AsyncWebServerRequest* request) {
@@ -1566,6 +1691,8 @@ void coffeeWebBegin(AsyncWebServer& server)
     StaticJsonDocument<192> doc;
     doc["ok"] = ok;
     doc["message"] = ok ? "NVS-WLAN-Daten gelöscht. Bitte ESP32 neu starten." : "NVS nicht erreichbar.";
+    doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
+    doc["active"] = coffeeWifiStoredCredentialsAreActive();
 
     String out;
     serializeJson(doc, out);
@@ -1607,7 +1734,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<2048> doc;
+  StaticJsonDocument<3072> doc;
 
   doc["type"] = "state";
 

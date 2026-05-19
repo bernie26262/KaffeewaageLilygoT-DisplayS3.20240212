@@ -549,6 +549,7 @@ void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info){
   debugln(coffeeWifiStatusSummary());
   debug("IP address: ");
   debugln(WiFi.localIP());
+  coffeeWifiMarkConnected();
 }
 
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info){
