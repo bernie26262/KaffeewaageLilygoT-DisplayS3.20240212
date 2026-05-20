@@ -195,6 +195,31 @@ byte selectedGefaess;
 String gefaess[] = {"Gefaess 1             ", "Gefaess 2             ", "Gefaess 3             ", "Gefaess 4             "};
 String menuentryTageReinigung;
 
+static const byte PAGE_WIFI_NETWORK = 22;
+static const byte PAGE_WIFI_SETUP_START = 24;
+static const byte PAGE_WIFI_SETUP_ACTIVE = 25;
+static const byte PAGE_WIFI_SETUP_SAVED = 26;
+static const byte HMI_PAGE_COUNT = 27;
+
+bool hmiWifiSetupWaitingForSave = false;
+uint32_t hmiWifiSetupRevisionAtStart = 0;
+
+static String fitHmiText(String text, uint8_t width = 24)
+{
+  text.trim();
+  if (text.length() > width) {
+    if (width > 3) {
+      text = text.substring(0, width - 3) + "...";
+    } else {
+      text = text.substring(0, width);
+    }
+  }
+  while (text.length() < width) {
+    text += ' ';
+  }
+  return text;
+}
+
 byte pageID = 0;
 byte newPageID = 0;
 const String headerOfPageID[] =
@@ -220,11 +245,14 @@ const String headerOfPageID[] =
   "Filterwechsel            ",   // 19
   "Mahlgewicht              ",   // 20
   "Anzahl Shots             ",   // 21
-  "IP-Adresse               ",   // 22
-  "Gefaess messen 4/4       "    // 23
+  "WLAN / Netzwerk          ",   // 22
+  "Gefaess messen 4/4       ",   // 23
+  "WLAN neu verbinden       ",   // 24
+  "WLAN-Setup aktiv         ",   // 25
+  "WLAN gespeichert         "    // 26
 };
 
-String menuItemsOfPage[24][4] =
+String menuItemsOfPage[HMI_PAGE_COUNT][4] =
 {  // Menu 0                      Menu 1                                 Menu 2                           Menu 3                               Page ID
   {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                ",       "Soll:              "},                   //0
   {"Gefaess messen         ",    "Kalibrieren               ",          "Autodetect            "        , "Pflege/Daten       "},               //1
@@ -240,7 +268,7 @@ String menuItemsOfPage[24][4] =
   {menuentryTageReinigung   ,    "Reset                       ",        "                              ", "                            "},      //11
   {menuentryTageReinigung   ,    "Reset                       ",        "                              ", "                            "},      //12
   {menuentryTageReinigung   ,    "Reset                       ",        "                              ", "                            "},      //13
-  {"Mahlgewichte         ",      "Shots                             ",  "IP-Adresse                    ", "                            "},      //14
+  {"Mahlgewichte         ",      "Shots                             ",  "WLAN/Netzwerk             ", "                            "},      //14
   {gefaess[selectedGefaess],     "Gefaess aufl.             ",          "                              ", "                            "},      //15
   {"Kalibrieren ok      ",       "OK                         ",         "                              ", "                            "},      //16
   {"Muehle reset?       ",       "OK                         ",         "                              ", "                            "},      //17
@@ -248,32 +276,35 @@ String menuItemsOfPage[24][4] =
   {"Filterwechsel reset?  ",     "OK                         ",         "                              ", "                            "},      //19
   {"Gesamt               ",      "Seit Reinigung                    ",  "OK                         ",    "                            "},      //20
   {"Gesamt               ",      "Seit Reinigung                    ",  "OK                         ",    "                            "},      //21
-  {"IP-Adresse           ",      "OK                         ",         "                              ", "                            "},      //22
-  {gefaess[selectedGefaess],     "Gefaess gemessen        ",            "OK                         ",    "                            "},      //10
+  {"SSID:                 ",     "                           ",        "IP:                         ",       "Setup starten          "},      //22
+  {gefaess[selectedGefaess],     "Gefaess gemessen        ",            "OK                         ",    "                            "},      //23
+  {"Mit WLAN Waagen-      ",      "Setup verbinden          ",             "IP: 192.168.4.1        ",       "aufrufen                "},      //24
+  {"Mit Handy verbinden:",       "WLAN: Waagen-Setup     ",             "Browser: 192.168.4.1   ",       "Weiter                 "},      //25
+  {"WLAN-Daten gespeich.",       "Neustart noetig        ",             "Neues WLAN aktiv       ",       "Beenden + Neustart     "},      //26
   
 };   
 
-//pageID                                            0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21 22 23 
-const byte footerOfPageID[] =                      {0, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};                      // es gibt zwei unterschiedliche Footer, die dargestellt werden können
-const byte firstMenuItemOnPage[] =                 {0, 0, 0, 4, 3, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 1, 2};                 //  bei 4 wird der Curser nicht dargestellt
-const byte lastMenuItemOnPage[] =                  {3, 3, 3, 4, 3, 3, 0, 1, 3, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 2, 1, 2};
-byte highlightedMenuItemWhenEnteringPage[] =       {3, 0, 0, 4, 3, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 1, 2};      // Wenn eine Seite betreten wird, wird der Cursor neben dieses Element gesetzt
-const bool actualWeightDisplayed[] =               {1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1};            // Wird das Ist-Gewicht auf der Seite dargestellt? 0=Nein, 1=Ja
-const bool setWeightDisplayed[] =                  {1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-const bool setWeightCalibrationdisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-const bool buttonMiddleActiveOnPage[] =            {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
-const int parentPageOfPageID[] =                   {0, 0, 0, 0, 0, 1, 1, 1, 1, 5, 6, 8, 8, 8, 8, 9, 10,11,12,13,14,14,14,15};
-const bool changeOfEncoderPosChangesMenuItem[] =   {1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};     // Auf den Seiten 4: Sollgewicht und 10: Kalibrieren,bekanntes Gewicht ändert der Encoder das Gewicht
-const bool dateTimeDisplayed[] =                   {1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-const bool timeTillCleanMuehleDisplayed[] =        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
-const bool timeTillCleanKaffeemDisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0};
-const bool timeTillChangeFilterDisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0};
-const bool warnungenDisplayed[]=                   {1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1};
-bool  callFunctionOfPage[24] =                     {0};
+//pageID                                            0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
+const byte footerOfPageID[] =                      {0, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};                      // es gibt zwei unterschiedliche Footer, die dargestellt werden können
+const byte firstMenuItemOnPage[] =                 {0, 0, 0, 4, 3, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};                 //  bei 4 wird der Curser nicht dargestellt
+const byte lastMenuItemOnPage[] =                  {3, 3, 3, 4, 3, 3, 0, 1, 3, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};
+byte highlightedMenuItemWhenEnteringPage[] =       {3, 0, 0, 4, 3, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};      // Wenn eine Seite betreten wird, wird der Cursor neben dieses Element gesetzt
+const bool actualWeightDisplayed[] =               {1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0};            // Wird das Ist-Gewicht auf der Seite dargestellt? 0=Nein, 1=Ja
+const bool setWeightDisplayed[] =                  {1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const bool setWeightCalibrationdisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const bool buttonMiddleActiveOnPage[] =            {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+const int parentPageOfPageID[] =                   {0, 0, 0, 0, 0, 1, 1, 1, 1, 5, 6, 8, 8, 8, 8, 9, 10,11,12,13,14,14,14,15,22,24,24};
+const bool changeOfEncoderPosChangesMenuItem[] =   {1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};     // Auf den Seiten 4: Sollgewicht und 10: Kalibrieren,bekanntes Gewicht ändert der Encoder das Gewicht
+const bool dateTimeDisplayed[] =                   {1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const bool timeTillCleanMuehleDisplayed[] =        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const bool timeTillCleanKaffeemDisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
+const bool timeTillChangeFilterDisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0};
+const bool warnungenDisplayed[]=                   {1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0};
+bool  callFunctionOfPage[HMI_PAGE_COUNT] =         {0};
 bool  callOfFunctionTerminated = 0;                                                          // pageEntered soll erst nach Beendigung der aufgerufenen Funktion auf 1 gestellt werden.
 bool  encoderPosChanged = false;
 
-const byte nextPageFromPageMenuCombi[24][5] =                                              // Abhängig von pageID und encPosition
+const byte nextPageFromPageMenuCombi[HMI_PAGE_COUNT][5] =                                 // Abhängig von pageID und encPosition
 { // M1  M2  M3  M4   Page ID
   {  1,  2,  3,  4, 0},  //0
   {  5,  6,  7,  8, 0},  //1
@@ -297,8 +328,11 @@ const byte nextPageFromPageMenuCombi[24][5] =                                   
   {  0,  0,  0,  0, 0},  //19
   {  0,  0,  0,  0, 0},  //20
   {  0,  0,  0,  0, 0},  //21
-  {  0,  0,  0,  0, 0},  //22
-  {  0,  0,  0,  0, 0}   //22
+  {  0,  0,  0, 24, 0},  //22
+  {  0,  0,  0,  0, 0},  //23
+  { 24, 24, 24, 24,24},  //24
+  { 25, 25, 25, 25,25},  //25
+  {  0,  0,  0, 26, 0}   //26
 };
 
 unsigned long timePageEntered = 0;
@@ -2119,6 +2153,13 @@ void RedrawTFTTime()
     tft.setFreeFont(FSS9);                 // Select the font MonoSpace 9pt
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString(timeHHMMSS,300,52,GFXFF);
+
+    // RedrawTFTTime() zeichnet Datum/Uhrzeit komplett neu.
+    // Danach die Vergleichswerte synchronisieren, damit die
+    // folgenden Teilupdates nicht auf einem alten Zustand aufsetzen.
+    oldtimeHH = timeinfo.tm_hour;
+    oldtimeMM = timeinfo.tm_min;
+    oldtimeSS = timeinfo.tm_sec;
 }
 void EraseTFTTime()
 {
@@ -2483,8 +2524,16 @@ void RefreshFooter()
   }
   if (footerOfPageID[pageID] == 1)
   {
+    const bool pageHasNoCursor = (firstMenuItemOnPage[pageID] == 4 && lastMenuItemOnPage[pageID] == 4);
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
-    tft.drawString("      Set      ",48,140,GFXFF);
+    if (pageHasNoCursor)
+    {
+      tft.drawString("               ",48,140,GFXFF);
+    }
+    else
+    {
+      tft.drawString("      Set      ",48,140,GFXFF);
+    }
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
     tft.drawString("   zurueck ",166,140,GFXFF);
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
@@ -2492,11 +2541,11 @@ void RefreshFooter()
     tft.setTextDatum(TL_DATUM); // Set datum to Top Left
 
     u8f.setFontDirection(0);            // left to right (this is default)
-    u8f.setForegroundColor(TFT_WHITE);  // apply colortft.print("     ");
     u8f.setBackgroundColor(TFT_BLACK);
     u8f.setFont(u8g2_font_unifont_t_symbols);     // extended font
     u8f.setFontMode(0);                 // use u8g2 transparent mode (this is default)
 
+    u8f.setForegroundColor(pageHasNoCursor ? TFT_BLACK : TFT_WHITE);
     u8f.drawGlyph(48,166,0x25bc); // Pfeil nach unten
     u8f.setForegroundColor(TFT_WHITE);
     u8f.drawGlyph(166,166,0x25bc);
@@ -2542,8 +2591,73 @@ void RefreshTFTAutodetect()  // nur auf pageID == 0 und nur wenn autodetect == 1
   }
 }
 
+static void updateHmiWifiMenuItems()
+{
+  if (pageID == PAGE_WIFI_NETWORK) {
+    String ssid = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : coffeeWifiCurrentSsid();
+    if (ssid.length() == 0) {
+      ssid = "-";
+    }
+    const String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("0.0.0.0");
+
+    menuItemsOfPage[PAGE_WIFI_NETWORK][0] = fitHmiText("SSID:");
+    menuItemsOfPage[PAGE_WIFI_NETWORK][1] = fitHmiText(ssid);
+    menuItemsOfPage[PAGE_WIFI_NETWORK][2] = fitHmiText("IP: " + ip);
+    menuItemsOfPage[PAGE_WIFI_NETWORK][3] = fitHmiText("Setup starten");
+    return;
+  }
+
+  if (pageID == PAGE_WIFI_SETUP_START) {
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][0] = fitHmiText("Mit WLAN Waagen-");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][1] = fitHmiText("Setup verbinden");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][2] = fitHmiText("IP: 192.168.4.1");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][3] = fitHmiText("aufrufen");
+    return;
+  }
+
+  if (pageID == PAGE_WIFI_SETUP_ACTIVE) {
+    menuItemsOfPage[PAGE_WIFI_SETUP_ACTIVE][0] = fitHmiText("WLAN-Setup aktiv");
+    menuItemsOfPage[PAGE_WIFI_SETUP_ACTIVE][1] = fitHmiText("WLAN: Waagen-Setup");
+    menuItemsOfPage[PAGE_WIFI_SETUP_ACTIVE][2] = fitHmiText("Browser:192.168.4.1");
+    menuItemsOfPage[PAGE_WIFI_SETUP_ACTIVE][3] = fitHmiText("Warten...");
+    return;
+  }
+
+  if (pageID == PAGE_WIFI_SETUP_SAVED) {
+    menuItemsOfPage[PAGE_WIFI_SETUP_SAVED][0] = fitHmiText("Daten gespeichert");
+    menuItemsOfPage[PAGE_WIFI_SETUP_SAVED][1] = fitHmiText("Neustart noetig");
+    menuItemsOfPage[PAGE_WIFI_SETUP_SAVED][2] = fitHmiText("WebUI oder HMI");
+    menuItemsOfPage[PAGE_WIFI_SETUP_SAVED][3] = fitHmiText("Neustart");
+  }
+}
+
+static void checkHmiWifiSetupSaved()
+{
+  if (pageID != PAGE_WIFI_SETUP_START || !hmiWifiSetupWaitingForSave) {
+    return;
+  }
+
+  if (coffeeWifiStoredCredentialsRevision() != hmiWifiSetupRevisionAtStart &&
+      coffeeWifiHasStoredCredentials() &&
+      coffeeWifiStoredCredentialsAreActive()) {
+    hmiWifiSetupWaitingForSave = false;
+    pageID = PAGE_WIFI_SETUP_SAVED;
+    pageEntered = true;
+  }
+}
+
+static void ClearTFTContentArea()
+{
+  // Allgemeines Loeschen des Inhaltsbereichs zwischen Header und Footer.
+  // Das verhindert Artefakte von laengeren Texten der vorherigen Seite,
+  // ohne einzelne Sonder-fillRect() fuer bestimmte Seiten einzufuehren.
+  tft.fillRect(0, 25, 320, 109, TFT_BLACK);
+}
+
 void RefreshTFTDisplay()
 {
+  updateHmiWifiMenuItems();
+  ClearTFTContentArea();
   
   tft.setTextDatum(TL_DATUM); // Set datum to Top Left
   tft.setFreeFont(FSS9);                 // Select the font MonoSpace 9pt
@@ -2603,6 +2717,34 @@ void RefreshTFTDisplay()
     stringifyActualWeight();
     RefreshTFTActualWeight();
   }
+  if (pageID == PAGE_WIFI_SETUP_START)
+  {
+    tft.setTextDatum(TL_DATUM);
+    tft.setFreeFont(FSS9);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(fitHmiText("Warten..."), 24, 112, GFXFF);
+  }
+  // Nach dem allgemeinen Loeschen des Inhaltsbereichs muessen Datum
+  // und Uhrzeit auf Seiten mit Datums-/Uhrzeitanzeige komplett neu
+  // gezeichnet werden. Sonst bleibt das Feld beim Ruecksprung auf
+  // pageID 0 leer, bis sich einzelne Ziffern aendern.
+  if (dateTimeDisplayed[pageID] == 1)
+  {
+    RedrawTFTTime();
+  }
+  if (timeTillCleanMuehleDisplayed[pageID] == 1)
+  {
+    RedrawTFTTimeToCleanMuehle();
+  }
+  if (timeTillCleanKaffeemDisplayed[pageID] == 1)
+  {
+    RedrawTFTTimeToCleanKaffeem();
+  }
+  if (timeTillChangeFilterDisplayed[pageID] == 1)
+  {
+    RedrawTFTTimeToChangeFilter();
+  }
+
   // Footer
   RefreshFooter();
  
@@ -3323,6 +3465,11 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
         highlightedMenuItemWhenEnteringPage[pageID] = menuItemPos;    //zum Merken des zuletzt gewählten Menu-Eintrags. Wird bei Neustart der Mühle wieder zurückgesetzt
        
         newPageID = parentPageOfPageID[pageID];
+
+       if (pageID == PAGE_WIFI_SETUP_START) {
+        coffeeWifiStopSetupAp();
+        hmiWifiSetupWaitingForSave = false;
+       }
     
        if (11 <= pageID <= 22)                       // alle Pflege/Daten-Untermenüs
        {
@@ -3396,6 +3543,12 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
       highlightedMenuItemWhenEnteringPage[pageID] = menuItemPos;    //zum Merken des zuletzt gewählten Menu-Eintrags. Wird bei Neustart der Mühle wieder zurückgesetzt
       debugln("Home");
       newPageID = 0;
+
+      if (pageID == PAGE_WIFI_SETUP_START || pageID == PAGE_WIFI_SETUP_SAVED) {
+        coffeeWifiStopSetupAp();
+        hmiWifiSetupWaitingForSave = false;
+      }
+
       RedrawTFTTime();
       
        
@@ -3702,8 +3855,33 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   if (callFunctionOfPage[22] == 1)
   {
     callFunctionOfPage[22] = 0;
-    
+    hmiWifiSetupRevisionAtStart = coffeeWifiStoredCredentialsRevision();
+    hmiWifiSetupWaitingForSave = true;
+    coffeeWifiStartSetupAp();
     callOfFunctionTerminated = 1;
+  }
+
+  if (callFunctionOfPage[24] == 1)
+  {
+    callFunctionOfPage[24] = 0;
+    callOfFunctionTerminated = 1;
+  }
+
+  if (callFunctionOfPage[25] == 1)
+  {
+    callFunctionOfPage[25] = 0;
+    callOfFunctionTerminated = 1;
+  }
+
+  if (callFunctionOfPage[26] == 1)
+  {
+    callFunctionOfPage[26] = 0;
+    coffeeOtaRequestReboot();
+    // Auf der WLAN-Abschlussseite soll OK keine weitere Seitennavigation
+    // ausloesen, sondern ausschliesslich den Neustart anfordern.
+    // Der Neustart erfolgt verzoegert ueber coffeeOtaLoop().
+    buttonPressedRotarySW = 0;
+    callOfFunctionTerminated = 0;
   }
 }
 
@@ -3843,6 +4021,7 @@ void loop(void)
   LoadCell.update();
   actualWeight = LoadCell.getData();
   updateCoffeeAppStateFromGlobals();
+  checkHmiWifiSetupSaved();
   const unsigned long nowWebMs = millis();
   const float webWeightDelta = actualWeight - lastWebBroadcastWeightG;
   const bool webWeightChanged = !hasWebBroadcastWeight ||

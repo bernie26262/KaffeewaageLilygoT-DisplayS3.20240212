@@ -27,6 +27,7 @@ bool coffeeWifiStoredPasswordAvailable();
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password);
 bool coffeeWifiSetStoredCredentialsActive(bool active);
 bool coffeeWifiClearCredentials();
+uint32_t coffeeWifiStoredCredentialsRevision();
 CoffeeWifiCredentialSource coffeeWifiCredentialSource();
 const char* coffeeWifiCredentialSourceLabel();
 String coffeeWifiStatusSummary();

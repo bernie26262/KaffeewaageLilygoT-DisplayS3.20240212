@@ -208,27 +208,57 @@ Auf dem lokalen HMI wird OTA nicht benoetigt, weil Firmware- und Dateisystem-Upd
 
 Stattdessen ist fuer ein eigenstaendiges Geraet ein WLAN-Einrichtungsmodus wichtig.
 
-Fuer das HMI ist `pageID = 22` als Seite `WLAN / Netzwerk` reserviert. Nach aktuellem Layout stehen dort maximal fuenf Textzeilen zur Verfuegung. Die Seite soll daher nur Status und kurze Hilfe anzeigen, keine WLAN-Passworteingabe.
+Fuer das HMI ist `pageID = 22` als Seite `WLAN / Netzwerk` vorgesehen. Nach aktuellem Layout stehen dort maximal fuenf Textzeilen zur Verfuegung. Die Seite ist deshalb bewusst nur Status-/Hilfeseite; eine WLAN-Passworteingabe am TFT ist nicht vorgesehen.
 
-Beispiel Normalbetrieb:
+Die HMI-Seiten fuer WLAN verwenden die bestehende Page-/Cursor-/Footer-Logik:
+
+- `pageID = 22`: WLAN-/Netzwerkstatus und Einstieg `Setup starten`
+- `pageID = 24`: Setup-WLAN laeuft, Anleitung fuer Smartphone/Tablet; keine Cursor-Zeile
+- `pageID = 25`: aktuell nicht Teil des aktiven WLAN-Ablaufs, fuer spaetere Erweiterungen reserviert
+- `pageID = 26`: WLAN-Daten gespeichert, Neustart anbieten
+
+Navigation:
+
+- `22 -> 24`: `Set` auf `Setup starten` startet den Setup-AP `Waagen-Setup`
+- `24`: zeigt nur die Anleitung und `Warten...`; nach erfolgreichem Speichern ueber `192.168.4.1` wechselt das HMI automatisch zu `26`
+- `24 + Zurueck` oder `24 + Home`: Setup-AP wird gestoppt
+- `26 + Home`: Setup-AP wird gestoppt und die Root-Seite geoeffnet
+- `26 + Zurueck`: zurueck zur Anleitungsseite `24`
+- `OK/Set` auf `26` auf dem Eintrag `Neustart` fordert einen ESP32-Neustart an
+
+`pageID = 23` bleibt unveraendert fuer `Gefaess gemessen` reserviert.
+
+Beispiel Normalbetrieb (`pageID = 22`):
 
 ```text
-WLAN verbunden
-Quelle: gespeicherte Daten
-SSID: FRITZ!Box 6490 Cable
+WLAN / Netzwerk
+SSID: FRITZ!Box...
 IP: 192.168.11.83
-Setup ueber WebUI
+
+Setup starten
 ```
 
-Beispiel Setup-AP aktiv:
+Beispiel Setup-AP aktiv (`pageID = 24`):
 
 ```text
-WLAN-Setup aktiv
-Mit Handy verbinden:
-WLAN: Waagen-Setup
-Browser oeffnen:
-192.168.4.1
+WLAN neu verbinden
+Im WLAN Waagen-
+Setup verbinden
+Browser: 192.168.4.1
+Warten...
 ```
+
+Beispiel nach erfolgreichem Speichern ueber `192.168.4.1` (`pageID = 26`):
+
+```text
+WLAN gespeichert
+Daten gespeichert
+Neustart noetig
+WebUI oder HMI
+Neustart
+```
+
+Der Inhaltsbereich wird beim Seitenwechsel allgemein geloescht, damit keine Artefakte laengerer Texte aus vorherigen WLAN-Seiten stehen bleiben. Die Setup-Seite unter `192.168.4.1` bestaetigt erfolgreiches Speichern zusaetzlich mit einem OK-Overlay.
 
 Damit kann der Nutzer das Geraet ohne erneutes Kompilieren in sein eigenes WLAN bringen; die eigentliche Eingabe erfolgt ueber Smartphone/Tablet in der WebUI.
 
@@ -257,10 +287,11 @@ Empfohlene schrittweise Umsetzung:
 7. Gespeicherte WLAN-Daten explizit aktivieren/deaktivieren und bei Verbindungsfehler automatisch auf das Standard-WLAN aus der Firmware zurueckfallen. ✅
 8. Manuellen Setup-Access-Point `Waagen-Setup` bereitstellen. ✅
 9. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen. ✅
-10. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Waagen-Setup` automatisch starten.
-11. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
-12. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-13. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+10. HMI-Seiten `22`, `24`, `25` und `26` fuer WLAN-Status, Setup-Start, Setup-Hinweis und Neustart-Hinweis vorbereiten. ✅
+11. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Waagen-Setup` automatisch starten.
+12. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
+13. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+14. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 
@@ -273,3 +304,10 @@ Fuer die Entwicklung sollte der Umbau vorsichtig erfolgen:
 - Erst nach erfolgreichen Tests die fest einkompilierten Secrets entfernen.
 
 So bleibt das aktuell verbaute Geraet erreichbar und das Risiko eines OTA-Lockouts bleibt gering.
+
+
+### HMI-Korrektur: WLAN-Setup-Hinweis und Wartungszeiten
+
+- pageID 22 zeigt SSID und IP bewusst knapp; lange SSIDs werden mit `...` gekuerzt, damit keine Display-Artefakte entstehen.
+- pageID 24 verwendet die Formulierung `Mit WLAN Waagen- / Setup verbinden / Browser:192.168.4.1 / Warten...`.
+- Die Wartungsseiten 11, 12 und 13 zeichnen ihre Zeitangaben nach einem Seitenwechsel wieder vollstaendig neu, weil der allgemeine Inhaltsbereich beim Seitenwechsel geloescht wird. Danach laufen die bestehenden Teilupdates weiter.

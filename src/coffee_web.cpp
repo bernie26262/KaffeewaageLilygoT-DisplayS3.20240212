@@ -1607,6 +1607,11 @@ static const char WIFI_SETUP_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     button.secondary { margin-top: 10px; background: #1a2533; border-color: rgba(85,195,66,.46); }
     .log { margin-top: 12px; padding: 10px 12px; border-radius: 14px; background: #0b1520; border: 1px solid rgba(148,163,184,.24); color: #c4ccd8; min-height: 1.2em; }
     .hint { font-size: .92rem; color: #9aa8b8; }
+    .modal-backdrop { position: fixed; inset: 0; display: none; place-items: center; padding: 18px; background: rgba(2,6,12,.72); z-index: 20; }
+    .modal-backdrop.show { display: grid; }
+    .modal { width: min(420px, 100%); background: #101b27; border: 1px solid rgba(148,163,184,.24); border-radius: 22px; padding: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.48); }
+    .modal-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 8px; }
+    .modal-text { color: #c4ccd8; white-space: pre-line; margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -1624,8 +1629,23 @@ static const char WIFI_SETUP_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div id="log" class="log"></div>
   </section>
 </main>
+<div id="infoOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+  <div class="modal">
+    <div class="modal-title" id="infoTitle">Hinweis</div>
+    <div class="modal-text" id="infoText"></div>
+    <button id="infoOk" type="button">OK</button>
+  </div>
+</div>
 <script>
 const log = document.getElementById('log');
+function openInfoOverlay(title, text) {
+  document.getElementById('infoTitle').textContent = title;
+  document.getElementById('infoText').textContent = text;
+  document.getElementById('infoOverlay').classList.add('show');
+}
+document.getElementById('infoOk').addEventListener('click', () => {
+  document.getElementById('infoOverlay').classList.remove('show');
+});
 document.getElementById('wifiSetupForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = new URLSearchParams();
@@ -1635,7 +1655,11 @@ document.getElementById('wifiSetupForm').addEventListener('submit', async (e) =>
   try {
     const res = await fetch('/api/wifi/setup', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
     const data = await res.json();
-    log.textContent = data.message || (res.ok ? 'Gespeichert. Bitte ESP32 neu starten.' : 'Fehler beim Speichern.');
+    const message = data.message || (res.ok ? 'Gespeichert. Bitte ESP32 neu starten.' : 'Fehler beim Speichern.');
+    log.textContent = message;
+    if (res.ok) {
+      openInfoOverlay('WLAN-Daten gespeichert', 'Die WLAN-Daten wurden gespeichert und aktiviert.\nBitte starte die Waage neu.');
+    }
   } catch (err) {
     log.textContent = 'Fehler beim Speichern der WLAN-Daten.';
   }

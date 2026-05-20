@@ -21,6 +21,7 @@ bool storedCredentialsActive = false;
 String storedCredentialsSsid;
 bool storedCredentialsPasswordAvailable = false;
 bool setupApActive = false;
+uint32_t storedCredentialsRevision = 0;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
 uint8_t activeCredentialsDisconnects = 0;
@@ -158,6 +159,7 @@ bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
   prefs.end();
 
   refreshStoredCredentialsCache();
+  storedCredentialsRevision++;
 
   return ssidBytes > 0 && (passwordToStore.length() == 0 || passBytes > 0) && activeBytes > 0;
 }
@@ -199,6 +201,7 @@ bool coffeeWifiSetStoredCredentialsActive(bool active)
   activeCredentialsLoaded = false;
   activeCredentials = CoffeeWifiCredentials{};
   refreshStoredCredentialsCache();
+  storedCredentialsRevision++;
   return activeBytes > 0;
 }
 
@@ -217,11 +220,17 @@ bool coffeeWifiClearCredentials()
   activeCredentialsLoaded = false;
   activeCredentials = CoffeeWifiCredentials{};
   refreshStoredCredentialsCache();
+  storedCredentialsRevision++;
 
   (void)ssidRemoved;
   (void)passRemoved;
   (void)activeRemoved;
   return true;
+}
+
+uint32_t coffeeWifiStoredCredentialsRevision()
+{
+  return storedCredentialsRevision;
 }
 
 CoffeeWifiCredentialSource coffeeWifiCredentialSource()
