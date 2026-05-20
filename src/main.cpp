@@ -2745,6 +2745,19 @@ void RefreshTFTDisplay()
     RedrawTFTTimeToChangeFilter();
   }
 
+  // Nach dem allgemeinen Loeschen des Inhaltsbereichs muessen auch
+  // die Daten-Unterseiten ihre Werte komplett neu zeichnen. Sonst
+  // werden Mahlgewichte/Shots beim Seitenwechsel kurz gezeichnet und
+  // anschliessend durch ClearTFTContentArea() wieder geloescht.
+  if (pageID == 20)
+  {
+    RefreshTFTMahlgewichte();
+  }
+  if (pageID == 21)
+  {
+    RefreshTFTShots();
+  }
+
   // Footer
   RefreshFooter();
  
@@ -4028,8 +4041,9 @@ void loop(void)
     webWeightDelta > WEB_STATE_WEIGHT_BROADCAST_DELTA_G ||
     webWeightDelta < -WEB_STATE_WEIGHT_BROADCAST_DELTA_G;
 
-  if ((nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_FULL_BROADCAST_INTERVAL_MS) ||
-      (webWeightChanged && nowWebMs - lastWebWeightBroadcastMs >= WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS))
+  if (coffeeWebHasClients() &&
+      ((nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_FULL_BROADCAST_INTERVAL_MS) ||
+       (webWeightChanged && nowWebMs - lastWebWeightBroadcastMs >= WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS)))
   {
     lastWebStateBroadcastMs = nowWebMs;
     lastWebWeightBroadcastMs = nowWebMs;

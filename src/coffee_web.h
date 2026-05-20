@@ -9,4 +9,5 @@ void coffeeWebBegin(AsyncWebServer& server);
 void coffeeWebHandleRoot(AsyncWebServerRequest* request);
 void coffeeWebLoop();
 void coffeeWebBroadcastState(const AppState& state);
+bool coffeeWebHasClients();
 void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler);

@@ -311,3 +311,16 @@ So bleibt das aktuell verbaute Geraet erreichbar und das Risiko eines OTA-Lockou
 - pageID 22 zeigt SSID und IP bewusst knapp; lange SSIDs werden mit `...` gekuerzt, damit keine Display-Artefakte entstehen.
 - pageID 24 verwendet die Formulierung `Mit WLAN Waagen- / Setup verbinden / Browser:192.168.4.1 / Warten...`.
 - Die Wartungsseiten 11, 12 und 13 zeichnen ihre Zeitangaben nach einem Seitenwechsel wieder vollstaendig neu, weil der allgemeine Inhaltsbereich beim Seitenwechsel geloescht wird. Danach laufen die bestehenden Teilupdates weiter.
+
+### WebUI-Korrektur: eigener WLAN-Tab in den Einstellungen
+
+Die WLAN-Funktionen sind in der WebUI nicht mehr unter `Einstellungen -> System / OTA` gebuendelt. Stattdessen gibt es einen eigenen Untertab `WLAN`.
+
+Ziel der Aufteilung:
+
+- `Wartung`: Wartungsstatus und Wartungs-Reset
+- `Waage & Gefaeße`: Kalibrierung, Gefaeße einmessen und Gesamtwerte
+- `WLAN`: WLAN-Status, gespeicherte WLAN-Daten, Setup-WLAN und Aktivierung/Deaktivierung
+- `System / OTA`: Update-Seite, ESP32-Neustart und Log
+
+Damit bleiben die sicherheitsrelevanten WLAN-Funktionen zusammen, waehrend `System / OTA` wieder kurz und uebersichtlich bleibt.

@@ -207,7 +207,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     .settings-subnav-title { margin: 0 0 10px; color: var(--muted); font-size: .82rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
     .settings-subnav {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 6px;
       padding: 6px;
       border: 1px solid var(--border);
@@ -417,6 +417,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <nav class="settings-subnav" aria-label="Einstellungen">
       <button class="settings-tab-button active" type="button" data-settings-tab="settingsMaintenancePanel">Wartung</button>
       <button class="settings-tab-button" type="button" data-settings-tab="settingsScalePanel">Waage & Gefäße</button>
+      <button class="settings-tab-button" type="button" data-settings-tab="settingsWifiPanel">WLAN</button>
       <button class="settings-tab-button" type="button" data-settings-tab="settingsSystemPanel">System / OTA</button>
     </nav>
   </section>
@@ -455,10 +456,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="openMeasureGefaess" class="secondary">Gefäß einmessen</button>
       </div>
     </section>
-  </div>
 
-  <div id="settingsSystemPanel" class="settings-section hidden">
-    <div class="settings-section-title">System / OTA</div>
     <section class="card">
       <div class="stats-title">Gesamtwerte</div>
       <div class="small">Gesamtzahl Shots und Gesamtgewicht Mahlgut manuell korrigieren.</div>
@@ -470,10 +468,13 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="openStatsTotals" class="secondary">Gesamtwerte ändern</button>
       </div>
     </section>
+  </div>
 
+  <div id="settingsWifiPanel" class="settings-section hidden">
+    <div class="settings-section-title">WLAN</div>
+    <div class="settings-section-hint">Verbindung, gespeicherte WLAN-Daten und Setup-WLAN.</div>
     <section class="card">
-      <div class="stats-title">System</div>
-      <div class="small">Firmware-Update und Neustart.</div>
+      <div class="stats-title">WLAN-Status</div>
       <div class="settings-list small" style="margin-top: 12px;">
         <div>WLAN: <b id="wifiStatus">---</b></div>
         <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
@@ -503,6 +504,16 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
         <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
         <button id="stopWifiSetupAp" class="secondary">Setup-WLAN stoppen</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="settingsSystemPanel" class="settings-section hidden">
+    <div class="settings-section-title">System / OTA</div>
+    <section class="card">
+      <div class="stats-title">System</div>
+      <div class="small">Firmware-Update und Neustart.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
         <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
         <button id="restartDevice" class="danger">ESP32 neu starten</button>
       </div>
@@ -632,7 +643,7 @@ function showTab(targetPageId) {
 }
 
 function showSettingsTab(targetPanelId) {
-  ['settingsMaintenancePanel', 'settingsScalePanel', 'settingsSystemPanel'].forEach(panelId => {
+  ['settingsMaintenancePanel', 'settingsScalePanel', 'settingsWifiPanel', 'settingsSystemPanel'].forEach(panelId => {
     el(panelId).classList.toggle('hidden', panelId !== targetPanelId);
   });
   document.querySelectorAll('.settings-tab-button').forEach(button => {
@@ -1699,6 +1710,32 @@ static bool isSetupApHost(AsyncWebServerRequest* request)
   return setupIp.length() > 0 && host.startsWith(setupIp);
 }
 
+static void sendProgmemHtmlChunked(AsyncWebServerRequest* request, const char* html)
+{
+  if (!request || !html) {
+    return;
+  }
+
+  const size_t totalLen = strlen_P(html);
+  AsyncWebServerResponse* response = request->beginChunkedResponse(
+    "text/html",
+    [html, totalLen](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+      if (index >= totalLen) {
+        return 0;
+      }
+
+      const size_t remaining = totalLen - index;
+      const size_t chunkLen = remaining < maxLen ? remaining : maxLen;
+      memcpy_P(buffer, html + index, chunkLen);
+      return chunkLen;
+    });
+
+  // Die WebUI wird direkt aus dem Firmware-Image geliefert. Nach OTA- oder
+  // WLAN-Setup-Aenderungen soll der Browser sie sicher neu laden.
+  response->addHeader("Cache-Control", "no-store");
+  request->send(response);
+}
+
 void coffeeWebHandleRoot(AsyncWebServerRequest* request)
 {
   if (!request) {
@@ -1706,11 +1743,11 @@ void coffeeWebHandleRoot(AsyncWebServerRequest* request)
   }
 
   if (isSetupApHost(request)) {
-    request->send_P(200, "text/html", WIFI_SETUP_HTML);
+    sendProgmemHtmlChunked(request, WIFI_SETUP_HTML);
     return;
   }
 
-  request->send_P(200, "text/html", INDEX_HTML);
+  sendProgmemHtmlChunked(request, INDEX_HTML);
 }
 
 
@@ -1803,7 +1840,7 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/wifi-setup", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send_P(200, "text/html", WIFI_SETUP_HTML);
+    sendProgmemHtmlChunked(request, WIFI_SETUP_HTML);
   });
 
   server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -2095,5 +2132,13 @@ static String buildStateJson(const AppState& s)
 
 void coffeeWebBroadcastState(const AppState& state)
 {
+  if (!coffeeWebHasClients()) {
+    return;
+  }
   ws.textAll(buildStateJson(state));
+}
+
+bool coffeeWebHasClients()
+{
+  return ws.count() > 0;
 }
