@@ -27,8 +27,250 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <style>
-    /* ===== Basis / Layout ===== */
+  <link rel="stylesheet" href="/coffee.css?v=3b">
+</head>
+<body>
+<main>
+  <section class="card top">
+    <h1>Single-Dose-Waage</h1>
+    <span id="ws" class="pill">Getrennt</span>
+  </section>
+
+  <section class="bottom-nav-shell" aria-label="Hauptnavigation">
+    <nav class="tab-nav">
+      <button class="tab-button active" type="button" data-tab="scalePage"><span class="tab-icon" aria-hidden="true">⚖</span><span>Waage</span></button>
+      <button class="tab-button" type="button" data-tab="timerPage"><span class="tab-icon" aria-hidden="true">⏱</span><span>Stoppuhr</span></button>
+      <button class="tab-button" type="button" data-tab="statsPage"><span class="tab-icon" aria-hidden="true">▦</span><span>Daten</span></button>
+      <button class="tab-button" type="button" data-tab="settingsPage"><span class="tab-icon" aria-hidden="true">⚙</span><span>Einstellungen</span></button>
+    </nav>
+  </section>
+
+  <div id="scalePage" class="page">
+  <section class="card">
+    <div class="label">Gewicht</div>
+    <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
+    <span style="display:none">Status: <b><span id="status">---</span></b></span>
+
+    <div class="scale-controls">
+      <div class="scale-target-row small">
+        <span class="label">Sollgewicht</span>
+        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
+        <span>g</span>
+        <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem;">Speichern</button>
+      </div>
+
+      <div class="button-row">
+        <button id="tare" class="compact secondary">Tara</button>
+        <button id="save" class="compact" disabled>Save Dose</button>
+      </div>
+
+      <div class="autodetect-row small" style="margin-bottom: 0; padding-bottom: 0; border-bottom: 0;">
+        <span>Autodetect</span>
+        <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
+          <span id="autodetectLed" class="autodetect-led"></span>
+          <span id="autodetectStatus">---</span>
+        </button>
+      </div>
+
+      <div class="scale-select-row small">
+        <span class="label">Siebträger</span>
+        <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
+          <option value="0">Bodenloser ST</option>
+          <option value="1">1er-Siebträger</option>
+          <option value="2">2er-Siebträger</option>
+          <option value="3">Custom-ST</option>
+        </select>
+      </div>
+    </div>
+  </section>
+  </div>
+
+  <div id="timerPage" class="page hidden">
+  <section class="card">
+    <div class="label">Stoppuhr</div>
+    <div class="value" id="stopwatch">00:00:00:0</div>
+    <div class="grid" style="margin-top: 12px;">
+      <button id="swToggle" class="secondary" disabled>Start / Stop</button>
+      <button id="swReset" class="secondary" disabled>Reset</button>
+    </div>
+  </section>
+  </div>
+
+  <div id="statsPage" class="page hidden">
+  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
+    <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
+    <ul class="maintenance-list" id="maintenanceList"></ul>
+  </section>
+
+  <section class="card">
+    <div class="stats-grid">
+      <div>
+        <div class="stats-title">Shots</div>
+        <div class="stat-row"><span>gesamt:</span><span id="shotsTotal">0</span></div>
+        <div class="stat-row"><span>seit Reinigung Kaffeemaschine:</span><span id="shotsMachine">0</span></div>
+        <div class="stat-row"><span>seit Reinigung Mühle:</span><span id="shotsGrinder">0</span></div>
+        <div class="stat-row"><span>seit Filterwechsel:</span><span id="shotsFilter">0</span></div>
+      </div>
+      <div>
+        <div class="stats-title">Mahlgut</div>
+        <div class="stat-row"><span>gesamt:</span><span><span id="groundTotalKg">0.00</span> kg</span></div>
+        <div class="stat-row"><span>seit Reinigung Kaffeemaschine:</span><span><span id="groundMachineG">0</span> g</span></div>
+        <div class="stat-row"><span>seit Reinigung Mühle:</span><span><span id="groundGrinderG">0</span> g</span></div>
+        <div class="stat-row"><span>seit Filterwechsel:</span><span><span id="groundFilterG">0</span> g</span></div>
+      </div>
+    </div>
+    <div class="ip-row small">
+      <div>Datum/Zeit: <b class="mono" id="datetime">---</b></div>
+      <div>Uptime: <b class="mono" id="uptime">---</b></div>
+      <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
+    </div>
+  </section>
+  </div>
+
+  <div id="settingsPage" class="page hidden">
+  <section class="card settings-subnav-card">
+    <div class="settings-subnav-title">Einstellungen</div>
+    <nav class="settings-subnav" aria-label="Einstellungen">
+      <button class="settings-tab-button active" type="button" data-settings-tab="settingsMaintenancePanel">Wartung</button>
+      <button class="settings-tab-button" type="button" data-settings-tab="settingsScalePanel">Waage & Gefäße</button>
+      <button class="settings-tab-button" type="button" data-settings-tab="settingsWifiPanel">WLAN</button>
+      <button class="settings-tab-button" type="button" data-settings-tab="settingsSystemPanel">System / OTA</button>
+    </nav>
+  </section>
+
+  <div id="settingsMaintenancePanel" class="settings-section">
+    <div class="settings-section-title">Wartung</div>
+    <div class="settings-section-hint">Häufig genutzte Wartungsanzeigen und Reset-Funktionen.</div>
+    <section id="maintenanceDetailCard" class="card maintenance ok show">
+      <div class="stats-title">Wartung</div>
+      <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
+      <ul class="maintenance-list" id="maintenanceDetailList"></ul>
+      <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
+      <div class="settings-actions">
+        <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
+        <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
+        <button id="resetFilter" class="secondary">Filter gewechselt</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="settingsScalePanel" class="settings-section hidden">
+    <div class="settings-section-title">Waage & Gefäße</div>
+    <section class="card">
+      <div class="stats-title">Waage kalibrieren</div>
+      <div class="small">Geführter Assistent zum Tarieren, Eingeben des Kalibriergewichts und Speichern des Kalibrierfaktors.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Gefäße einmessen</div>
+      <div class="small">Gespeicherte Gefäßgewichte für Autodetect.</div>
+      <div id="gefaessList" class="gefaess-list"></div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openMeasureGefaess" class="secondary">Gefäß einmessen</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Gesamtwerte</div>
+      <div class="small">Gesamtzahl Shots und Gesamtgewicht Mahlgut manuell korrigieren.</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>Gesamtzahl Shots: <b id="statsTotalShotsView">0</b></div>
+        <div>Gesamtgewicht Mahlgut: <b id="statsTotalGroundView">0,0 g</b></div>
+      </div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openStatsTotals" class="secondary">Gesamtwerte ändern</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="settingsWifiPanel" class="settings-section hidden">
+    <div class="settings-section-title">WLAN</div>
+    <div class="settings-section-hint">Verbindung, gespeicherte WLAN-Daten und Setup-WLAN.</div>
+    <section class="card">
+      <div class="stats-title">WLAN-Status</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>WLAN: <b id="wifiStatus">---</b></div>
+        <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
+        <div>Quelle: <b id="wifiCredentialSource">---</b></div>
+        <div>Gespeicherte WLAN-Daten: <b id="wifiStoredCredentials">---</b></div>
+        <div>Gespeicherte WLAN-Daten aktiv: <b id="wifiStoredCredentialsActive">---</b></div>
+      </div>
+      <div class="settings-list small" style="margin-top: 10px;">
+        <div>Gespeicherte SSID: <b class="mono" id="wifiStoredSsid">---</b></div>
+        <div>Gespeichertes Passwort: <b id="wifiStoredPasswordStatus">---</b></div>
+        <div>Setup-WLAN: <b id="wifiSetupApStatus">aus</b></div>
+        <div>Setup-Adresse: <b class="mono" id="wifiSetupApAddress">---</b></div>
+      </div>
+      <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, nutzt die Waage automatisch wieder das Standard-WLAN aus der Firmware.</div>
+      <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
+        <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
+        <div class="wifi-form-note">Speichert SSID und Passwort in der Waage. Die Daten werden erst verwendet, wenn sie danach bewusst aktiviert werden.</div>
+        <label><span>SSID</span><input id="wifiSetupSsid" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
+        <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="Leer lassen, um gespeichertes Passwort zu behalten"></label>
+        <div class="settings-actions">
+          <button id="saveWifiCredentials" class="secondary" type="submit">WLAN-Daten speichern</button>
+        </div>
+      </form>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="activateWifiCredentials" class="secondary">Gespeicherte WLAN-Daten verwenden</button>
+        <button id="deactivateWifiCredentials" class="secondary">Standard-WLAN verwenden</button>
+        <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
+        <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
+        <button id="stopWifiSetupAp" class="secondary">Setup-WLAN stoppen</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="settingsSystemPanel" class="settings-section hidden">
+    <div class="settings-section-title">System / OTA</div>
+    <section class="card">
+      <div class="stats-title">System</div>
+      <div class="small">Firmware-Update und Neustart.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
+        <button id="restartDevice" class="danger">ESP32 neu starten</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Log</div>
+      <div class="small">Letzte WebUI-/Systemmeldung.</div>
+      <div class="log mono" id="log"></div>
+    </section>
+  </div>
+
+  </div>
+
+  <div id="confirmOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal">
+      <div class="modal-title" id="confirmTitle">Wartung reset?</div>
+      <div class="modal-text" id="confirmText">Bitte bestätigen.</div>
+      <div class="modal-actions">
+        <button id="confirmCancel" class="secondary">Abbrechen</button>
+        <button id="confirmOk" class="danger">Ok</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="wizardOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
+    <div class="modal">
+      <div class="modal-title" id="wizardTitle">Assistent</div>
+      <div class="modal-text" id="wizardText">Bitte folgen.</div>
+      <div id="wizardBody"></div>
+      <div class="modal-actions" id="wizardActions"></div>
+    </div>
+  </div>
+
+</main>
+
+<script src="/coffee.js?v=3b"></script>
+</body>
+</html>)rawliteral";
+
+static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layout ===== */
     :root {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: #f4f7fb;
@@ -310,248 +552,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       button.compact, .button-row, .nav-button { width: 100%; }
       .modal-actions { grid-template-columns: 1fr; }
     }
+)rawliteral";
 
-  </style>
-</head>
-<body>
-<main>
-  <section class="card top">
-    <h1>Single-Dose-Waage</h1>
-    <span id="ws" class="pill">Getrennt</span>
-  </section>
-
-  <section class="bottom-nav-shell" aria-label="Hauptnavigation">
-    <nav class="tab-nav">
-      <button class="tab-button active" type="button" data-tab="scalePage"><span class="tab-icon" aria-hidden="true">⚖</span><span>Waage</span></button>
-      <button class="tab-button" type="button" data-tab="timerPage"><span class="tab-icon" aria-hidden="true">⏱</span><span>Stoppuhr</span></button>
-      <button class="tab-button" type="button" data-tab="statsPage"><span class="tab-icon" aria-hidden="true">▦</span><span>Daten</span></button>
-      <button class="tab-button" type="button" data-tab="settingsPage"><span class="tab-icon" aria-hidden="true">⚙</span><span>Einstellungen</span></button>
-    </nav>
-  </section>
-
-  <div id="scalePage" class="page">
-  <section class="card">
-    <div class="label">Gewicht</div>
-    <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
-    <span style="display:none">Status: <b><span id="status">---</span></b></span>
-
-    <div class="scale-controls">
-      <div class="scale-target-row small">
-        <span class="label">Sollgewicht</span>
-        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
-        <span>g</span>
-        <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem;">Speichern</button>
-      </div>
-
-      <div class="button-row">
-        <button id="tare" class="compact secondary">Tara</button>
-        <button id="save" class="compact" disabled>Save Dose</button>
-      </div>
-
-      <div class="autodetect-row small" style="margin-bottom: 0; padding-bottom: 0; border-bottom: 0;">
-        <span>Autodetect</span>
-        <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
-          <span id="autodetectLed" class="autodetect-led"></span>
-          <span id="autodetectStatus">---</span>
-        </button>
-      </div>
-
-      <div class="scale-select-row small">
-        <span class="label">Siebträger</span>
-        <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
-          <option value="0">Bodenloser ST</option>
-          <option value="1">1er-Siebträger</option>
-          <option value="2">2er-Siebträger</option>
-          <option value="3">Custom-ST</option>
-        </select>
-      </div>
-    </div>
-  </section>
-  </div>
-
-  <div id="timerPage" class="page hidden">
-  <section class="card">
-    <div class="label">Stoppuhr</div>
-    <div class="value" id="stopwatch">00:00:00:0</div>
-    <div class="grid" style="margin-top: 12px;">
-      <button id="swToggle" class="secondary" disabled>Start / Stop</button>
-      <button id="swReset" class="secondary" disabled>Reset</button>
-    </div>
-  </section>
-  </div>
-
-  <div id="statsPage" class="page hidden">
-  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
-    <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
-    <ul class="maintenance-list" id="maintenanceList"></ul>
-  </section>
-
-  <section class="card">
-    <div class="stats-grid">
-      <div>
-        <div class="stats-title">Shots</div>
-        <div class="stat-row"><span>gesamt:</span><span id="shotsTotal">0</span></div>
-        <div class="stat-row"><span>seit Reinigung Kaffeemaschine:</span><span id="shotsMachine">0</span></div>
-        <div class="stat-row"><span>seit Reinigung Mühle:</span><span id="shotsGrinder">0</span></div>
-        <div class="stat-row"><span>seit Filterwechsel:</span><span id="shotsFilter">0</span></div>
-      </div>
-      <div>
-        <div class="stats-title">Mahlgut</div>
-        <div class="stat-row"><span>gesamt:</span><span><span id="groundTotalKg">0.00</span> kg</span></div>
-        <div class="stat-row"><span>seit Reinigung Kaffeemaschine:</span><span><span id="groundMachineG">0</span> g</span></div>
-        <div class="stat-row"><span>seit Reinigung Mühle:</span><span><span id="groundGrinderG">0</span> g</span></div>
-        <div class="stat-row"><span>seit Filterwechsel:</span><span><span id="groundFilterG">0</span> g</span></div>
-      </div>
-    </div>
-    <div class="ip-row small">
-      <div>Datum/Zeit: <b class="mono" id="datetime">---</b></div>
-      <div>Uptime: <b class="mono" id="uptime">---</b></div>
-      <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
-    </div>
-  </section>
-  </div>
-
-  <div id="settingsPage" class="page hidden">
-  <section class="card settings-subnav-card">
-    <div class="settings-subnav-title">Einstellungen</div>
-    <nav class="settings-subnav" aria-label="Einstellungen">
-      <button class="settings-tab-button active" type="button" data-settings-tab="settingsMaintenancePanel">Wartung</button>
-      <button class="settings-tab-button" type="button" data-settings-tab="settingsScalePanel">Waage & Gefäße</button>
-      <button class="settings-tab-button" type="button" data-settings-tab="settingsWifiPanel">WLAN</button>
-      <button class="settings-tab-button" type="button" data-settings-tab="settingsSystemPanel">System / OTA</button>
-    </nav>
-  </section>
-
-  <div id="settingsMaintenancePanel" class="settings-section">
-    <div class="settings-section-title">Wartung</div>
-    <div class="settings-section-hint">Häufig genutzte Wartungsanzeigen und Reset-Funktionen.</div>
-    <section id="maintenanceDetailCard" class="card maintenance ok show">
-      <div class="stats-title">Wartung</div>
-      <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
-      <ul class="maintenance-list" id="maintenanceDetailList"></ul>
-      <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
-      <div class="settings-actions">
-        <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
-        <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
-        <button id="resetFilter" class="secondary">Filter gewechselt</button>
-      </div>
-    </section>
-  </div>
-
-  <div id="settingsScalePanel" class="settings-section hidden">
-    <div class="settings-section-title">Waage & Gefäße</div>
-    <section class="card">
-      <div class="stats-title">Waage kalibrieren</div>
-      <div class="small">Geführter Assistent zum Tarieren, Eingeben des Kalibriergewichts und Speichern des Kalibrierfaktors.</div>
-      <div class="settings-actions" style="margin-top: 12px;">
-        <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="stats-title">Gefäße einmessen</div>
-      <div class="small">Gespeicherte Gefäßgewichte für Autodetect.</div>
-      <div id="gefaessList" class="gefaess-list"></div>
-      <div class="settings-actions" style="margin-top: 12px;">
-        <button id="openMeasureGefaess" class="secondary">Gefäß einmessen</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="stats-title">Gesamtwerte</div>
-      <div class="small">Gesamtzahl Shots und Gesamtgewicht Mahlgut manuell korrigieren.</div>
-      <div class="settings-list small" style="margin-top: 12px;">
-        <div>Gesamtzahl Shots: <b id="statsTotalShotsView">0</b></div>
-        <div>Gesamtgewicht Mahlgut: <b id="statsTotalGroundView">0,0 g</b></div>
-      </div>
-      <div class="settings-actions" style="margin-top: 12px;">
-        <button id="openStatsTotals" class="secondary">Gesamtwerte ändern</button>
-      </div>
-    </section>
-  </div>
-
-  <div id="settingsWifiPanel" class="settings-section hidden">
-    <div class="settings-section-title">WLAN</div>
-    <div class="settings-section-hint">Verbindung, gespeicherte WLAN-Daten und Setup-WLAN.</div>
-    <section class="card">
-      <div class="stats-title">WLAN-Status</div>
-      <div class="settings-list small" style="margin-top: 12px;">
-        <div>WLAN: <b id="wifiStatus">---</b></div>
-        <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
-        <div>Quelle: <b id="wifiCredentialSource">---</b></div>
-        <div>Gespeicherte WLAN-Daten: <b id="wifiStoredCredentials">---</b></div>
-        <div>Gespeicherte WLAN-Daten aktiv: <b id="wifiStoredCredentialsActive">---</b></div>
-      </div>
-      <div class="settings-list small" style="margin-top: 10px;">
-        <div>Gespeicherte SSID: <b class="mono" id="wifiStoredSsid">---</b></div>
-        <div>Gespeichertes Passwort: <b id="wifiStoredPasswordStatus">---</b></div>
-        <div>Setup-WLAN: <b id="wifiSetupApStatus">aus</b></div>
-        <div>Setup-Adresse: <b class="mono" id="wifiSetupApAddress">---</b></div>
-      </div>
-      <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, nutzt die Waage automatisch wieder das Standard-WLAN aus der Firmware.</div>
-      <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
-        <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
-        <div class="wifi-form-note">Speichert SSID und Passwort in der Waage. Die Daten werden erst verwendet, wenn sie danach bewusst aktiviert werden.</div>
-        <label><span>SSID</span><input id="wifiSetupSsid" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
-        <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="Leer lassen, um gespeichertes Passwort zu behalten"></label>
-        <div class="settings-actions">
-          <button id="saveWifiCredentials" class="secondary" type="submit">WLAN-Daten speichern</button>
-        </div>
-      </form>
-      <div class="settings-actions" style="margin-top: 12px;">
-        <button id="activateWifiCredentials" class="secondary">Gespeicherte WLAN-Daten verwenden</button>
-        <button id="deactivateWifiCredentials" class="secondary">Standard-WLAN verwenden</button>
-        <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
-        <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
-        <button id="stopWifiSetupAp" class="secondary">Setup-WLAN stoppen</button>
-      </div>
-    </section>
-  </div>
-
-  <div id="settingsSystemPanel" class="settings-section hidden">
-    <div class="settings-section-title">System / OTA</div>
-    <section class="card">
-      <div class="stats-title">System</div>
-      <div class="small">Firmware-Update und Neustart.</div>
-      <div class="settings-actions" style="margin-top: 12px;">
-        <button id="openUpdatePage" class="secondary">Update-Seite öffnen</button>
-        <button id="restartDevice" class="danger">ESP32 neu starten</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="stats-title">Log</div>
-      <div class="small">Letzte WebUI-/Systemmeldung.</div>
-      <div class="log mono" id="log"></div>
-    </section>
-  </div>
-
-  </div>
-
-  <div id="confirmOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
-    <div class="modal">
-      <div class="modal-title" id="confirmTitle">Wartung reset?</div>
-      <div class="modal-text" id="confirmText">Bitte bestätigen.</div>
-      <div class="modal-actions">
-        <button id="confirmCancel" class="secondary">Abbrechen</button>
-        <button id="confirmOk" class="danger">Ok</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="wizardOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="wizardTitle">
-    <div class="modal">
-      <div class="modal-title" id="wizardTitle">Assistent</div>
-      <div class="modal-text" id="wizardText">Bitte folgen.</div>
-      <div id="wizardBody"></div>
-      <div class="modal-actions" id="wizardActions"></div>
-    </div>
-  </div>
-
-</main>
-
-<script>
-// ===== WebSocket / globaler UI-State =====
+static const char COFFEE_JS[] PROGMEM = R"rawliteral(// ===== WebSocket / globaler UI-State =====
 let ws;
 let lastState = null;
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
@@ -1572,10 +1575,7 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-initWebUi();
-</script>
-</body>
-</html>)rawliteral";
+initWebUi();)rawliteral";
 
 static const char PWA_MANIFEST_JSON[] PROGMEM = R"rawliteral({
   "name": "Kaffeewaage",
@@ -1710,30 +1710,40 @@ static bool isSetupApHost(AsyncWebServerRequest* request)
   return setupIp.length() > 0 && host.startsWith(setupIp);
 }
 
-static void sendProgmemHtmlChunked(AsyncWebServerRequest* request, const char* html)
+static void sendProgmemChunked(AsyncWebServerRequest* request,
+                               const char* content,
+                               const char* contentType,
+                               const char* cacheControl)
 {
-  if (!request || !html) {
+  if (!request || !content || !contentType) {
     return;
   }
 
-  const size_t totalLen = strlen_P(html);
+  const size_t totalLen = strlen_P(content);
   AsyncWebServerResponse* response = request->beginChunkedResponse(
-    "text/html",
-    [html, totalLen](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+    contentType,
+    [content, totalLen](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
       if (index >= totalLen) {
         return 0;
       }
 
       const size_t remaining = totalLen - index;
       const size_t chunkLen = remaining < maxLen ? remaining : maxLen;
-      memcpy_P(buffer, html + index, chunkLen);
+      memcpy_P(buffer, content + index, chunkLen);
       return chunkLen;
     });
 
-  // Die WebUI wird direkt aus dem Firmware-Image geliefert. Nach OTA- oder
-  // WLAN-Setup-Aenderungen soll der Browser sie sicher neu laden.
-  response->addHeader("Cache-Control", "no-store");
+  if (cacheControl && cacheControl[0] != '\0') {
+    response->addHeader("Cache-Control", cacheControl);
+  }
   request->send(response);
+}
+
+static void sendProgmemHtmlChunked(AsyncWebServerRequest* request, const char* html)
+{
+  // Die WebUI wird direkt aus dem Firmware-Image geliefert. Nach OTA- oder
+  // WLAN-Setup-Aenderungen soll der Browser das HTML sicher neu laden.
+  sendProgmemChunked(request, html, "text/html", "no-store");
 }
 
 void coffeeWebHandleRoot(AsyncWebServerRequest* request)
@@ -1841,6 +1851,16 @@ void coffeeWebBegin(AsyncWebServer& server)
 
   server.on("/wifi-setup", HTTP_GET, [](AsyncWebServerRequest* request) {
     sendProgmemHtmlChunked(request, WIFI_SETUP_HTML);
+  });
+
+  server.on("/coffee.css", HTTP_GET, [](AsyncWebServerRequest* request) {
+    // Versionierung erfolgt per Query-String im HTML-Link.
+    sendProgmemChunked(request, COFFEE_CSS, "text/css", "public, max-age=31536000, immutable");
+  });
+
+  server.on("/coffee.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    // Versionierung erfolgt per Query-String im HTML-Link.
+    sendProgmemChunked(request, COFFEE_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
   server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {
