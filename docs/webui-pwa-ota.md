@@ -12,6 +12,36 @@ data/kaffeewaage-512.png
 data/kaffeewaage.ico
 ```
 
+
+## WebUI-Asset-Split
+
+Die Haupt-WebUI wird weiterhin aus der Firmware/PROGMEM ausgeliefert. Seit dem Performance-Split besteht sie aber nicht mehr aus einer einzigen grossen HTML-Antwort. Stattdessen werden die grossen Bestandteile ueber getrennte Routen bereitgestellt:
+
+```text
+/           HTML-Grundgeruest
+/coffee.css Stylesheet
+/coffee.js  JavaScript
+```
+
+Dadurch bleibt der Betrieb weiterhin ohne zusaetzlichen SPIFFS-/LittleFS-Upload fuer die Haupt-WebUI moeglich, aber die einzelnen HTTP-Antworten sind deutlich kleiner. Das hat die Auslieferung der WebUI auf der Kaffeewaage stabilisiert und stark beschleunigt.
+
+Gemessene Referenzwerte nach dem Split:
+
+```text
+/           ca. 12,7 kB
+/coffee.css ca. 12,6 kB
+/coffee.js  ca. 39,1 kB
+```
+
+Zum Testen nach Firmware-Upload koennen Cache-Buster verwendet werden:
+
+```text
+http://<ip>/?v=test
+http://<ip>/coffee.css?v=test
+http://<ip>/coffee.js?v=test
+```
+
+Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
 ## PWA-/Homescreen-Integration
 
 Die WebUI enthaelt im HTML-`head` die relevanten PWA-/Mobile-Meta-Tags:
