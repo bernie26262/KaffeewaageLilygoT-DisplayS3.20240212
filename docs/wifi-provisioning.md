@@ -324,3 +324,18 @@ Ziel der Aufteilung:
 - `System / OTA`: Update-Seite, ESP32-Neustart und Log
 
 Damit bleiben die sicherheitsrelevanten WLAN-Funktionen zusammen, waehrend `System / OTA` wieder kurz und uebersichtlich bleibt.
+
+
+## WLAN-Signalqualität
+
+Die Waage bewertet die WLAN-Verbindung zusätzlich zur reinen verbunden/getrennt-Anzeige quantitativ über `WiFi.RSSI()`:
+
+- `>= -55 dBm`: sehr gut, 4 Balken
+- `-56 .. -67 dBm`: gut, 3 Balken
+- `-68 .. -75 dBm`: mittel, 2 Balken
+- `-76 .. -83 dBm`: schwach, 1 Balken
+- `< -83 dBm`: sehr schwach, 0 Balken
+
+Der WebSocket-State enthält dafür unter `system` die Felder `wifi_rssi_dbm`, `wifi_signal_level` und `wifi_signal_label`. Die WebUI zeigt Signalqualität, Text und dBm-Wert im WLAN-Tab sowie zusätzlich auf der Datenseite bei Datum/Zeit, Uptime und IP-Adresse an. Im WebUI-Header wird links neben der WebSocket-Pill ein reines Signal-Icon ohne Text angezeigt. Das TFT-HMI verwendet den bestehenden WLAN-Platz im Header weiter, zeigt bei Verbindung aber eine 0-4-Balken-Anzeige statt nur verbunden/getrennt. Bei getrennter Verbindung bleibt das bestehende Disconnected-Icon erhalten.
+
+Später sinnvoll für alle drei ESP32-Projekte: Auf der Setup-Seite `192.168.4.1` sollte die SSID-Eingabe optional durch eine WLAN-Liste ergänzt werden. Dafür müsste der ESP im Setup-Modus verfügbare Netzwerke scannen und die gefundenen SSIDs als Dropdown anbieten.

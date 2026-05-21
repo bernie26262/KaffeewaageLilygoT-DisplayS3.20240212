@@ -71,6 +71,9 @@ struct TimeState {
 struct SystemState {
   bool wifi_connected = false;
   String ip;
+  int16_t wifi_rssi_dbm = 0;
+  uint8_t wifi_signal_level = 0;
+  String wifi_signal_label;
   uint32_t uptime_ms = 0;
   bool web_wizard_active = false;
   bool autodetect_paused = false;

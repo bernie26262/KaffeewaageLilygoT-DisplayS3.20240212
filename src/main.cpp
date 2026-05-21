@@ -425,6 +425,8 @@ bool ifpathWifi = 0;
 bool ifpathWifiLogo = 0;
 bool statuswlanConnected = 0;
 bool oldstatuswlanConnected = 0;
+uint8_t statuswlanSignalLevel = 0;
+uint8_t oldstatuswlanSignalLevel = 255;
 
 float startWeightGrinding = 0;
 float stopWeightGrinding = 0;
@@ -608,6 +610,26 @@ static int32_t secondsUntilMaintenanceDue(uint32_t lastDoneEpoch, uint32_t inter
   return static_cast<int32_t>(seconds);
 }
 
+static uint8_t wifiSignalLevelFromRssi(int32_t rssiDbm)
+{
+  if (rssiDbm >= -55) return 4;
+  if (rssiDbm >= -67) return 3;
+  if (rssiDbm >= -75) return 2;
+  if (rssiDbm >= -83) return 1;
+  return 0;
+}
+
+static const char* wifiSignalLabelFromLevel(uint8_t level)
+{
+  switch (level) {
+    case 4: return "sehr gut";
+    case 3: return "gut";
+    case 2: return "mittel";
+    case 1: return "schwach";
+    default: return "sehr schwach";
+  }
+}
+
 static void updateCoffeeAppStateFromGlobals()
 {
   appState.weight.actual_g = actualWeight;
@@ -669,6 +691,17 @@ static void updateCoffeeAppStateFromGlobals()
 
   appState.system.wifi_connected = WiFi.status() == WL_CONNECTED;
   appState.system.ip = appState.system.wifi_connected ? WiFi.localIP().toString() : String();
+  if (appState.system.wifi_connected) {
+    const int32_t rssiDbm = WiFi.RSSI();
+    const uint8_t signalLevel = wifiSignalLevelFromRssi(rssiDbm);
+    appState.system.wifi_rssi_dbm = static_cast<int16_t>(rssiDbm);
+    appState.system.wifi_signal_level = signalLevel;
+    appState.system.wifi_signal_label = wifiSignalLabelFromLevel(signalLevel);
+  } else {
+    appState.system.wifi_rssi_dbm = 0;
+    appState.system.wifi_signal_level = 0;
+    appState.system.wifi_signal_label = "getrennt";
+  }
   appState.system.web_wizard_active = webWizardActive;
   appState.system.autodetect_paused = webWizardActive && webWizardAutodetectPaused;
   appState.system.uptime_ms = millis();
@@ -2406,12 +2439,31 @@ void RedrawTFTWarnungen()
   }
 }
 
-void RefreshTFTWLANConnected()
+void RefreshTFTWLANConnected(uint8_t signalLevel)
 {
-   tft.drawBitmap(284, 0,wlanconnected16x16, 16, 16, TFT_WHITE, TFT_BLACK);
+   const int x = 284;
+   const int y = 0;
+   tft.fillRect(x, y, 16, 16, TFT_BLACK);
+
+   // Kompakte quantitative WLAN-Anzeige im bestehenden 16x16-Headerfeld.
+   // 0..4 Balken zeigen die Signalqualität; getrenntes WLAN nutzt weiterhin
+   // das bestehende Disconnected-Bitmap.
+   for (uint8_t i = 0; i < 4; ++i) {
+     const int barW = 3;
+     const int gap = 1;
+     const int barX = x + 1 + i * (barW + gap);
+     const int barH = 4 + i * 3;
+     const int barY = y + 14 - barH;
+     const bool filled = i < signalLevel;
+     tft.drawRect(barX, barY, barW, barH, TFT_WHITE);
+     if (filled) {
+       tft.fillRect(barX + 1, barY + 1, barW - 2, barH - 2, TFT_WHITE);
+     }
+   }
 }
 void RefreshTFTWLANDisconnected()
 {
+   tft.fillRect(284, 0, 16, 16, TFT_BLACK);
    tft.drawBitmap(284, 0,wlandisconnected16x16, 16, 16, TFT_WHITE, TFT_BLACK);
 }
 
@@ -4017,7 +4069,7 @@ void setup()
   setenv("TZ", TZ_INFO, 1);
   printLocalTime();
   if (WiFi.status() != WL_CONNECTED) RefreshTFTWLANDisconnected();
-  if (WiFi.status() == WL_CONNECTED) RefreshTFTWLANConnected();
+  if (WiFi.status() == WL_CONNECTED) RefreshTFTWLANConnected(wifiSignalLevelFromRssi(WiFi.RSSI()));
   
   pageEntered = true;
   
@@ -4099,21 +4151,26 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
  if (WiFi.status() == WL_CONNECTED)
  {
   statuswlanConnected = 1;
+  statuswlanSignalLevel = wifiSignalLevelFromRssi(WiFi.RSSI());
  }
  if (WiFi.status() != WL_CONNECTED)
  {
   statuswlanConnected = 0;
+  statuswlanSignalLevel = 0;
  }
- if (statuswlanConnected == 1 && oldstatuswlanConnected != statuswlanConnected)
+ if (statuswlanConnected == 1 &&
+     (oldstatuswlanConnected != statuswlanConnected || oldstatuswlanSignalLevel != statuswlanSignalLevel))
  {
-  RefreshTFTWLANConnected();
+  RefreshTFTWLANConnected(statuswlanSignalLevel);
   oldstatuswlanConnected = statuswlanConnected;
+  oldstatuswlanSignalLevel = statuswlanSignalLevel;
  }
 
  if (statuswlanConnected == 0 && oldstatuswlanConnected != statuswlanConnected)
  {
   RefreshTFTWLANDisconnected();
   oldstatuswlanConnected = statuswlanConnected;
+  oldstatuswlanSignalLevel = 255;
  }
 
 //##############################################

@@ -33,7 +33,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 <main>
   <section class="card top">
     <h1>Single-Dose-Waage</h1>
-    <span id="ws" class="pill">Getrennt</span>
+    <div class="top-status">
+      <span id="wifiSignalHeaderIcon" class="wifi-signal header-wifi-signal" aria-hidden="true" title="WLAN-Signal"></span>
+      <span id="ws" class="pill">Getrennt</span>
+    </div>
   </section>
 
   <section class="bottom-nav-shell" aria-label="Hauptnavigation">
@@ -124,7 +127,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="ip-row small">
       <div>Datum/Zeit: <b class="mono" id="datetime">---</b></div>
       <div>Uptime: <b class="mono" id="uptime">---</b></div>
+      <div>SSID: <b class="mono" id="statsWifiSsid">---</b></div>
       <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
+      <div>WLAN-Signal: <span class="wifi-signal-row"><span id="statsWifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="statsWifiSignalLabel">---</b> <span class="muted-inline" id="statsWifiSignalRssi">---</span></span></div>
     </div>
   </section>
   </div>
@@ -196,6 +201,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div class="settings-list small" style="margin-top: 12px;">
         <div>WLAN: <b id="wifiStatus">---</b></div>
         <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
+        <div>Signal: <span class="wifi-signal-row"><span id="wifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="wifiSignalLabel">---</b> <span class="muted-inline" id="wifiSignalRssi">---</span></span></div>
         <div>Quelle: <b id="wifiCredentialSource">---</b></div>
         <div>Gespeicherte WLAN-Daten: <b id="wifiStoredCredentials">---</b></div>
         <div>Gespeicherte WLAN-Daten aktiv: <b id="wifiStoredCredentialsActive">---</b></div>
@@ -312,6 +318,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       box-shadow: var(--shadow);
     }
     .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 14px; }
+    .top-status { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
     h1 { margin: 0; font-size: 1.15rem; letter-spacing: -.02em; white-space: nowrap; }
     .pill {
       flex: 0 0 auto;
@@ -447,6 +454,21 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .wifi-form label { display: grid; gap: 5px; color: var(--muted); font-size: .9rem; }
     .wifi-form input { width: 100%; box-sizing: border-box; }
     .wifi-form-note { color: var(--muted); font-size: .86rem; line-height: 1.35; }
+    .wifi-signal-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .wifi-signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; vertical-align: -2px; }
+    .wifi-signal .bar { display: block; width: 4px; border-radius: 2px 2px 0 0; background: rgba(148,163,184,.35); }
+    .wifi-signal .bar:nth-child(1) { height: 5px; }
+    .wifi-signal .bar:nth-child(2) { height: 8px; }
+    .wifi-signal .bar:nth-child(3) { height: 11px; }
+    .wifi-signal .bar:nth-child(4) { height: 14px; }
+    .wifi-signal .bar.on { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,.35); }
+    .header-wifi-signal { height: 18px; padding: 4px 2px; }
+    .header-wifi-signal .bar { width: 5px; }
+    .header-wifi-signal .bar:nth-child(1) { height: 6px; }
+    .header-wifi-signal .bar:nth-child(2) { height: 10px; }
+    .header-wifi-signal .bar:nth-child(3) { height: 14px; }
+    .header-wifi-signal .bar:nth-child(4) { height: 18px; }
+    .muted-inline { color: var(--muted); }
     .dashboard-settings-list { gap: 4px; margin-top: 6px; line-height: 1.25; }
     .settings-actions { display: grid; gap: 10px; margin-top: 12px; }
     .settings-section { display: grid; gap: 10px; }
@@ -1161,6 +1183,32 @@ function renderAutodetect(s) {
   autodetectLed.classList.toggle('on', autodetectOn && !autodetectPaused);
 }
 
+function renderWifiBars(id, level, title) {
+  const icon = el(id);
+  if (!icon) return;
+  icon.innerHTML = [0, 1, 2, 3].map(i => `<span class="bar${i < level ? ' on' : ''}"></span>`).join('');
+  icon.setAttribute('title', title);
+}
+
+function renderWifiSignal(s) {
+  const connected = !!s.system?.wifi;
+  const level = connected ? Math.max(0, Math.min(4, Number(s.system?.wifi_signal_level ?? 0))) : 0;
+  const label = connected ? (s.system?.wifi_signal_label || '---') : 'getrennt';
+  const rssi = s.system?.wifi_rssi_dbm;
+  const hasRssi = connected && Number.isFinite(Number(rssi));
+  const rssiText = hasRssi ? `(${rssi} dBm)` : '';
+  const title = connected ? `${label}${hasRssi ? ` (${rssi} dBm)` : ''}` : 'getrennt';
+
+  renderWifiBars('wifiSignalIcon', level, title);
+  renderWifiBars('wifiSignalHeaderIcon', level, title);
+  renderWifiBars('statsWifiSignalIcon', level, title);
+
+  setText('wifiSignalLabel', label);
+  setText('wifiSignalRssi', rssiText);
+  setText('statsWifiSignalLabel', label);
+  setText('statsWifiSignalRssi', rssiText);
+}
+
 function renderStatsAndSystem(s) {
   setText('shotsTotal', s.stats?.shots?.total ?? 0);
   setText('shotsMachine', s.stats?.shots?.since_machine_clean ?? 0);
@@ -1175,8 +1223,10 @@ function renderStatsAndSystem(s) {
   setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));
   setText('uptime', fmtUptime(s.system?.uptime_ms));
   setText('ip', s.system?.ip || location.hostname);
+  setText('statsWifiSsid', s.system?.wifi_ssid || '---');
   setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
   setText('wifiSsid', s.system?.wifi_ssid || '---');
+  renderWifiSignal(s);
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
   setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
@@ -2153,6 +2203,9 @@ static String buildStateJson(const AppState& s)
 
   doc["system"]["wifi"] = s.system.wifi_connected;
   doc["system"]["ip"] = s.system.ip;
+  doc["system"]["wifi_rssi_dbm"] = s.system.wifi_rssi_dbm;
+  doc["system"]["wifi_signal_level"] = s.system.wifi_signal_level;
+  doc["system"]["wifi_signal_label"] = s.system.wifi_signal_label;
   doc["system"]["uptime_ms"] = s.system.uptime_ms;
   doc["system"]["wifi_ssid"] = coffeeWifiCurrentSsid();
   doc["system"]["wifi_credential_source"] = coffeeWifiCredentialSourceLabel();
