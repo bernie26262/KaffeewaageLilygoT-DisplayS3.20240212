@@ -12,6 +12,7 @@ constexpr uint32_t COLOR_GREEN = 0x2E8B57;
 constexpr uint32_t COLOR_GREEN_DARK = 0x1F5F3D;
 constexpr uint32_t COLOR_WHITE = 0xFFFFFF;
 constexpr uint32_t COLOR_MUTED = 0xA8B8A8;
+constexpr uint32_t COLOR_DIM = 0x5F705F;
 
 lv_obj_t *weightLabel = nullptr;
 lv_obj_t *statusLabel = nullptr;
@@ -67,6 +68,17 @@ void style_button(lv_obj_t *btn)
 
     lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_GREEN_DARK), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(btn, lv_color_hex(COLOR_GREEN), LV_STATE_PRESSED);
+}
+
+void style_nav_button(lv_obj_t *btn, bool active)
+{
+    style_button(btn);
+    lv_obj_set_style_radius(btn, 10, 0);
+    lv_obj_set_style_pad_all(btn, 8, 0);
+    lv_obj_set_style_border_color(btn, lv_color_hex(active ? COLOR_GREEN : COLOR_DIM), 0);
+    if (active) {
+        lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_GREEN_DARK), 0);
+    }
 }
 
 void update_status(const char *msg)
@@ -133,8 +145,14 @@ static void button_event_cb(lv_event_t *event)
         update_status("Save gedrueckt - noch Demo-Modus ohne Waegezelle");
     } else if (strcmp(action, "timer") == 0) {
         set_timer_running(!timerRunning);
-    } else if (strcmp(action, "setup") == 0) {
-        update_status("Setup gedrueckt - LVGL-Touch ist bereit");
+    } else if (strcmp(action, "nav_home") == 0) {
+        update_status("Home aktiv - Hauptansicht fuer Gewicht und Schnellaktionen");
+    } else if (strcmp(action, "nav_gefaesse") == 0) {
+        update_status("Gefaesse gedrueckt - Ansicht wird spaeter angebunden");
+    } else if (strcmp(action, "nav_stats") == 0) {
+        update_status("Statistik gedrueckt - Ansicht wird spaeter angebunden");
+    } else if (strcmp(action, "Settings") == 0) {
+        update_status("Setup gedrueckt - WLAN, Wartung und System folgen spaeter");
     }
 }
 
@@ -153,6 +171,20 @@ lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action)
     if (strcmp(action, "timer") == 0) {
         timerButtonLabel = label;
     }
+    return btn;
+}
+
+lv_obj_t *create_nav_button(lv_obj_t *parent, const char *text, const char *action, bool active)
+{
+    lv_obj_t *btn = lv_btn_create(parent);
+    style_nav_button(btn, active);
+    lv_obj_set_size(btn, 128, 38);
+    lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(action));
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_label_set_text(label, text);
+    style_label(label, active ? COLOR_WHITE : COLOR_MUTED);
+    lv_obj_center(label);
     return btn;
 }
 
@@ -175,18 +207,18 @@ void ui_t4s3_create(uint16_t width, uint16_t height)
     style_screen(screen);
 
     lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "Kaffeewaage T4-S3  |  LVGL Touch Lab");
+    lv_label_set_text(title, "Kaffeewaage");
     style_label(title, COLOR_GREEN);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 12);
 
     lv_obj_t *mode = lv_label_create(screen);
-    lv_label_set_text_fmt(mode, "%ux%u  |  Rotation 0  |  ohne Waegezelle", width, height);
+    lv_label_set_text_fmt(mode, "T4-S3  |  %ux%u  |  Demo ohne Waegezelle", width, height);
     style_label(mode, COLOR_MUTED);
     lv_obj_align(mode, LV_ALIGN_TOP_RIGHT, -18, 12);
 
     lv_obj_t *weightPanel = lv_obj_create(screen);
     style_panel(weightPanel);
-    lv_obj_set_size(weightPanel, 365, 270);
+    lv_obj_set_size(weightPanel, 365, 258);
     lv_obj_align(weightPanel, LV_ALIGN_TOP_LEFT, 18, 54);
 
     lv_obj_t *weightTitle = lv_label_create(weightPanel);
@@ -224,7 +256,7 @@ void ui_t4s3_create(uint16_t width, uint16_t height)
 
     lv_obj_t *buttonPanel = lv_obj_create(screen);
     style_panel(buttonPanel);
-    lv_obj_set_size(buttonPanel, 195, 270);
+    lv_obj_set_size(buttonPanel, 195, 258);
     lv_obj_align(buttonPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
 
     lv_obj_t *buttonTitle = lv_label_create(buttonPanel);
@@ -241,23 +273,37 @@ void ui_t4s3_create(uint16_t width, uint16_t height)
     lv_obj_t *timer = create_button(buttonPanel, "Timer", "timer");
     lv_obj_align(timer, LV_ALIGN_TOP_MID, 0, 165);
 
-    lv_obj_t *setup = create_button(screen, "Setup", "setup");
-    lv_obj_set_size(setup, 130, 48);
-    lv_obj_align(setup, LV_ALIGN_BOTTOM_RIGHT, -18, -18);
-
     statusLabel = lv_label_create(screen);
     lv_label_set_text(statusLabel, "Status: Demo-Modus bereit - keine Waegezelle erforderlich");
-    lv_obj_set_width(statusLabel, 420);
+    lv_obj_set_width(statusLabel, 560);
     lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_DOT);
     style_label(statusLabel, COLOR_WHITE);
-    lv_obj_align(statusLabel, LV_ALIGN_BOTTOM_LEFT, 18, -46);
+    lv_obj_align(statusLabel, LV_ALIGN_BOTTOM_LEFT, 18, -84);
 
     touchLabel = lv_label_create(screen);
-    lv_label_set_text(touchLabel, "Touch: Buttons reagieren, echte Waagenfunktionen folgen spaeter");
-    lv_obj_set_width(touchLabel, 420);
+    lv_label_set_text(touchLabel, "Home aktiv: Gewicht, Tara, Save und Timer als Touch-Prototyp");
+    lv_obj_set_width(touchLabel, 560);
     lv_label_set_long_mode(touchLabel, LV_LABEL_LONG_DOT);
     style_label(touchLabel, COLOR_MUTED);
-    lv_obj_align(touchLabel, LV_ALIGN_BOTTOM_LEFT, 18, -20);
+    lv_obj_align(touchLabel, LV_ALIGN_BOTTOM_LEFT, 18, -62);
+
+    lv_obj_t *navPanel = lv_obj_create(screen);
+    style_panel(navPanel);
+    lv_obj_set_size(navPanel, 564, 50);
+    lv_obj_set_style_pad_all(navPanel, 5, 0);
+    lv_obj_align(navPanel, LV_ALIGN_BOTTOM_MID, 0, -8);
+
+    lv_obj_t *navHome = create_nav_button(navPanel, "Waage", "nav_home", true);
+    lv_obj_align(navHome, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t *navGefaesse = create_nav_button(navPanel, "Gefaesse", "nav_gefaesse", false);
+    lv_obj_align(navGefaesse, LV_ALIGN_LEFT_MID, 140, 0);
+
+    lv_obj_t *navStats = create_nav_button(navPanel, "Daten", "nav_stats", false);
+    lv_obj_align(navStats, LV_ALIGN_LEFT_MID, 280, 0);
+
+    lv_obj_t *navSetup = create_nav_button(navPanel, "Settings", "Settings", false);
+    lv_obj_align(navSetup, LV_ALIGN_LEFT_MID, 420, 0);
 }
 
 void ui_t4s3_tick()
