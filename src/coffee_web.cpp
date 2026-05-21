@@ -268,7 +268,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee.js?v=3b"></script>
+<script src="/coffee_core.js?v=3c"></script>
+<script src="/coffee_render.js?v=3c"></script>
+<script src="/coffee_events.js?v=3c"></script>
 </body>
 </html>)rawliteral";
 
@@ -560,7 +562,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     }
 )rawliteral";
 
-static const char COFFEE_JS[] PROGMEM = R"rawliteral(// ===== WebSocket / globaler UI-State =====
+static const char COFFEE_CORE_JS[] PROGMEM = R"rawliteral(// ===== WebSocket / globaler UI-State =====
 let ws;
 let lastState = null;
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
@@ -971,8 +973,9 @@ function openMeasureGefaessWizard() {
 function openStatsTotalsWizard() {
   openWizard('statsTotals', false);
 }
+)rawliteral";
 
-// ===== Wartung =====
+static const char COFFEE_RENDER_JS[] PROGMEM = R"rawliteral(// ===== Wartung =====
 function fmtDuration(seconds) {
   return fmtDayClockDuration(seconds);
 }
@@ -1221,8 +1224,9 @@ function render(s) {
     updateWizardLiveFields();
   }
 }
+)rawliteral";
 
-// ===== WebSocket-Verbindung =====
+static const char COFFEE_EVENTS_JS[] PROGMEM = R"rawliteral(// ===== WebSocket-Verbindung =====
 function connect() {
   el('ws').textContent = 'Verbinde…';
   el('ws').classList.remove('ok');
@@ -1581,7 +1585,8 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-initWebUi();)rawliteral";
+initWebUi();
+)rawliteral";
 
 static const char PWA_MANIFEST_JSON[] PROGMEM = R"rawliteral({
   "name": "Kaffeewaage",
@@ -1864,9 +1869,19 @@ void coffeeWebBegin(AsyncWebServer& server)
     sendProgmemChunked(request, COFFEE_CSS, "text/css", "public, max-age=31536000, immutable");
   });
 
-  server.on("/coffee.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+  server.on("/coffee_core.js", HTTP_GET, [](AsyncWebServerRequest* request) {
     // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemChunked(request, COFFEE_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemChunked(request, COFFEE_CORE_JS, "application/javascript", "public, max-age=31536000, immutable");
+  });
+
+  server.on("/coffee_render.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    // Versionierung erfolgt per Query-String im HTML-Link.
+    sendProgmemChunked(request, COFFEE_RENDER_JS, "application/javascript", "public, max-age=31536000, immutable");
+  });
+
+  server.on("/coffee_events.js", HTTP_GET, [](AsyncWebServerRequest* request) {
+    // Versionierung erfolgt per Query-String im HTML-Link.
+    sendProgmemChunked(request, COFFEE_EVENTS_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
   server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {

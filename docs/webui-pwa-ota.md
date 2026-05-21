@@ -20,17 +20,21 @@ Die Haupt-WebUI wird weiterhin aus der Firmware/PROGMEM ausgeliefert. Seit dem P
 ```text
 /           HTML-Grundgeruest
 /coffee.css Stylesheet
-/coffee.js  JavaScript
+/coffee_core.js   JavaScript: Basisfunktionen, Navigation, Overlays
+/coffee_render.js JavaScript: Wartung, Stopwatch, State-Rendering
+/coffee_events.js JavaScript: WebSocket-Verbindung und Event-Handler
 ```
 
-Dadurch bleibt der Betrieb weiterhin ohne zusaetzlichen SPIFFS-/LittleFS-Upload fuer die Haupt-WebUI moeglich, aber die einzelnen HTTP-Antworten sind deutlich kleiner. Das hat die Auslieferung der WebUI auf der Kaffeewaage stabilisiert und stark beschleunigt.
+Dadurch bleibt der Betrieb weiterhin ohne zusaetzlichen SPIFFS-/LittleFS-Upload fuer die Haupt-WebUI moeglich, aber die einzelnen HTTP-Antworten sind deutlich kleiner. Das hat die Auslieferung der WebUI auf der Kaffeewaage stabilisiert und stark beschleunigt. Nach weiteren Tests wurde der JavaScript-Teil nochmals in drei kleinere Dateien aufgeteilt, damit kein einzelnes JS-Asset mehr ca. 39 kB gross ist.
 
 Gemessene Referenzwerte nach dem Split:
 
 ```text
 /           ca. 12,7 kB
 /coffee.css ca. 12,6 kB
-/coffee.js  ca. 39,1 kB
+/coffee_core.js   ca. 15 kB
+/coffee_render.js ca. 10 kB
+/coffee_events.js ca. 14 kB
 ```
 
 Zum Testen nach Firmware-Upload koennen Cache-Buster verwendet werden:
@@ -38,7 +42,9 @@ Zum Testen nach Firmware-Upload koennen Cache-Buster verwendet werden:
 ```text
 http://<ip>/?v=test
 http://<ip>/coffee.css?v=test
-http://<ip>/coffee.js?v=test
+http://<ip>/coffee_core.js?v=test
+http://<ip>/coffee_render.js?v=test
+http://<ip>/coffee_events.js?v=test
 ```
 
 Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
