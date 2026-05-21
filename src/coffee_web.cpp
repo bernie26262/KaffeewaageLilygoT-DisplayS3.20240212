@@ -46,8 +46,17 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </section>
 
   <div id="scalePage" class="page">
-  <section class="card">
-    <div class="label">Gewicht</div>
+  <section class="card scale-card">
+    <div class="weight-head">
+      <div class="label">Gewicht</div>
+      <div class="autodetect-row small">
+        <span>Autodetect</span>
+        <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
+          <span id="autodetectLed" class="autodetect-led"></span>
+          <span id="autodetectStatus">---</span>
+        </button>
+      </div>
+    </div>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
     <span style="display:none">Status: <b><span id="status">---</span></b></span>
 
@@ -64,13 +73,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="save" class="compact" disabled>Save Dose</button>
       </div>
 
-      <div class="autodetect-row small" style="margin-bottom: 0; padding-bottom: 0; border-bottom: 0;">
-        <span>Autodetect</span>
-        <button id="autodetectToggle" class="autodetect-toggle off" type="button" aria-pressed="false">
-          <span id="autodetectLed" class="autodetect-led"></span>
-          <span id="autodetectStatus">---</span>
-        </button>
-      </div>
 
       <div class="scale-select-row small">
         <span class="label">Siebträger</span>
@@ -334,7 +336,9 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .maintenance-item.ok { color: #bbf7d0; }
     .maintenance-item.due { color: #fecaca; font-weight: 750; }
     /* ===== Autodetect / Gewichtskarte ===== */
-    .autodetect-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(148,163,184,.14); }
+    .scale-card { display: grid; gap: 12px; }
+    .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .autodetect-row { display: inline-flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0; padding: 0; border-bottom: 0; white-space: nowrap; }
     .autodetect-toggle {
       width: auto;
       min-width: 0;
@@ -549,6 +553,8 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       body { padding: 14px 14px calc(96px + env(safe-area-inset-bottom)); }
       .grid, .stats-grid { grid-template-columns: 1fr; }
       .weight { font-size: 3.4rem; }
+      .weight-head { align-items: flex-start; }
+      .autodetect-row { margin-left: auto; }
       button.compact, .button-row, .nav-button { width: 100%; }
       .modal-actions { grid-template-columns: 1fr; }
     }
