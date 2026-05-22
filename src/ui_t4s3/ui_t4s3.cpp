@@ -60,6 +60,7 @@ lv_obj_t *targetOverlay = nullptr;
 lv_obj_t *targetOverlayValueLabel = nullptr;
 lv_obj_t *targetOverlayStepLabel = nullptr;
 lv_obj_t *vesselOverlay = nullptr;
+lv_obj_t *restartOverlay = nullptr;
 lv_obj_t *vesselOptionLabels[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *screenTimeoutValueLabel = nullptr;
 lv_obj_t *systemTimeStatusLabel = nullptr;
@@ -109,6 +110,8 @@ void open_target_overlay();
 void close_target_overlay(bool save);
 void open_vessel_overlay();
 void close_vessel_overlay(bool save);
+void open_restart_overlay();
+void close_restart_overlay();
 lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, int width, int height);
 void update_status(const char *msg);
 
@@ -596,7 +599,13 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "system_logs") == 0) {
         update_status("Logs / Diagnose: Anzeige folgt spaeter");
     } else if (strcmp(action, "system_restart") == 0) {
-        update_status("Neustart: Bestaetigungs-Overlay folgt spaeter");
+        open_restart_overlay();
+    } else if (strcmp(action, "restart_cancel") == 0) {
+        close_restart_overlay();
+    } else if (strcmp(action, "restart_confirm") == 0) {
+        update_status("Neustart wird ausgefuehrt ...");
+        delay(120);
+        ESP.restart();
     }
 }
 
@@ -626,6 +635,70 @@ void close_target_overlay(bool save)
     }
 }
 
+
+void close_restart_overlay()
+{
+    if (restartOverlay) {
+        lv_obj_del(restartOverlay);
+        restartOverlay = nullptr;
+    }
+    update_status("Neustart abgebrochen");
+}
+
+void open_restart_overlay()
+{
+    if (restartOverlay) {
+        return;
+    }
+
+    lv_obj_t *screen = lv_scr_act();
+
+    restartOverlay = lv_obj_create(screen);
+    lv_obj_set_size(restartOverlay, screenWidth, screenHeight);
+    lv_obj_align(restartOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(restartOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(restartOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(restartOverlay, 0, 0);
+    lv_obj_set_style_pad_all(restartOverlay, 0, 0);
+    lv_obj_clear_flag(restartOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(restartOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 230);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Neustart");
+    style_label(title, COLOR_GREEN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
+
+    lv_obj_t *msg = lv_label_create(panel);
+    lv_label_set_text(msg, "Waage jetzt neu starten?");
+    lv_obj_set_width(msg, 360);
+    lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+    style_label(msg, COLOR_WHITE);
+    lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 58);
+
+    lv_obj_t *hint = lv_label_create(panel);
+    lv_label_set_text(hint, "Nicht gespeicherte Demo-Werte gehen verloren.");
+    lv_obj_set_width(hint, 360);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    style_label(hint, COLOR_MUTED);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 92);
+
+    lv_obj_t *cancel = create_button(panel, "Abbr.", "restart_cancel", 150, 56);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 18, 0);
+
+    lv_obj_t *confirm = create_button(panel, "Neustart", "restart_confirm", 170, 56);
+    lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, -18, 0);
+
+    lv_obj_move_foreground(restartOverlay);
+    update_status("Neustart bestaetigen oder abbrechen");
+}
 void open_target_overlay()
 {
     if (targetOverlay) {
@@ -1629,6 +1702,7 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
 
 
 
