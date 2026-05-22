@@ -24,6 +24,7 @@ enum class Page : uint8_t {
     Daten,
     Settings,
     SettingsWartung,
+    SettingsWaage,
 };
 
 Page activePage = Page::Waage;
@@ -471,7 +472,15 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "maintenance_reset_filter") == 0) {
         update_status("Filterwechsel: Reset folgt spaeter mit Bestaetigung");
     } else if (strcmp(action, "settings_waage") == 0) {
-        update_status("Settings: Waage / Gefaesse - Kalibrierung und Werte folgen");
+        navigate_to(Page::SettingsWaage);
+    } else if (strcmp(action, "scale_calibration") == 0) {
+        update_status("Kalibrierung: Assistent folgt spaeter");
+    } else if (strcmp(action, "vessels_measure") == 0) {
+        update_status("Gefaesse einmessen: Assistent folgt spaeter");
+    } else if (strcmp(action, "vessels_manage") == 0) {
+        update_status("Gefaesse verwalten: Liste / Loeschen folgt spaeter");
+    } else if (strcmp(action, "totals_edit") == 0) {
+        update_status("Gesamtwerte aendern: Eingabe folgt spaeter");
     } else if (strcmp(action, "settings_wlan") == 0) {
         update_status("Settings: WLAN - Status und Setup-Assistent folgen");
     } else if (strcmp(action, "settings_system") == 0) {
@@ -792,7 +801,7 @@ void create_nav(lv_obj_t *screen)
     lv_obj_t *navDaten = create_nav_button(screen, "Daten", "nav_daten", activePage == Page::Daten);
     lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 298, -8);
 
-    const bool settingsActive = activePage == Page::Settings || activePage == Page::SettingsWartung;
+    const bool settingsActive = activePage == Page::Settings || activePage == Page::SettingsWartung || activePage == Page::SettingsWaage;
     lv_obj_t *navSettings = create_nav_button(screen, "Settings", "nav_settings", settingsActive);
     lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 438, -8);
 }
@@ -1073,6 +1082,69 @@ void create_maintenance_row(lv_obj_t *parent,
     lv_obj_align(line, LV_ALIGN_TOP_LEFT, 0, y + 49);
 }
 
+
+void create_settings_waage_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "Waage / Gefaesse");
+
+    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
+
+    struct ScaleCard {
+        const char *title;
+        const char *line1;
+        const char *line2;
+        const char *action;
+        int x;
+        int y;
+    };
+
+    const ScaleCard cards[] = {
+        {"Kalibrierung", "bekanntes Gewicht", "Waage abgleichen", "scale_calibration", 0, 42},
+        {"Gefaesse einmessen", "Gewicht erfassen", "fuer Autodetect", "vessels_measure", 274, 42},
+        {"Gefaesse verwalten", "anzeigen / loeschen", "gespeicherte Gefaesse", "vessels_manage", 0, 142},
+        {"Gesamtwerte", "Shots und Mahlgut", "korrigieren", "totals_edit", 274, 142},
+    };
+
+    for (const auto &card : cards) {
+        lv_obj_t *btn = lv_btn_create(panel);
+        style_button(btn);
+        lv_obj_set_size(btn, 260, 88);
+        lv_obj_align(btn, LV_ALIGN_TOP_LEFT, card.x, card.y);
+        lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
+
+        lv_obj_t *title = lv_label_create(btn);
+        lv_label_set_text(title, card.title);
+        style_label(title, COLOR_GREEN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, -2);
+
+        lv_obj_t *line1 = lv_label_create(btn);
+        lv_label_set_text(line1, card.line1);
+        lv_obj_set_width(line1, 220);
+        lv_label_set_long_mode(line1, LV_LABEL_LONG_DOT);
+        style_label(line1, COLOR_WHITE);
+        lv_obj_align(line1, LV_ALIGN_TOP_LEFT, 0, 30);
+
+        lv_obj_t *line2 = lv_label_create(btn);
+        lv_label_set_text(line2, card.line2);
+        lv_obj_set_width(line2, 220);
+        lv_label_set_long_mode(line2, LV_LABEL_LONG_DOT);
+        style_label(line2, COLOR_MUTED);
+        lv_obj_align(line2, LV_ALIGN_TOP_LEFT, 0, 54);
+    }
+
+    create_footer(screen,
+                  "Status: Waage / Gefaesse-Demo bereit",
+                  "Kalibrierung, Gefaesse und Gesamtwerte folgen als Detailseiten");
+}
+
 void create_settings_wartung_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
@@ -1185,6 +1257,9 @@ void build_current_page()
         break;
     case Page::SettingsWartung:
         create_settings_wartung_page(screen);
+        break;
+    case Page::SettingsWaage:
+        create_settings_waage_page(screen);
         break;
     }
 
