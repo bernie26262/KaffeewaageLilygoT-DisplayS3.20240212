@@ -85,6 +85,8 @@ uint8_t currentVesselIndex = 0;
 uint8_t draftVesselIndex = 0;
 constexpr uint16_t SCREEN_TIMEOUT_MINUTES[] = {1, 5, 10, 30};
 uint8_t screenTimeoutIndex = 1;
+uint32_t lastUserActivityMs = 0;
+bool suppressNextClick = false;
 
 
 void build_current_page();
@@ -161,6 +163,19 @@ void change_screen_timeout(int8_t delta)
     char msg[64];
     snprintf(msg, sizeof(msg), "Bildschirmtimeout auf %u min gesetzt", current_screen_timeout_minutes());
     update_status(msg);
+}
+
+
+bool consume_suppressed_click()
+{
+    if (!suppressNextClick) {
+        return false;
+    }
+
+    suppressNextClick = false;
+    lastUserActivityMs = millis();
+    update_status("Display aufgeweckt - erste Beruehrung ignoriert");
+    return true;
 }
 
 const char *vessel_name(uint8_t index)
@@ -407,6 +422,11 @@ static void button_event_cb(lv_event_t *event)
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
         return;
     }
+
+    if (consume_suppressed_click()) {
+        return;
+    }
+    ui_t4s3_notify_activity();
 
     const char *action = static_cast<const char *>(lv_event_get_user_data(event));
     if (!action) {
@@ -1453,11 +1473,35 @@ void build_current_page()
 
 }  // namespace
 
+uint16_t ui_t4s3_get_screen_timeout_minutes()
+{
+    return current_screen_timeout_minutes();
+}
+
+uint32_t ui_t4s3_get_last_activity_ms()
+{
+    return lastUserActivityMs;
+}
+
+void ui_t4s3_notify_activity()
+{
+    lastUserActivityMs = millis();
+}
+
+void ui_t4s3_prepare_wakeup_touch()
+{
+    // Wake-touch suppression is handled by the fullscreen sleep overlay
+    // in t4s3_main.cpp. Keep this hook harmless.
+    suppressNextClick = false;
+    lastUserActivityMs = millis();
+}
+
 void ui_t4s3_create(uint16_t width, uint16_t height)
 {
     screenWidth = width;
     screenHeight = height;
     activePage = Page::Waage;
+    lastUserActivityMs = millis();
     build_current_page();
 }
 
@@ -1489,5 +1533,10 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
+
+
+
+
 
 
