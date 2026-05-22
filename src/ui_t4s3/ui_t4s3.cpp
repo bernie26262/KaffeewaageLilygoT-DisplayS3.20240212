@@ -25,6 +25,8 @@ enum class Page : uint8_t {
     Settings,
     SettingsWartung,
     SettingsWaage,
+    SettingsWlan,
+    SettingsSystem,
 };
 
 Page activePage = Page::Waage;
@@ -56,6 +58,8 @@ lv_obj_t *targetOverlayValueLabel = nullptr;
 lv_obj_t *targetOverlayStepLabel = nullptr;
 lv_obj_t *vesselOverlay = nullptr;
 lv_obj_t *vesselOptionLabels[4] = {nullptr, nullptr, nullptr, nullptr};
+lv_obj_t *screenTimeoutValueLabel = nullptr;
+
 
 uint32_t lastSimMs = 0;
 uint32_t lastTimerMs = 0;
@@ -79,6 +83,9 @@ int32_t targetStepTenths = 5;
 int32_t draftTargetStepTenths = 5;
 uint8_t currentVesselIndex = 0;
 uint8_t draftVesselIndex = 0;
+constexpr uint16_t SCREEN_TIMEOUT_MINUTES[] = {1, 5, 10, 30};
+uint8_t screenTimeoutIndex = 1;
+
 
 void build_current_page();
 void open_target_overlay();
@@ -86,6 +93,7 @@ void close_target_overlay(bool save);
 void open_vessel_overlay();
 void close_vessel_overlay(bool save);
 lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, int width, int height);
+void update_status(const char *msg);
 
 void reset_dynamic_labels()
 {
@@ -111,6 +119,7 @@ void reset_dynamic_labels()
     gramsFilterLabel = nullptr;
     targetOverlayValueLabel = nullptr;
     targetOverlayStepLabel = nullptr;
+    screenTimeoutValueLabel = nullptr;
     for (uint8_t i = 0; i < 4; ++i) {
         vesselOptionLabels[i] = nullptr;
     }
@@ -121,6 +130,37 @@ void set_text(lv_obj_t *obj, const char *text)
     if (obj) {
         lv_label_set_text(obj, text);
     }
+}
+
+uint16_t current_screen_timeout_minutes()
+{
+    return SCREEN_TIMEOUT_MINUTES[screenTimeoutIndex];
+}
+
+void update_screen_timeout_display()
+{
+    if (!screenTimeoutValueLabel) {
+        return;
+    }
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%u min", current_screen_timeout_minutes());
+    lv_label_set_text(screenTimeoutValueLabel, buf);
+}
+
+void change_screen_timeout(int8_t delta)
+{
+    const int8_t next = static_cast<int8_t>(screenTimeoutIndex) + delta;
+    if (next < 0 || next >= static_cast<int8_t>(sizeof(SCREEN_TIMEOUT_MINUTES) / sizeof(SCREEN_TIMEOUT_MINUTES[0]))) {
+        return;
+    }
+
+    screenTimeoutIndex = static_cast<uint8_t>(next);
+    update_screen_timeout_display();
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Bildschirmtimeout auf %u min gesetzt", current_screen_timeout_minutes());
+    update_status(msg);
 }
 
 const char *vessel_name(uint8_t index)
@@ -482,9 +522,19 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "totals_edit") == 0) {
         update_status("Gesamtwerte aendern: Eingabe folgt spaeter");
     } else if (strcmp(action, "settings_wlan") == 0) {
-        update_status("Settings: WLAN - Status und Setup-Assistent folgen");
+        navigate_to(Page::SettingsWlan);
+    } else if (strcmp(action, "wlan_start_setup") == 0) {
+        update_status("WLAN-Assistent: Setup-AP wird spaeter hier gestartet");
     } else if (strcmp(action, "settings_system") == 0) {
-        update_status("Settings: System - Neustart und Logs folgen");
+        navigate_to(Page::SettingsSystem);
+    } else if (strcmp(action, "timeout_minus") == 0) {
+        change_screen_timeout(-1);
+    } else if (strcmp(action, "timeout_plus") == 0) {
+        change_screen_timeout(1);
+    } else if (strcmp(action, "system_logs") == 0) {
+        update_status("Logs / Diagnose: Anzeige folgt spaeter");
+    } else if (strcmp(action, "system_restart") == 0) {
+        update_status("Neustart: Bestaetigungs-Overlay folgt spaeter");
     }
 }
 
@@ -801,7 +851,11 @@ void create_nav(lv_obj_t *screen)
     lv_obj_t *navDaten = create_nav_button(screen, "Daten", "nav_daten", activePage == Page::Daten);
     lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 298, -8);
 
-    const bool settingsActive = activePage == Page::Settings || activePage == Page::SettingsWartung || activePage == Page::SettingsWaage;
+    const bool settingsActive = activePage == Page::Settings ||
+                                activePage == Page::SettingsWartung ||
+                                activePage == Page::SettingsWaage ||
+                                activePage == Page::SettingsWlan ||
+                                activePage == Page::SettingsSystem;
     lv_obj_t *navSettings = create_nav_button(screen, "Settings", "nav_settings", settingsActive);
     lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 438, -8);
 }
@@ -1083,6 +1137,62 @@ void create_maintenance_row(lv_obj_t *parent,
 }
 
 
+
+void create_wlan_info_row(lv_obj_t *parent,
+                          const char *label,
+                          const char *value,
+                          int y)
+{
+    lv_obj_t *labelObj = lv_label_create(parent);
+    lv_label_set_text(labelObj, label);
+    lv_obj_set_width(labelObj, 112);
+    lv_label_set_long_mode(labelObj, LV_LABEL_LONG_DOT);
+    style_label(labelObj, COLOR_MUTED);
+    lv_obj_align(labelObj, LV_ALIGN_TOP_LEFT, 0, y);
+
+    lv_obj_t *valueObj = lv_label_create(parent);
+    lv_label_set_text(valueObj, value);
+    lv_obj_set_width(valueObj, 330);
+    lv_label_set_long_mode(valueObj, LV_LABEL_LONG_DOT);
+    style_label(valueObj, COLOR_WHITE);
+    lv_obj_align(valueObj, LV_ALIGN_TOP_LEFT, 122, y);
+}
+
+void create_settings_wlan_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "WLAN / Netzwerk");
+
+    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
+
+    lv_obj_t *status = lv_label_create(panel);
+    lv_label_set_text(status, "Status: verbunden");
+    style_label(status, COLOR_GREEN);
+    lv_obj_align(status, LV_ALIGN_TOP_LEFT, 0, 34);
+
+    create_wifi_quality_icon(panel, 156, 29, 3);
+
+    create_wlan_info_row(panel, "SSID:", "FRITZ!Box 6490 Cable", 72);
+    create_wlan_info_row(panel, "IP:", "192.168.11.83", 104);
+    create_wlan_info_row(panel, "Signal:", "-67 dBm, gut", 136);
+    create_wlan_info_row(panel, "Setup-AP:", "Waagen-Setup", 168);
+    create_wlan_info_row(panel, "WebUI:", "192.168.4.1", 200);
+
+    lv_obj_t *setupBtn = create_button(panel, "Setup-AP starten", "wlan_start_setup", 150, 52);
+    lv_obj_align(setupBtn, LV_ALIGN_TOP_RIGHT, 0, 86);
+
+    create_footer(screen,
+                  "WLAN-Demo bereit",
+                  "Einrichtung spaeter per Setup-AP und WebUI");
+}
+
 void create_settings_waage_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
@@ -1175,6 +1285,75 @@ void create_settings_wartung_page(lv_obj_t *screen)
                   "Reset-Buttons sind Platzhalter; spaeter mit Bestaetigungs-Overlay");
 }
 
+void create_settings_system_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "System");
+
+    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
+
+    lv_obj_t *timeoutTitle = lv_label_create(panel);
+    lv_label_set_text(timeoutTitle, "Bildschirmtimeout");
+    style_label(timeoutTitle, COLOR_MUTED);
+    lv_obj_align(timeoutTitle, LV_ALIGN_TOP_LEFT, 0, 44);
+
+    lv_obj_t *minus = create_button(panel, "-", "timeout_minus", 56, 48);
+    lv_obj_align(minus, LV_ALIGN_TOP_LEFT, 0, 76);
+
+    lv_obj_t *timeoutBox = lv_obj_create(panel);
+    style_panel(timeoutBox);
+    lv_obj_set_size(timeoutBox, 150, 48);
+    lv_obj_align(timeoutBox, LV_ALIGN_TOP_LEFT, 68, 76);
+    lv_obj_clear_flag(timeoutBox, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(timeoutBox, LV_SCROLLBAR_MODE_OFF);
+
+    screenTimeoutValueLabel = lv_label_create(timeoutBox);
+    lv_obj_set_width(screenTimeoutValueLabel, 130);
+    lv_obj_set_style_text_align(screenTimeoutValueLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(screenTimeoutValueLabel, COLOR_WHITE);
+    lv_obj_center(screenTimeoutValueLabel);
+    update_screen_timeout_display();
+
+    lv_obj_t *plus = create_button(panel, "+", "timeout_plus", 56, 48);
+    lv_obj_align(plus, LV_ALIGN_TOP_LEFT, 230, 76);
+
+    lv_obj_t *wakeTitle = lv_label_create(panel);
+    lv_label_set_text(wakeTitle, "Display wacht auf durch:");
+    style_label(wakeTitle, COLOR_MUTED);
+    lv_obj_align(wakeTitle, LV_ALIGN_TOP_LEFT, 0, 142);
+
+    lv_obj_t *wakeText = lv_label_create(panel);
+    lv_label_set_text(wakeText, "Touch oder Gewichtsaenderung +/- 30 g");
+    lv_obj_set_width(wakeText, 340);
+    lv_label_set_long_mode(wakeText, LV_LABEL_LONG_DOT);
+    style_label(wakeText, COLOR_WHITE);
+    lv_obj_align(wakeText, LV_ALIGN_TOP_LEFT, 0, 170);
+
+    lv_obj_t *logs = create_button(panel, "Logs", "system_logs", 120, 50);
+    lv_obj_align(logs, LV_ALIGN_TOP_RIGHT, 0, 76);
+
+    lv_obj_t *restart = create_button(panel, "Neustart", "system_restart", 120, 50);
+    lv_obj_align(restart, LV_ALIGN_TOP_RIGHT, 0, 142);
+
+    lv_obj_t *note = lv_label_create(panel);
+    lv_label_set_text(note, "Echte Display-Aus/Wakeup-Logik folgt im naechsten Schritt.");
+    lv_obj_set_width(note, 520);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
+    style_label(note, COLOR_MUTED);
+    lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    create_footer(screen,
+                  "System-Demo bereit",
+                  "Timeout-Auswahl ist UI; Display-Abschaltung folgt spaeter");
+}
+
 void create_settings_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
@@ -1199,7 +1378,7 @@ void create_settings_page(lv_obj_t *screen)
         {"Wartung", "Reinigung / Filterwechsel", "Zeit bis oder seit Wartung", "settings_wartung", 0, 36},
         {"Waage / Gefaesse", "Kalibrieren, einmessen", "Gesamtwerte korrigieren", "settings_waage", 274, 36},
         {"WLAN", "SSID, IP, Signal", "spaeter Setup-WLAN", "settings_wlan", 0, 138},
-        {"System", "Neustart", "Logs / Diagnose", "settings_system", 274, 138},
+        {"System", "Timeout, Neustart", "Logs / Diagnose", "settings_system", 274, 138},
     };
 
     for (const auto &card : cards) {
@@ -1261,6 +1440,12 @@ void build_current_page()
     case Page::SettingsWaage:
         create_settings_waage_page(screen);
         break;
+    case Page::SettingsWlan:
+        create_settings_wlan_page(screen);
+        break;
+    case Page::SettingsSystem:
+        create_settings_system_page(screen);
+        break;
     }
 
     create_nav(screen);
@@ -1304,4 +1489,5 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
 
