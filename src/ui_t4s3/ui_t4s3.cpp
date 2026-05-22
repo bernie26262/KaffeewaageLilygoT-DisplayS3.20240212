@@ -41,10 +41,14 @@ lv_obj_t *autodetectButtonLabel = nullptr;
 lv_obj_t *autodetectStateLabel = nullptr;
 lv_obj_t *autodetectLed = nullptr;
 lv_obj_t *vesselLabel = nullptr;
-lv_obj_t *shotsTodayLabel = nullptr;
-lv_obj_t *gramsTodayLabel = nullptr;
 lv_obj_t *totalShotsLabel = nullptr;
+lv_obj_t *shotsMachineLabel = nullptr;
+lv_obj_t *shotsGrinderLabel = nullptr;
+lv_obj_t *shotsFilterLabel = nullptr;
 lv_obj_t *totalGramsLabel = nullptr;
+lv_obj_t *gramsMachineLabel = nullptr;
+lv_obj_t *gramsGrinderLabel = nullptr;
+lv_obj_t *gramsFilterLabel = nullptr;
 lv_obj_t *targetOverlay = nullptr;
 lv_obj_t *targetOverlayValueLabel = nullptr;
 lv_obj_t *targetOverlayStepLabel = nullptr;
@@ -59,10 +63,14 @@ bool timerRunning = false;
 int32_t simTenths = 0;
 int8_t simDir = 1;
 bool autodetectEnabled = true;
-uint16_t demoShotsToday = 0;
 uint16_t demoTotalShots = 0;
-int32_t demoGramsTodayTenths = 0;
+uint16_t demoMachineShots = 0;
+uint16_t demoGrinderShots = 0;
+uint16_t demoFilterShots = 0;
 int32_t demoTotalGramsTenths = 0;
+int32_t demoMachineGramsTenths = 0;
+int32_t demoGrinderGramsTenths = 0;
+int32_t demoFilterGramsTenths = 0;
 int32_t demoTargetTenths = 180;
 int32_t draftTargetTenths = 180;
 int32_t targetStepTenths = 5;
@@ -91,10 +99,14 @@ void reset_dynamic_labels()
     autodetectStateLabel = nullptr;
     autodetectLed = nullptr;
     vesselLabel = nullptr;
-    shotsTodayLabel = nullptr;
-    gramsTodayLabel = nullptr;
     totalShotsLabel = nullptr;
+    shotsMachineLabel = nullptr;
+    shotsGrinderLabel = nullptr;
+    shotsFilterLabel = nullptr;
     totalGramsLabel = nullptr;
+    gramsMachineLabel = nullptr;
+    gramsGrinderLabel = nullptr;
+    gramsFilterLabel = nullptr;
     targetOverlayValueLabel = nullptr;
     targetOverlayStepLabel = nullptr;
     for (uint8_t i = 0; i < 4; ++i) {
@@ -162,17 +174,29 @@ void update_demo_stats_display()
 {
     char buf[32];
 
-    snprintf(buf, sizeof(buf), "%u", demoShotsToday);
-    set_text(shotsTodayLabel, buf);
-
-    format_grams(buf, sizeof(buf), demoGramsTodayTenths);
-    set_text(gramsTodayLabel, buf);
-
     snprintf(buf, sizeof(buf), "%u", demoTotalShots);
     set_text(totalShotsLabel, buf);
 
+    snprintf(buf, sizeof(buf), "%u", demoMachineShots);
+    set_text(shotsMachineLabel, buf);
+
+    snprintf(buf, sizeof(buf), "%u", demoGrinderShots);
+    set_text(shotsGrinderLabel, buf);
+
+    snprintf(buf, sizeof(buf), "%u", demoFilterShots);
+    set_text(shotsFilterLabel, buf);
+
     format_grams(buf, sizeof(buf), demoTotalGramsTenths);
     set_text(totalGramsLabel, buf);
+
+    format_grams(buf, sizeof(buf), demoMachineGramsTenths);
+    set_text(gramsMachineLabel, buf);
+
+    format_grams(buf, sizeof(buf), demoGrinderGramsTenths);
+    set_text(gramsGrinderLabel, buf);
+
+    format_grams(buf, sizeof(buf), demoFilterGramsTenths);
+    set_text(gramsFilterLabel, buf);
 }
 
 void update_target_display()
@@ -356,10 +380,14 @@ static void button_event_cb(lv_event_t *event)
             update_status("Save ignoriert - Demo-Gewicht ist 0,0 g");
             return;
         }
-        demoShotsToday++;
         demoTotalShots++;
-        demoGramsTodayTenths += simTenths;
+        demoMachineShots++;
+        demoGrinderShots++;
+        demoFilterShots++;
         demoTotalGramsTenths += simTenths;
+        demoMachineGramsTenths += simTenths;
+        demoGrinderGramsTenths += simTenths;
+        demoFilterGramsTenths += simTenths;
         update_demo_stats_display();
 
         char msg[96];
@@ -841,70 +869,154 @@ void create_waage_page(lv_obj_t *screen)
 }
 void create_stoppuhr_page(lv_obj_t *screen)
 {
-    lv_obj_t *panel = lv_obj_create(screen);
-    style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_t *timerPanel = lv_obj_create(screen);
+    style_panel(timerPanel);
+    lv_obj_set_size(timerPanel, 365, 258);
+    lv_obj_align(timerPanel, LV_ALIGN_TOP_LEFT, 18, 54);
+    lv_obj_clear_flag(timerPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(timerPanel, LV_SCROLLBAR_MODE_OFF);
 
-    create_panel_title(panel, "Stoppuhr");
+    create_panel_title(timerPanel, "Stoppuhr");
 
-    timerLabel = lv_label_create(panel);
+    timerLabel = lv_label_create(timerPanel);
     lv_label_set_text(timerLabel, "00:00:0");
-    lv_obj_set_width(timerLabel, 260);
+    lv_obj_set_width(timerLabel, 330);
     lv_label_set_long_mode(timerLabel, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(timerLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(timerLabel, LV_TEXT_ALIGN_CENTER, 0);
     style_label(timerLabel, COLOR_WHITE);
-    lv_obj_align(timerLabel, LV_ALIGN_CENTER, -105, -10);
+    lv_obj_set_style_text_font(timerLabel, &lv_font_montserrat_48, 0);
+    lv_obj_align(timerLabel, LV_ALIGN_CENTER, 0, -24);
     update_timer_display();
 
-    lv_obj_t *start = create_button(panel, timerRunning ? "Stop" : "Start", "timer_start_stop", 180, 64);
-    lv_obj_align(start, LV_ALIGN_RIGHT_MID, -15, -42);
+    lv_obj_t *timerInfo = lv_label_create(timerPanel);
+    lv_label_set_text(timerInfo, timerRunning ? "laeuft" : "bereit");
+    lv_obj_set_width(timerInfo, 330);
+    lv_obj_set_style_text_align(timerInfo, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(timerInfo, timerRunning ? COLOR_GREEN : COLOR_MUTED);
+    lv_obj_align(timerInfo, LV_ALIGN_BOTTOM_MID, 0, -22);
 
-    lv_obj_t *reset = create_button(panel, "Reset", "timer_reset", 180, 64);
-    lv_obj_align(reset, LV_ALIGN_RIGHT_MID, -15, 42);
+    lv_obj_t *inputPanel = lv_obj_create(screen);
+    style_plain_block(inputPanel, COLOR_BG);
+    lv_obj_set_size(inputPanel, 195, 258);
+    lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
 
-    lv_obj_t *hint = lv_label_create(panel);
-    lv_label_set_text(hint, "Demo-Stoppuhr ohne Waagenlogik. Zeit bleibt beim Seitenwechsel erhalten.");
-    lv_obj_set_width(hint, 330);
-    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    style_label(hint, COLOR_MUTED);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *start = create_button(inputPanel, timerRunning ? "Stop" : "Start", "timer_start_stop", 175, 78);
+    lv_obj_align(start, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *reset = create_button(inputPanel, "Reset", "timer_reset", 175, 78);
+    lv_obj_align(reset, LV_ALIGN_TOP_MID, 0, 90);
 
     create_footer(screen,
                   "Status: Stoppuhr bereit",
-                  "Stoppuhr aktiv: Start/Stop und Reset funktionieren bereits als LVGL-Touch-Seite");
+                  "Start/Stop und Reset sind als Touch-Bedienung vorbereitet.");
 }
 
 void create_daten_page(lv_obj_t *screen)
 {
-    char shotsToday[16];
-    char gramsToday[24];
     char totalShots[16];
+    char machineShots[16];
+    char grinderShots[16];
+    char filterShots[16];
     char totalGrams[24];
+    char machineGrams[24];
+    char grinderGrams[24];
+    char filterGrams[24];
 
-    snprintf(shotsToday, sizeof(shotsToday), "%u", demoShotsToday);
-    format_grams(gramsToday, sizeof(gramsToday), demoGramsTodayTenths);
     snprintf(totalShots, sizeof(totalShots), "%u", demoTotalShots);
+    snprintf(machineShots, sizeof(machineShots), "%u", demoMachineShots);
+    snprintf(grinderShots, sizeof(grinderShots), "%u", demoGrinderShots);
+    snprintf(filterShots, sizeof(filterShots), "%u", demoFilterShots);
     format_grams(totalGrams, sizeof(totalGrams), demoTotalGramsTenths);
+    format_grams(machineGrams, sizeof(machineGrams), demoMachineGramsTenths);
+    format_grams(grinderGrams, sizeof(grinderGrams), demoGrinderGramsTenths);
+    format_grams(filterGrams, sizeof(filterGrams), demoFilterGramsTenths);
 
-    create_info_card(screen, "Shots heute", shotsToday, 18, 54, 175, 90, &shotsTodayLabel);
-    create_info_card(screen, "Mahlmenge heute", gramsToday, 212, 54, 175, 90, &gramsTodayLabel);
-    create_info_card(screen, "Gesamt-Shots", totalShots, 406, 54, 175, 90, &totalShotsLabel);
+    auto addRow = [](lv_obj_t *parent, const char *name, const char *value, int y, lv_obj_t **valueOut) {
+        lv_obj_t *nameLabel = lv_label_create(parent);
+        lv_label_set_text(nameLabel, name);
+        lv_obj_set_width(nameLabel, 168);
+        lv_label_set_long_mode(nameLabel, LV_LABEL_LONG_DOT);
+        style_label(nameLabel, COLOR_MUTED);
+        lv_obj_align(nameLabel, LV_ALIGN_TOP_LEFT, 0, y);
 
-    create_info_card(screen, "Gesamtmenge", totalGrams, 18, 162, 175, 90, &totalGramsLabel);
-    create_info_card(screen, "Wartung", "ok", 212, 162, 175, 90);
-    create_info_card(screen, "Autodetect", autodetectEnabled ? "AN" : "AUS", 406, 162, 175, 90);
+        lv_obj_t *valueLabel = lv_label_create(parent);
+        lv_label_set_text(valueLabel, value);
+        lv_obj_set_width(valueLabel, 74);
+        lv_obj_set_style_text_align(valueLabel, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_long_mode(valueLabel, LV_LABEL_LONG_DOT);
+        style_label(valueLabel, COLOR_WHITE);
+        lv_obj_align(valueLabel, LV_ALIGN_TOP_RIGHT, 0, y);
+        if (valueOut) {
+            *valueOut = valueLabel;
+        }
+    };
 
-    lv_obj_t *note = lv_label_create(screen);
-    lv_label_set_text(note, "Demo-Daten: Save auf der Waage-Seite erhoeht Shots und Mahlmenge. Spaeter kommen echte Werte aus AppState/Storage.");
-    lv_obj_set_width(note, 560);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    style_label(note, COLOR_MUTED);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 20, 275);
+    auto addSection = [](lv_obj_t *parent, const char *text, int y) {
+        lv_obj_t *label = lv_label_create(parent);
+        lv_label_set_text(label, text);
+        lv_obj_set_width(label, 236);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        style_label(label, COLOR_MUTED);
+        lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, y);
+    };
+
+    lv_obj_t *shotsPanel = lv_obj_create(screen);
+    style_panel(shotsPanel);
+    lv_obj_set_size(shotsPanel, 270, 180);
+    lv_obj_align(shotsPanel, LV_ALIGN_TOP_LEFT, 18, 54);
+    lv_obj_clear_flag(shotsPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(shotsPanel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(shotsPanel, "Shots");
+    addRow(shotsPanel, "Gesamt", totalShots, 30, &totalShotsLabel);
+    addSection(shotsPanel, "seit Reinigung / Wechsel", 58);
+    addRow(shotsPanel, "Kaffeemaschine", machineShots, 84, &shotsMachineLabel);
+    addRow(shotsPanel, "Kaffeemuehle", grinderShots, 110, &shotsGrinderLabel);
+    addRow(shotsPanel, "Filter", filterShots, 136, &shotsFilterLabel);
+
+    lv_obj_t *gramsPanel = lv_obj_create(screen);
+    style_panel(gramsPanel);
+    lv_obj_set_size(gramsPanel, 270, 180);
+    lv_obj_align(gramsPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
+    lv_obj_clear_flag(gramsPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(gramsPanel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(gramsPanel, "Mahlgut");
+    addRow(gramsPanel, "Gesamt", totalGrams, 30, &totalGramsLabel);
+    addSection(gramsPanel, "seit Reinigung / Wechsel", 58);
+    addRow(gramsPanel, "Kaffeemaschine", machineGrams, 84, &gramsMachineLabel);
+    addRow(gramsPanel, "Kaffeemuehle", grinderGrams, 110, &gramsGrinderLabel);
+    addRow(gramsPanel, "Filter", filterGrams, 136, &gramsFilterLabel);
+
+    lv_obj_t *systemPanel = lv_obj_create(screen);
+    style_panel(systemPanel);
+    lv_obj_set_size(systemPanel, 564, 80);
+    lv_obj_align(systemPanel, LV_ALIGN_TOP_LEFT, 18, 248);
+    lv_obj_clear_flag(systemPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(systemPanel, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *systemTitle = lv_label_create(systemPanel);
+    lv_label_set_text(systemTitle, "System");
+    style_label(systemTitle, COLOR_MUTED);
+    lv_obj_align(systemTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *left = lv_label_create(systemPanel);
+    lv_label_set_text(left, "Uptime: 00:05:04\nWLAN: Demo-Netz");
+    lv_obj_set_width(left, 265);
+    lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
+    style_label(left, COLOR_WHITE);
+    lv_obj_align(left, LV_ALIGN_TOP_LEFT, 0, 26);
+
+    lv_obj_t *right = lv_label_create(systemPanel);
+    lv_label_set_text(right, "IP: 192.168.11.83\nSignal: gut (-63 dBm)");
+    lv_obj_set_width(right, 265);
+    lv_label_set_long_mode(right, LV_LABEL_LONG_DOT);
+    style_label(right, COLOR_WHITE);
+    lv_obj_align(right, LV_ALIGN_TOP_RIGHT, 0, 26);
 
     create_footer(screen,
                   "Status: Daten-Demo bereit",
-                  "Daten aktiv: Demo-Shots, Demo-Mahlmenge, Wartung und Autodetect-Status");
+                  "Daten aktiv: Shots, Mahlgut und Systemwerte noch mit Demo-Werten");
 }
 
 void create_settings_page(lv_obj_t *screen)
