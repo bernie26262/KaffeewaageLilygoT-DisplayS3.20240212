@@ -57,3 +57,29 @@ gramsFilter   Mahlgut seit Filterwechsel in Zehntelgramm
 ```
 
 Diese Werte sind weiterhin Prototyp-/Demo-Werte, bis die echte Waagenlogik und HX711-Anbindung aktiv sind.
+
+## Wartungszeiten
+
+Die T4-S3-Wartungsseite speichert die letzten Wartungszeitpunkte als Epoch-Zeit in Sekunden:
+
+```text
+lastKaffee   letzter Reset Kaffeemaschine
+lastMuehle   letzter Reset Kaffeemuehle
+lastFilter   letzter Reset Filterwechsel
+```
+
+Verwendete Intervalle aus der bestehenden Projektlogik:
+
+```text
+Kaffeemaschine reinigen: 10 Tage    = 864000 Sekunden
+Muehle reinigen:          28 Tage    = 2419200 Sekunden
+Filterwechsel:            12 Wochen  = 7257600 Sekunden
+```
+
+Die Anzeige verwendet `in` für noch nicht fällige Wartung und `seit` für überfällige Wartung.
+Das Format ist zum Beispiel:
+
+```text
+Kaffeemaschine: in      9 Tagen, 12:35:24
+Filter: seit            2 Tagen, 22:34:13
+```

@@ -21,3 +21,10 @@ void t4s3_settings_begin();
 void t4s3_settings_load(T4S3UiSettings &settings);
 void t4s3_settings_save(const T4S3UiSettings &settings);
 
+
+void t4s3_settings_load_maintenance(uint32_t &machineEpoch,
+                                    uint32_t &grinderEpoch,
+                                    uint32_t &filterEpoch);
+void t4s3_settings_save_maintenance(uint32_t machineEpoch,
+                                    uint32_t grinderEpoch,
+                                    uint32_t filterEpoch);

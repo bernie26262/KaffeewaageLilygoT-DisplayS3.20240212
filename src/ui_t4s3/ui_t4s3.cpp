@@ -76,6 +76,7 @@ lv_obj_t *wlanSignalLabel = nullptr;
 lv_obj_t *wlanSetupApLabel = nullptr;
 lv_obj_t *wlanWebUiLabel = nullptr;
 lv_obj_t *wlanQualityBars[4] = {nullptr, nullptr, nullptr, nullptr};
+lv_obj_t *maintenanceWarningButton = nullptr;
 
 
 uint32_t lastSimMs = 0;
@@ -105,7 +106,22 @@ constexpr uint16_t SCREEN_TIMEOUT_MINUTES[] = {1, 5, 10, 30};
 uint8_t screenTimeoutIndex = 1;
 uint32_t lastUserActivityMs = 0;
 bool suppressNextClick = false;
-
+bool maintenanceDue = false;
+uint32_t maintenanceMachineEpoch = 0;
+uint32_t maintenanceGrinderEpoch = 0;
+uint32_t maintenanceFilterEpoch = 0;
+lv_obj_t *maintenanceResetOverlay = nullptr;
+const char *maintenancePendingAction = nullptr;
+const char *maintenanceRequestedAction = nullptr;
+uint32_t maintenanceResetRequestedAtMs = 0;
+uint32_t maintenanceResetCooldownUntilMs = 0;
+bool maintenanceRefreshPending = false;
+lv_obj_t *maintenanceMachineLeftLabel = nullptr;
+lv_obj_t *maintenanceMachineTimeLabel = nullptr;
+lv_obj_t *maintenanceGrinderLeftLabel = nullptr;
+lv_obj_t *maintenanceGrinderTimeLabel = nullptr;
+lv_obj_t *maintenanceFilterLeftLabel = nullptr;
+lv_obj_t *maintenanceFilterTimeLabel = nullptr;
 
 void build_current_page();
 void open_target_overlay();
@@ -114,6 +130,12 @@ void open_vessel_overlay();
 void close_vessel_overlay(bool save);
 void open_restart_overlay();
 void close_restart_overlay();
+
+
+void open_maintenance_reset_overlay(const char *action);
+void close_maintenance_reset_overlay();
+void process_pending_maintenance_reset();
+void perform_maintenance_reset(const char *action);
 lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, int width, int height);
 void update_status(const char *msg);
 void load_saved_ui_settings();
@@ -165,9 +187,17 @@ void reset_dynamic_labels()
 
 void set_text(lv_obj_t *obj, const char *text)
 {
-    if (obj) {
-        lv_label_set_text(obj, text);
+    if (!obj || !text) {
+        return;
     }
+
+    // LVGL-Objektzeiger koennen nach Overlays/Seitenwechseln veralten.
+    // Ohne diese Pruefung kann lv_label_set_text() mit LoadProhibited crashen.
+    if (!lv_obj_is_valid(obj)) {
+        return;
+    }
+
+    lv_label_set_text(obj, text);
 }
 
 uint16_t current_screen_timeout_minutes()
@@ -217,6 +247,8 @@ void change_screen_timeout(int8_t delta)
     char msg[64];
     snprintf(msg, sizeof(msg), "Bildschirmtimeout auf %u min gesetzt", current_screen_timeout_minutes());
     update_status(msg);
+
+    save_current_ui_settings();
 }
 
 
@@ -524,7 +556,352 @@ void navigate_to(Page page)
 }
 
 void update_wlan_page_display();
+void update_maintenance_display();
+void update_maintenance_due_state();
+void update_maintenance_warning_display();
 
+#if COFFEE_T4S3_MAINTENANCE_TEST_30S
+constexpr uint32_t MAINTENANCE_MACHINE_INTERVAL_SEC = 30UL;  // Test: 30 Sekunden
+constexpr uint32_t MAINTENANCE_GRINDER_INTERVAL_SEC = 30UL;  // Test: 30 Sekunden
+constexpr uint32_t MAINTENANCE_FILTER_INTERVAL_SEC  = 30UL;  // Test: 30 Sekunden
+#else
+constexpr uint32_t MAINTENANCE_MACHINE_INTERVAL_SEC = 864000UL;     // 10 Tage
+constexpr uint32_t MAINTENANCE_GRINDER_INTERVAL_SEC = 2419200UL;    // 28 Tage
+constexpr uint32_t MAINTENANCE_FILTER_INTERVAL_SEC  = 7257600UL;    // 12 Wochen / 84 Tage
+#endif
+
+const char *maintenance_action_title(const char *action)
+{
+    if (!action) {
+        return "Wartung";
+    }
+    if (strcmp(action, "maintenance_reset_machine") == 0) {
+        return "Kaffeemaschine";
+    }
+    if (strcmp(action, "maintenance_reset_grinder") == 0) {
+        return "Kaffeemuehle";
+    }
+    if (strcmp(action, "maintenance_reset_filter") == 0) {
+        return "Filter";
+    }
+    return "Wartung";
+}
+
+void save_maintenance_epochs()
+{
+    t4s3_settings_save_maintenance(maintenanceMachineEpoch,
+                                   maintenanceGrinderEpoch,
+                                   maintenanceFilterEpoch);
+}
+
+void load_maintenance_epochs()
+{
+    t4s3_settings_load_maintenance(maintenanceMachineEpoch,
+                                   maintenanceGrinderEpoch,
+                                   maintenanceFilterEpoch);
+}
+
+void ensure_maintenance_epochs_initialized()
+{
+    const uint32_t now = t4s3_time_now_epoch();
+    if (now == 0) {
+        return;
+    }
+
+    bool changed = false;
+    if (maintenanceMachineEpoch == 0) {
+        maintenanceMachineEpoch = now;
+        changed = true;
+    }
+    if (maintenanceGrinderEpoch == 0) {
+        maintenanceGrinderEpoch = now;
+        changed = true;
+    }
+    if (maintenanceFilterEpoch == 0) {
+        maintenanceFilterEpoch = now;
+        changed = true;
+    }
+
+    if (changed) {
+        save_maintenance_epochs();
+    }
+}
+
+void format_maintenance_duration(char *buf, size_t len, uint32_t seconds)
+{
+    const uint32_t days = seconds / 86400UL;
+    seconds %= 86400UL;
+    const uint32_t hours = seconds / 3600UL;
+    seconds %= 3600UL;
+    const uint32_t minutes = seconds / 60UL;
+    const uint32_t secs = seconds % 60UL;
+
+    snprintf(buf, len, "%lu %s, %02lu:%02lu:%02lu",
+             static_cast<unsigned long>(days),
+             days == 1 ? "Tag" : "Tagen",
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes),
+             static_cast<unsigned long>(secs));
+}
+
+void maintenance_status(uint32_t lastEpoch,
+                        uint32_t intervalSec,
+                        char *direction,
+                        size_t directionLen,
+                        char *timeText,
+                        size_t timeLen)
+{
+    const uint32_t now = t4s3_time_now_epoch();
+    if (now == 0 || lastEpoch == 0) {
+        strlcpy(direction, "-", directionLen);
+        strlcpy(timeText, "warte auf Zeit", timeLen);
+        return;
+    }
+
+    const uint32_t dueEpoch = lastEpoch + intervalSec;
+    if (now < dueEpoch) {
+        strlcpy(direction, "in", directionLen);
+        format_maintenance_duration(timeText, timeLen, dueEpoch - now);
+    } else {
+        strlcpy(direction, "seit", directionLen);
+        format_maintenance_duration(timeText, timeLen, now - dueEpoch);
+    }
+}
+
+
+void update_maintenance_row_display(lv_obj_t *leftLabel,
+                                    lv_obj_t *timeLabel,
+                                    const char *title,
+                                    uint32_t lastEpoch,
+                                    uint32_t intervalSec)
+{
+    if (!leftLabel || !timeLabel) {
+        return;
+    }
+
+    char direction[8];
+    char timeText[32];
+    maintenance_status(lastEpoch, intervalSec,
+                       direction, sizeof(direction),
+                       timeText, sizeof(timeText));
+
+    char leftText[80];
+    snprintf(leftText, sizeof(leftText), "%s: %s", title, direction);
+
+    set_text(leftLabel, leftText);
+    set_text(timeLabel, timeText);
+
+    const uint32_t nowEpoch = t4s3_time_now_epoch();
+    const bool due = (nowEpoch != 0 && lastEpoch != 0 && nowEpoch >= (lastEpoch + intervalSec));
+    const uint32_t leftColor = due ? 0xD65A5A : COLOR_WHITE;
+    const uint32_t timeColor = due ? 0xD65A5A : COLOR_MUTED;
+
+    if (leftLabel && lv_obj_is_valid(leftLabel)) {
+        lv_obj_set_style_text_color(leftLabel, lv_color_hex(leftColor), 0);
+    }
+    if (timeLabel && lv_obj_is_valid(timeLabel)) {
+        lv_obj_set_style_text_color(timeLabel, lv_color_hex(timeColor), 0);
+    }
+}
+
+void update_maintenance_display()
+{
+    update_maintenance_row_display(maintenanceMachineLeftLabel,
+                                   maintenanceMachineTimeLabel,
+                                   "Kaffeemaschine",
+                                   maintenanceMachineEpoch,
+                                   MAINTENANCE_MACHINE_INTERVAL_SEC);
+
+    update_maintenance_row_display(maintenanceGrinderLeftLabel,
+                                   maintenanceGrinderTimeLabel,
+                                   "Kaffeemuehle",
+                                   maintenanceGrinderEpoch,
+                                   MAINTENANCE_GRINDER_INTERVAL_SEC);
+
+    update_maintenance_row_display(maintenanceFilterLeftLabel,
+                                   maintenanceFilterTimeLabel,
+                                   "Filter",
+                                   maintenanceFilterEpoch,
+                                   MAINTENANCE_FILTER_INTERVAL_SEC);
+}
+
+bool maintenance_item_due(uint32_t lastEpoch, uint32_t intervalSec, uint32_t now)
+{
+    if (now == 0 || lastEpoch == 0) {
+        return false;
+    }
+
+    return now >= (lastEpoch + intervalSec);
+}
+
+void update_maintenance_warning_display()
+{
+    if (!maintenanceWarningButton) {
+        return;
+    }
+
+    if (!lv_obj_is_valid(maintenanceWarningButton)) {
+        maintenanceWarningButton = nullptr;
+        return;
+    }
+
+    if (maintenanceDue) {
+        lv_obj_clear_flag(maintenanceWarningButton, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(maintenanceWarningButton, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void update_maintenance_due_state()
+{
+    const uint32_t now = t4s3_time_now_epoch();
+
+    const bool due =
+        maintenance_item_due(maintenanceMachineEpoch, MAINTENANCE_MACHINE_INTERVAL_SEC, now) ||
+        maintenance_item_due(maintenanceGrinderEpoch, MAINTENANCE_GRINDER_INTERVAL_SEC, now) ||
+        maintenance_item_due(maintenanceFilterEpoch, MAINTENANCE_FILTER_INTERVAL_SEC, now);
+
+    if (maintenanceDue != due) {
+        maintenanceDue = due;
+        Serial.printf("[T4S3][Maintenance] due changed: %u\n", maintenanceDue ? 1 : 0);
+        update_maintenance_warning_display();
+    }
+}
+void perform_maintenance_reset(const char *action)
+{
+    const uint32_t nowEpoch = t4s3_time_now_epoch();
+    if (nowEpoch == 0) {
+        update_status("Wartung kann erst nach NTP-Sync zurueckgesetzt werden");
+        return;
+    }
+
+    if (strcmp(action, "maintenance_reset_machine") == 0) {
+        maintenanceMachineEpoch = nowEpoch;
+    } else if (strcmp(action, "maintenance_reset_grinder") == 0) {
+        maintenanceGrinderEpoch = nowEpoch;
+    } else if (strcmp(action, "maintenance_reset_filter") == 0) {
+        maintenanceFilterEpoch = nowEpoch;
+    } else {
+        return;
+    }
+
+    save_maintenance_epochs();
+
+    // Nicht direkt im Reset-Pfad LVGL-Objekte aktualisieren.
+    // Das hatte LoadProhibited-Crashes verursacht. Stattdessen kurz warten
+    // und dann im normalen ui_t4s3_tick() aktualisieren.
+    maintenanceResetCooldownUntilMs = millis() + 500UL;
+    maintenanceRefreshPending = true;
+
+    char msg[96];
+    snprintf(msg, sizeof(msg), "%s zurueckgesetzt", maintenance_action_title(action));
+    update_status(msg);
+}
+
+void close_maintenance_reset_overlay()
+{
+    if (maintenanceResetOverlay && lv_obj_is_valid(maintenanceResetOverlay)) {
+        lv_obj_add_flag(maintenanceResetOverlay, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        maintenanceResetOverlay = nullptr;
+    }
+    maintenancePendingAction = nullptr;
+    update_status("Wartungs-Reset abgebrochen");
+}
+
+void process_pending_maintenance_reset()
+{
+    if (!maintenanceRequestedAction) {
+        return;
+    }
+
+    const uint32_t nowMs = millis();
+    if (nowMs - maintenanceResetRequestedAtMs < 900UL) {
+        return;
+    }
+
+    const char *action = maintenanceRequestedAction;
+    maintenanceRequestedAction = nullptr;
+    maintenanceResetRequestedAtMs = 0;
+
+    if (maintenanceResetOverlay && lv_obj_is_valid(maintenanceResetOverlay)) {
+        lv_obj_add_flag(maintenanceResetOverlay, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        maintenanceResetOverlay = nullptr;
+    }
+    maintenancePendingAction = nullptr;
+
+    perform_maintenance_reset(action);
+}
+
+void open_maintenance_reset_overlay(const char *action)
+{
+    if (maintenanceResetOverlay && !lv_obj_is_valid(maintenanceResetOverlay)) {
+        maintenanceResetOverlay = nullptr;
+    }
+
+    if (maintenanceResetOverlay) {
+        maintenancePendingAction = action;
+        lv_obj_clear_flag(maintenanceResetOverlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(maintenanceResetOverlay);
+        update_status("Wartungs-Reset bestaetigen oder abbrechen");
+        return;
+    }
+
+    maintenancePendingAction = action;
+    const char *titleText = maintenance_action_title(action);
+
+    lv_obj_t *screen = lv_scr_act();
+
+    maintenanceResetOverlay = lv_obj_create(screen);
+    lv_obj_set_size(maintenanceResetOverlay, screenWidth, screenHeight);
+    lv_obj_align(maintenanceResetOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(maintenanceResetOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(maintenanceResetOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(maintenanceResetOverlay, 0, 0);
+    lv_obj_set_style_pad_all(maintenanceResetOverlay, 0, 0);
+    lv_obj_clear_flag(maintenanceResetOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(maintenanceResetOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 230);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Wartung zuruecksetzen");
+    style_label(title, COLOR_GREEN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
+
+    char msgText[120];
+    snprintf(msgText, sizeof(msgText), "%s jetzt als erledigt markieren?", titleText);
+
+    lv_obj_t *msg = lv_label_create(panel);
+    lv_label_set_text(msg, msgText);
+    lv_obj_set_width(msg, 360);
+    lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+    style_label(msg, COLOR_WHITE);
+    lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 62);
+
+    lv_obj_t *hint = lv_label_create(panel);
+    lv_label_set_text(hint, "Der aktuelle NTP-Zeitpunkt wird gespeichert.");
+    lv_obj_set_width(hint, 360);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    style_label(hint, COLOR_MUTED);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 100);
+
+    lv_obj_t *cancel = create_button(panel, "Abbr.", "maintenance_reset_cancel", 150, 56);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 18, 0);
+
+    lv_obj_t *confirm = create_button(panel, "Reset", "maintenance_reset_confirm", 170, 56);
+    lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, -18, 0);
+
+    lv_obj_move_foreground(maintenanceResetOverlay);
+    update_status("Wartungs-Reset bestaetigen oder abbrechen");
+}
 static void button_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
@@ -571,6 +948,8 @@ static void button_event_cb(lv_event_t *event)
         update_autodetect_display();
         update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
         save_current_ui_settings();
+    } else if (strcmp(action, "maintenance_warning") == 0) {
+        navigate_to(Page::SettingsWartung);
     } else if (strcmp(action, "target_open") == 0) {
         open_target_overlay();
     } else if (strcmp(action, "target_overlay_minus") == 0) {
@@ -636,11 +1015,19 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "settings_back") == 0) {
         navigate_to(Page::Settings);
     } else if (strcmp(action, "maintenance_reset_machine") == 0) {
-        update_status("Kaffeemaschine: Reset folgt spaeter mit Bestaetigung");
+        open_maintenance_reset_overlay(action);
     } else if (strcmp(action, "maintenance_reset_grinder") == 0) {
-        update_status("Kaffeemuehle: Reset folgt spaeter mit Bestaetigung");
+        open_maintenance_reset_overlay(action);
     } else if (strcmp(action, "maintenance_reset_filter") == 0) {
-        update_status("Filterwechsel: Reset folgt spaeter mit Bestaetigung");
+        open_maintenance_reset_overlay(action);
+    } else if (strcmp(action, "maintenance_reset_cancel") == 0) {
+        close_maintenance_reset_overlay();
+    } else if (strcmp(action, "maintenance_reset_confirm") == 0) {
+        if (maintenancePendingAction) {
+            maintenanceRequestedAction = maintenancePendingAction;
+            maintenanceResetRequestedAtMs = millis();
+            update_status("Wartungs-Reset wird vorbereitet ...");
+        }
     } else if (strcmp(action, "settings_waage") == 0) {
         navigate_to(Page::SettingsWaage);
     } else if (strcmp(action, "scale_calibration") == 0) {
@@ -1161,6 +1548,12 @@ void create_waage_page(lv_obj_t *screen)
     style_label(weightLabel, COLOR_WHITE);
     lv_obj_set_style_text_font(weightLabel, &lv_font_montserrat_48, 0);
     lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -28);
+    update_maintenance_due_state();
+    maintenanceWarningButton = create_button(dataPanel, "Wartung erforderlich", "maintenance_warning", 337, 34);
+    lv_obj_align(maintenanceWarningButton, LV_ALIGN_BOTTOM_LEFT, 0, -64);
+    lv_obj_set_style_bg_color(maintenanceWarningButton, lv_color_hex(0x8B3A3A), 0);
+    lv_obj_set_style_border_color(maintenanceWarningButton, lv_color_hex(0xC85A5A), 0);
+    update_maintenance_warning_display();
 
     lv_obj_t *targetBox = lv_btn_create(dataPanel);
     lv_obj_set_size(targetBox, 337, 58);
@@ -1389,7 +1782,17 @@ void create_maintenance_row(lv_obj_t *parent,
     style_label(timeLabel, COLOR_MUTED);
     lv_obj_align(timeLabel, LV_ALIGN_TOP_RIGHT, -120, y + 10);
 
-    lv_obj_t *button = create_button(parent, "Reset", action, 112, 42);
+    
+    if (strcmp(action, "maintenance_reset_machine") == 0) {
+        maintenanceMachineLeftLabel = leftLabel;
+        maintenanceMachineTimeLabel = timeLabel;
+    } else if (strcmp(action, "maintenance_reset_grinder") == 0) {
+        maintenanceGrinderLeftLabel = leftLabel;
+        maintenanceGrinderTimeLabel = timeLabel;
+    } else if (strcmp(action, "maintenance_reset_filter") == 0) {
+        maintenanceFilterLeftLabel = leftLabel;
+        maintenanceFilterTimeLabel = timeLabel;
+    }lv_obj_t *button = create_button(parent, "Reset", action, 112, 42);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, 0, y);
 
     lv_obj_t *line = lv_obj_create(parent);
@@ -1539,22 +1942,38 @@ void create_settings_wartung_page(lv_obj_t *screen)
     lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
 
+    ensure_maintenance_epochs_initialized();
+
     lv_obj_t *hint = lv_label_create(panel);
-    lv_label_set_text(hint, "Reinigung / Filterwechsel: Demo-Zeiten");
-    lv_obj_set_width(hint, 390);
+    lv_label_set_text(hint, "Intervalle: Kaffeemaschine 10 Tage, Muehle 28 Tage, Filter 12 Wochen");
+    lv_obj_set_width(hint, 410);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
     style_label(hint, COLOR_MUTED);
     lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, 32);
 
-    create_maintenance_row(panel, "Kaffeemaschine", "seit", "12 Tagen, 23:56:54", "maintenance_reset_machine", 72);
-    create_maintenance_row(panel, "Kaffeemuehle", "in", "1 Tag, 03:10:08", "maintenance_reset_grinder", 128);
-    create_maintenance_row(panel, "Filter", "in", "0 Tagen, 12:34:56", "maintenance_reset_filter", 184);
+    char dirMachine[8];
+    char dirGrinder[8];
+    char dirFilter[8];
+    char timeMachine[32];
+    char timeGrinder[32];
+    char timeFilter[32];
 
-    create_footer(screen,
-                  "Status: Wartung-Demo bereit",
-                  "Reset-Buttons sind Platzhalter; spaeter mit Bestaetigungs-Overlay");
+    maintenance_status(maintenanceMachineEpoch, MAINTENANCE_MACHINE_INTERVAL_SEC,
+                       dirMachine, sizeof(dirMachine), timeMachine, sizeof(timeMachine));
+    maintenance_status(maintenanceGrinderEpoch, MAINTENANCE_GRINDER_INTERVAL_SEC,
+                       dirGrinder, sizeof(dirGrinder), timeGrinder, sizeof(timeGrinder));
+    maintenance_status(maintenanceFilterEpoch, MAINTENANCE_FILTER_INTERVAL_SEC,
+                       dirFilter, sizeof(dirFilter), timeFilter, sizeof(timeFilter));
+
+    create_maintenance_row(panel, "Kaffeemaschine", dirMachine, timeMachine, "maintenance_reset_machine", 72);
+    create_maintenance_row(panel, "Kaffeemuehle", dirGrinder, timeGrinder, "maintenance_reset_grinder", 128);
+    create_maintenance_row(panel, "Filter", dirFilter, timeFilter, "maintenance_reset_filter", 184);
+
+    
+    update_maintenance_display();create_footer(screen,
+                  "Wartung bereit",
+                  "Reset speichert den aktuellen NTP-Zeitpunkt");
 }
-
 void create_settings_system_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
@@ -1745,12 +2164,16 @@ void ui_t4s3_create(uint16_t width, uint16_t height)
     screenHeight = height;
     activePage = Page::Waage;
     load_saved_ui_settings();
+    load_maintenance_epochs();
+    update_maintenance_due_state();
     lastUserActivityMs = millis();
     build_current_page();
 }
 
 void ui_t4s3_tick()
 {
+    process_pending_maintenance_reset();
+
     const uint32_t now = millis();
 
     if (timerRunning && now - lastTimerMs >= 100) {
@@ -1761,9 +2184,26 @@ void ui_t4s3_tick()
     static uint32_t lastClockMs = 0;
     if (now - lastClockMs >= 1000) {
         lastClockMs = now;
+
         update_clock_display();
         update_header_wifi_display();
         update_wlan_page_display();
+
+        // Hintergrundstatus immer aktualisieren, nicht nur auf der Wartungsseite.
+        // Dadurch kann auf der Waage-Seite sofort eine Warnung erscheinen,
+        // sobald eine Wartung faellig wird.
+        if (static_cast<int32_t>(now - maintenanceResetCooldownUntilMs) >= 0) {
+            update_maintenance_due_state();
+
+            if (maintenanceRefreshPending) {
+                maintenanceRefreshPending = false;
+                update_maintenance_warning_display();
+            }
+
+            if (activePage == Page::SettingsWartung) {
+                update_maintenance_display();
+            }
+        }
     }
 
     if (now - lastSimMs < 350) {
@@ -1779,15 +2219,6 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
-
-
-
-
-
-
-
-
-
 
 
 

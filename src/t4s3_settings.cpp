@@ -170,3 +170,49 @@ void t4s3_settings_save(const T4S3UiSettings &settings)
     prefs.putInt("gramsFilter", settings.filterGramsTenths);Serial.println("[T4S3][Settings] saved UI settings");
 }
 
+
+void t4s3_settings_load_maintenance(uint32_t &machineEpoch,
+                                    uint32_t &grinderEpoch,
+                                    uint32_t &filterEpoch)
+{
+    t4s3_settings_begin();
+
+    machineEpoch = 0;
+    grinderEpoch = 0;
+    filterEpoch = 0;
+
+    if (!prefsReady) {
+        Serial.println("[T4S3][Settings] maintenance load skipped (NVS unavailable)");
+        return;
+    }
+
+    machineEpoch = prefs.getULong("lastKaffee", 0);
+    grinderEpoch = prefs.getULong("lastMuehle", 0);
+    filterEpoch = prefs.getULong("lastFilter", 0);
+
+    Serial.printf("[T4S3][Settings] maintenance loaded: machine=%lu, grinder=%lu, filter=%lu\n",
+                  static_cast<unsigned long>(machineEpoch),
+                  static_cast<unsigned long>(grinderEpoch),
+                  static_cast<unsigned long>(filterEpoch));
+}
+
+void t4s3_settings_save_maintenance(uint32_t machineEpoch,
+                                    uint32_t grinderEpoch,
+                                    uint32_t filterEpoch)
+{
+    t4s3_settings_begin();
+
+    if (!prefsReady) {
+        Serial.println("[T4S3][Settings] maintenance save skipped (NVS unavailable)");
+        return;
+    }
+
+    prefs.putULong("lastKaffee", machineEpoch);
+    prefs.putULong("lastMuehle", grinderEpoch);
+    prefs.putULong("lastFilter", filterEpoch);
+
+    Serial.printf("[T4S3][Settings] maintenance saved: machine=%lu, grinder=%lu, filter=%lu\n",
+                  static_cast<unsigned long>(machineEpoch),
+                  static_cast<unsigned long>(grinderEpoch),
+                  static_cast<unsigned long>(filterEpoch));
+}

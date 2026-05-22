@@ -119,3 +119,17 @@ void t4s3_time_format_local(char *buf, size_t len)
 
     strftime(buf, len, "%d.%m.%Y %H:%M:%S", &timeinfo);
 }
+
+uint32_t t4s3_time_now_epoch()
+{
+    if (!ntpConfigured) {
+        return 0;
+    }
+
+    time_t now = time(nullptr);
+    if (now < 1700000000) {
+        return 0;
+    }
+
+    return static_cast<uint32_t>(now);
+}
