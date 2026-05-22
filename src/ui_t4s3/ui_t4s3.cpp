@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <stdio.h>
+#include <string.h>
 
 namespace {
 
@@ -14,12 +15,41 @@ constexpr uint32_t COLOR_WHITE = 0xFFFFFF;
 constexpr uint32_t COLOR_MUTED = 0xA8B8A8;
 constexpr uint32_t COLOR_DIM = 0x5F705F;
 
+constexpr uint16_t SCREEN_W = 600;
+constexpr uint16_t SCREEN_H = 450;
+
+enum class Page : uint8_t {
+    Waage,
+    Stoppuhr,
+    Daten,
+    Settings,
+};
+
+Page activePage = Page::Waage;
+uint16_t screenWidth = SCREEN_W;
+uint16_t screenHeight = SCREEN_H;
+
 lv_obj_t *weightLabel = nullptr;
 lv_obj_t *statusLabel = nullptr;
 lv_obj_t *touchLabel = nullptr;
 lv_obj_t *simLabel = nullptr;
 lv_obj_t *timerLabel = nullptr;
 lv_obj_t *timerButtonLabel = nullptr;
+lv_obj_t *targetLabel = nullptr;
+lv_obj_t *clockLabel = nullptr;
+lv_obj_t *autodetectButtonLabel = nullptr;
+lv_obj_t *autodetectStateLabel = nullptr;
+lv_obj_t *autodetectLed = nullptr;
+lv_obj_t *vesselLabel = nullptr;
+lv_obj_t *shotsTodayLabel = nullptr;
+lv_obj_t *gramsTodayLabel = nullptr;
+lv_obj_t *totalShotsLabel = nullptr;
+lv_obj_t *totalGramsLabel = nullptr;
+lv_obj_t *targetOverlay = nullptr;
+lv_obj_t *targetOverlayValueLabel = nullptr;
+lv_obj_t *targetOverlayStepLabel = nullptr;
+lv_obj_t *vesselOverlay = nullptr;
+lv_obj_t *vesselOptionLabels[4] = {nullptr, nullptr, nullptr, nullptr};
 
 uint32_t lastSimMs = 0;
 uint32_t lastTimerMs = 0;
@@ -28,12 +58,163 @@ uint32_t timerStartedMs = 0;
 bool timerRunning = false;
 int32_t simTenths = 0;
 int8_t simDir = 1;
+bool autodetectEnabled = true;
+uint16_t demoShotsToday = 0;
+uint16_t demoTotalShots = 0;
+int32_t demoGramsTodayTenths = 0;
+int32_t demoTotalGramsTenths = 0;
+int32_t demoTargetTenths = 180;
+int32_t draftTargetTenths = 180;
+int32_t targetStepTenths = 5;
+int32_t draftTargetStepTenths = 5;
+uint8_t currentVesselIndex = 0;
+uint8_t draftVesselIndex = 0;
+
+void build_current_page();
+void open_target_overlay();
+void close_target_overlay(bool save);
+void open_vessel_overlay();
+void close_vessel_overlay(bool save);
+lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, int width, int height);
+
+void reset_dynamic_labels()
+{
+    weightLabel = nullptr;
+    statusLabel = nullptr;
+    touchLabel = nullptr;
+    simLabel = nullptr;
+    timerLabel = nullptr;
+    timerButtonLabel = nullptr;
+    targetLabel = nullptr;
+    clockLabel = nullptr;
+    autodetectButtonLabel = nullptr;
+    autodetectStateLabel = nullptr;
+    autodetectLed = nullptr;
+    vesselLabel = nullptr;
+    shotsTodayLabel = nullptr;
+    gramsTodayLabel = nullptr;
+    totalShotsLabel = nullptr;
+    totalGramsLabel = nullptr;
+    targetOverlayValueLabel = nullptr;
+    targetOverlayStepLabel = nullptr;
+    for (uint8_t i = 0; i < 4; ++i) {
+        vesselOptionLabels[i] = nullptr;
+    }
+}
 
 void set_text(lv_obj_t *obj, const char *text)
 {
     if (obj) {
         lv_label_set_text(obj, text);
     }
+}
+
+const char *vessel_name(uint8_t index)
+{
+    switch (index) {
+    case 0: return "Bodenloser ST";
+    case 1: return "1er-Siebtraeger";
+    case 2: return "2er-Siebtraeger";
+    case 3: return "Custom ST";
+    default: return "Bodenloser ST";
+    }
+}
+
+void update_autodetect_display()
+{
+    set_text(autodetectStateLabel, "Auto");
+    if (autodetectLed) {
+        lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEnabled ? COLOR_GREEN : COLOR_DIM), 0);
+    }
+}
+
+void update_vessel_display()
+{
+    set_text(vesselLabel, vessel_name(currentVesselIndex));
+}
+
+void update_vessel_overlay_display()
+{
+    for (uint8_t i = 0; i < 4; ++i) {
+        if (!vesselOptionLabels[i]) {
+            continue;
+        }
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%s%s", i == draftVesselIndex ? "> " : "  ", vessel_name(i));
+        lv_label_set_text(vesselOptionLabels[i], buf);
+        lv_obj_set_style_text_color(vesselOptionLabels[i],
+                                    lv_color_hex(i == draftVesselIndex ? COLOR_GREEN : COLOR_WHITE),
+                                    0);
+    }
+}
+
+void format_grams(char *buf, size_t len, int32_t tenths)
+{
+    const char *sign = tenths < 0 ? "-" : "";
+    int32_t absTenths = abs(tenths);
+    snprintf(buf, len, "%s%ld,%ld g",
+             sign,
+             static_cast<long>(absTenths / 10),
+             static_cast<long>(absTenths % 10));
+}
+
+void update_demo_stats_display()
+{
+    char buf[32];
+
+    snprintf(buf, sizeof(buf), "%u", demoShotsToday);
+    set_text(shotsTodayLabel, buf);
+
+    format_grams(buf, sizeof(buf), demoGramsTodayTenths);
+    set_text(gramsTodayLabel, buf);
+
+    snprintf(buf, sizeof(buf), "%u", demoTotalShots);
+    set_text(totalShotsLabel, buf);
+
+    format_grams(buf, sizeof(buf), demoTotalGramsTenths);
+    set_text(totalGramsLabel, buf);
+}
+
+void update_target_display()
+{
+    char buf[24];
+    format_grams(buf, sizeof(buf), demoTargetTenths);
+    set_text(targetLabel, buf);
+}
+
+void update_target_overlay_display()
+{
+    char buf[24];
+    format_grams(buf, sizeof(buf), draftTargetTenths);
+    set_text(targetOverlayValueLabel, buf);
+
+    format_grams(buf, sizeof(buf), draftTargetStepTenths);
+    set_text(targetOverlayStepLabel, buf);
+}
+
+void format_demo_datetime(char *buf, size_t len)
+{
+    const uint32_t baseSeconds = 17UL * 3600UL + 32UL * 60UL + 17UL;
+    const uint32_t elapsedSeconds = millis() / 1000UL;
+    const uint32_t totalSeconds = baseSeconds + elapsedSeconds;
+    const uint32_t days = totalSeconds / 86400UL;
+    const uint32_t secondsOfDay = totalSeconds % 86400UL;
+    const uint32_t hours = secondsOfDay / 3600UL;
+    const uint32_t minutes = (secondsOfDay / 60UL) % 60UL;
+    const uint32_t seconds = secondsOfDay % 60UL;
+
+    snprintf(buf, len, "%02lu.05.26  %02lu:%02lu:%02lu",
+             static_cast<unsigned long>(21UL + days),
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes),
+             static_cast<unsigned long>(seconds));
+}
+
+void update_clock_display()
+{
+    char buf[32];
+    format_demo_datetime(buf, sizeof(buf));
+    set_text(clockLabel, buf);
 }
 
 void style_screen(lv_obj_t *obj)
@@ -70,6 +251,16 @@ void style_button(lv_obj_t *btn)
     lv_obj_set_style_border_color(btn, lv_color_hex(COLOR_GREEN), LV_STATE_PRESSED);
 }
 
+void style_plain_block(lv_obj_t *obj, uint32_t color)
+{
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(obj, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(obj, 0, 0);
+    lv_obj_set_style_radius(obj, 2, 0);
+    lv_obj_set_style_pad_all(obj, 0, 0);
+}
+
 void style_nav_button(lv_obj_t *btn, bool active)
 {
     style_button(btn);
@@ -87,7 +278,7 @@ void update_status(const char *msg)
     set_text(statusLabel, msg);
 }
 
-void update_timer_display()
+void format_timer(char *buf, size_t len)
 {
     uint32_t elapsed = timerBaseMs;
     if (timerRunning) {
@@ -98,11 +289,16 @@ void update_timer_display()
     const uint32_t seconds = (elapsed / 1000) % 60;
     const uint32_t minutes = (elapsed / 60000) % 60;
 
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%02lu:%02lu:%lu",
+    snprintf(buf, len, "%02lu:%02lu:%lu",
              static_cast<unsigned long>(minutes),
              static_cast<unsigned long>(seconds),
              static_cast<unsigned long>(tenths));
+}
+
+void update_timer_display()
+{
+    char buf[24];
+    format_timer(buf, sizeof(buf));
     set_text(timerLabel, buf);
 }
 
@@ -116,14 +312,28 @@ void set_timer_running(bool running)
         timerStartedMs = millis();
         timerRunning = true;
         set_text(timerButtonLabel, "Stop");
-        update_status("Timer gestartet - Demo-Stoppuhr laeuft");
+        update_status("Stoppuhr gestartet");
     } else {
         timerBaseMs += millis() - timerStartedMs;
         timerRunning = false;
-        set_text(timerButtonLabel, "Timer");
-        update_status("Timer gestoppt - Demo-Stoppuhr pausiert");
+        set_text(timerButtonLabel, "Start");
+        update_status("Stoppuhr gestoppt");
     }
     update_timer_display();
+}
+
+void reset_timer()
+{
+    timerBaseMs = 0;
+    timerStartedMs = millis();
+    update_timer_display();
+    update_status("Stoppuhr auf 00:00:0 gesetzt");
+}
+
+void navigate_to(Page page)
+{
+    activePage = page;
+    build_current_page();
 }
 
 static void button_event_cb(lv_event_t *event)
@@ -142,34 +352,285 @@ static void button_event_cb(lv_event_t *event)
         set_text(weightLabel, "0,0 g");
         update_status("Tara gedrueckt - Demo-Gewicht auf 0,0 g gesetzt");
     } else if (strcmp(action, "save") == 0) {
-        update_status("Save gedrueckt - noch Demo-Modus ohne Waegezelle");
-    } else if (strcmp(action, "timer") == 0) {
+        if (simTenths <= 0) {
+            update_status("Save ignoriert - Demo-Gewicht ist 0,0 g");
+            return;
+        }
+        demoShotsToday++;
+        demoTotalShots++;
+        demoGramsTodayTenths += simTenths;
+        demoTotalGramsTenths += simTenths;
+        update_demo_stats_display();
+
+        char msg[96];
+        char grams[24];
+        format_grams(grams, sizeof(grams), simTenths);
+        snprintf(msg, sizeof(msg), "Save gedrueckt - Demo-Bezug %s gespeichert", grams);
+        update_status(msg);
+    } else if (strcmp(action, "autodetect") == 0) {
+        autodetectEnabled = !autodetectEnabled;
+        update_autodetect_display();
+        update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
+    } else if (strcmp(action, "target_open") == 0) {
+        open_target_overlay();
+    } else if (strcmp(action, "target_overlay_minus") == 0) {
+        if (draftTargetTenths > 50) {
+            draftTargetTenths -= draftTargetStepTenths;
+            if (draftTargetTenths < 50) {
+                draftTargetTenths = 50;
+            }
+        }
+        update_target_overlay_display();
+    } else if (strcmp(action, "target_overlay_plus") == 0) {
+        if (draftTargetTenths < 600) {
+            draftTargetTenths += draftTargetStepTenths;
+            if (draftTargetTenths > 600) {
+                draftTargetTenths = 600;
+            }
+        }
+        update_target_overlay_display();
+    } else if (strcmp(action, "target_step_minus") == 0) {
+        if (draftTargetStepTenths == 10) {
+            draftTargetStepTenths = 5;
+        } else if (draftTargetStepTenths == 5) {
+            draftTargetStepTenths = 1;
+        }
+        update_target_overlay_display();
+    } else if (strcmp(action, "target_step_plus") == 0) {
+        if (draftTargetStepTenths == 1) {
+            draftTargetStepTenths = 5;
+        } else if (draftTargetStepTenths == 5) {
+            draftTargetStepTenths = 10;
+        }
+        update_target_overlay_display();
+    } else if (strcmp(action, "target_overlay_cancel") == 0) {
+        close_target_overlay(false);
+    } else if (strcmp(action, "target_overlay_save") == 0) {
+        close_target_overlay(true);
+    } else if (strcmp(action, "vessel_select") == 0) {
+        open_vessel_overlay();
+    } else if (strncmp(action, "vessel_option_", 14) == 0) {
+        const uint8_t idx = static_cast<uint8_t>(action[14] - '0');
+        if (idx < 4) {
+            draftVesselIndex = idx;
+            close_vessel_overlay(true);
+        }
+    } else if (strcmp(action, "vessel_cancel") == 0) {
+        close_vessel_overlay(false);
+    } else if (strcmp(action, "vessel_save") == 0) {
+        close_vessel_overlay(true);
+    } else if (strcmp(action, "timer") == 0 || strcmp(action, "timer_start_stop") == 0) {
         set_timer_running(!timerRunning);
-    } else if (strcmp(action, "nav_home") == 0) {
-        update_status("Home aktiv - Hauptansicht fuer Gewicht und Schnellaktionen");
-    } else if (strcmp(action, "nav_gefaesse") == 0) {
-        update_status("Gefaesse gedrueckt - Ansicht wird spaeter angebunden");
-    } else if (strcmp(action, "nav_stats") == 0) {
-        update_status("Statistik gedrueckt - Ansicht wird spaeter angebunden");
-    } else if (strcmp(action, "Settings") == 0) {
-        update_status("Setup gedrueckt - WLAN, Wartung und System folgen spaeter");
+    } else if (strcmp(action, "timer_reset") == 0) {
+        reset_timer();
+    } else if (strcmp(action, "nav_waage") == 0) {
+        navigate_to(Page::Waage);
+    } else if (strcmp(action, "nav_stoppuhr") == 0) {
+        navigate_to(Page::Stoppuhr);
+    } else if (strcmp(action, "nav_daten") == 0) {
+        navigate_to(Page::Daten);
+    } else if (strcmp(action, "nav_settings") == 0) {
+        navigate_to(Page::Settings);
     }
 }
 
-lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action)
+
+void close_target_overlay(bool save)
+{
+    if (save) {
+        demoTargetTenths = draftTargetTenths;
+        targetStepTenths = draftTargetStepTenths;
+        update_target_display();
+    lv_obj_move_foreground(weightLabel);
+
+        char grams[24];
+        char msg[72];
+        format_grams(grams, sizeof(grams), demoTargetTenths);
+        snprintf(msg, sizeof(msg), "Sollgewicht gespeichert: %s", grams);
+        update_status(msg);
+    } else {
+        update_status("Sollgewicht nicht geaendert");
+    }
+
+    if (targetOverlay) {
+        lv_obj_del(targetOverlay);
+        targetOverlay = nullptr;
+        targetOverlayValueLabel = nullptr;
+        targetOverlayStepLabel = nullptr;
+    }
+}
+
+void open_target_overlay()
+{
+    if (targetOverlay) {
+        return;
+    }
+
+    draftTargetTenths = demoTargetTenths;
+    draftTargetStepTenths = targetStepTenths;
+
+    lv_obj_t *screen = lv_scr_act();
+
+    targetOverlay = lv_obj_create(screen);
+    lv_obj_set_size(targetOverlay, screenWidth, screenHeight);
+    lv_obj_align(targetOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(targetOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(targetOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(targetOverlay, 0, 0);
+    lv_obj_set_style_pad_all(targetOverlay, 0, 0);
+    lv_obj_clear_flag(targetOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(targetOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 330);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Sollgewicht");
+    style_label(title, COLOR_GREEN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 2);
+
+    lv_obj_t *valueTitle = lv_label_create(panel);
+    lv_label_set_text(valueTitle, "Wert");
+    style_label(valueTitle, COLOR_MUTED);
+    lv_obj_align(valueTitle, LV_ALIGN_TOP_MID, 0, 42);
+
+    targetOverlayValueLabel = lv_label_create(panel);
+    lv_obj_set_width(targetOverlayValueLabel, 150);
+    lv_obj_set_style_text_align(targetOverlayValueLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(targetOverlayValueLabel, COLOR_WHITE);
+    lv_obj_align(targetOverlayValueLabel, LV_ALIGN_TOP_MID, 0, 72);
+
+    lv_obj_t *minus = create_button(panel, "-", "target_overlay_minus", 86, 58);
+    lv_obj_align(minus, LV_ALIGN_TOP_MID, -130, 62);
+
+    lv_obj_t *plus = create_button(panel, "+", "target_overlay_plus", 86, 58);
+    lv_obj_align(plus, LV_ALIGN_TOP_MID, 130, 62);
+
+    lv_obj_t *stepTitle = lv_label_create(panel);
+    lv_label_set_text(stepTitle, "Schrittweite");
+    style_label(stepTitle, COLOR_MUTED);
+    lv_obj_align(stepTitle, LV_ALIGN_TOP_MID, 0, 138);
+
+    targetOverlayStepLabel = lv_label_create(panel);
+    lv_obj_set_width(targetOverlayStepLabel, 150);
+    lv_obj_set_style_text_align(targetOverlayStepLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(targetOverlayStepLabel, COLOR_WHITE);
+    lv_obj_align(targetOverlayStepLabel, LV_ALIGN_TOP_MID, 0, 168);
+
+    lv_obj_t *stepMinus = create_button(panel, "-", "target_step_minus", 86, 52);
+    lv_obj_align(stepMinus, LV_ALIGN_TOP_MID, -130, 158);
+
+    lv_obj_t *stepPlus = create_button(panel, "+", "target_step_plus", 86, 52);
+    lv_obj_align(stepPlus, LV_ALIGN_TOP_MID, 130, 158);
+
+    update_target_overlay_display();
+
+    lv_obj_t *cancel = create_button(panel, "Abbr.", "target_overlay_cancel", 150, 52);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    lv_obj_t *save = create_button(panel, "Speichern", "target_overlay_save", 175, 52);
+    lv_obj_align(save, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+
+    update_status("Sollgewicht bearbeiten");
+}
+
+
+
+void close_vessel_overlay(bool save)
+{
+    if (save) {
+        currentVesselIndex = draftVesselIndex;
+        update_vessel_display();
+
+        char msg[72];
+        snprintf(msg, sizeof(msg), "Siebtraeger gespeichert: %s", vessel_name(currentVesselIndex));
+        update_status(msg);
+    } else {
+        update_status("Siebtraeger-Auswahl nicht geaendert");
+    }
+
+    if (vesselOverlay) {
+        lv_obj_del(vesselOverlay);
+        vesselOverlay = nullptr;
+        for (uint8_t i = 0; i < 4; ++i) {
+            vesselOptionLabels[i] = nullptr;
+        }
+    }
+}
+
+void open_vessel_overlay()
+{
+    if (vesselOverlay) {
+        return;
+    }
+
+    draftVesselIndex = currentVesselIndex;
+
+    lv_obj_t *screen = lv_scr_act();
+
+    vesselOverlay = lv_obj_create(screen);
+    lv_obj_set_size(vesselOverlay, screenWidth, screenHeight);
+    lv_obj_align(vesselOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(vesselOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(vesselOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(vesselOverlay, 0, 0);
+    lv_obj_set_style_pad_all(vesselOverlay, 0, 0);
+    lv_obj_clear_flag(vesselOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(vesselOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 295);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Siebtraeger waehlen");
+    style_label(title, COLOR_GREEN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
+
+    const char *actions[] = {
+        "vessel_option_0",
+        "vessel_option_1",
+        "vessel_option_2",
+        "vessel_option_3",
+    };
+
+    for (uint8_t i = 0; i < 4; ++i) {
+        lv_obj_t *option = create_button(panel, "", actions[i], 350, 48);
+        lv_obj_align(option, LV_ALIGN_TOP_MID, 0, 48 + i * 55);
+
+        vesselOptionLabels[i] = lv_label_create(option);
+        lv_obj_set_width(vesselOptionLabels[i], 310);
+        lv_obj_set_style_text_align(vesselOptionLabels[i], LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_align(vesselOptionLabels[i], LV_ALIGN_LEFT_MID, 10, 0);
+    }
+    update_vessel_overlay_display();
+
+    update_status("Siebtraeger direkt per Touch waehlen");
+}
+
+
+lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, int width = 170, int height = 58)
 {
     lv_obj_t *btn = lv_btn_create(parent);
     style_button(btn);
-    lv_obj_set_width(btn, 170);
-    lv_obj_set_height(btn, 58);
+    lv_obj_set_width(btn, width);
+    lv_obj_set_height(btn, height);
     lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(action));
 
     lv_obj_t *label = lv_label_create(btn);
     lv_label_set_text(label, text);
     style_label(label, COLOR_WHITE);
     lv_obj_center(label);
-    if (strcmp(action, "timer") == 0) {
+    if (strcmp(action, "timer") == 0 || strcmp(action, "timer_start_stop") == 0) {
         timerButtonLabel = label;
+        lv_label_set_text(timerButtonLabel, timerRunning ? "Stop" : "Start");
+    } else if (strcmp(action, "autodetect") == 0) {
+        autodetectButtonLabel = label;
+        lv_label_set_text(autodetectButtonLabel, autodetectEnabled ? "Autodetect: AN" : "Autodetect: AUS");
+    } else if (strcmp(action, "vessel_select") == 0) {
+        vesselLabel = label;
+        lv_label_set_text(vesselLabel, vessel_name(currentVesselIndex));
     }
     return btn;
 }
@@ -178,7 +639,7 @@ lv_obj_t *create_nav_button(lv_obj_t *parent, const char *text, const char *acti
 {
     lv_obj_t *btn = lv_btn_create(parent);
     style_nav_button(btn, active);
-    lv_obj_set_size(btn, 128, 38);
+    lv_obj_set_size(btn, 128, 46);
     lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(action));
 
     lv_obj_t *label = lv_label_create(btn);
@@ -188,10 +649,41 @@ lv_obj_t *create_nav_button(lv_obj_t *parent, const char *text, const char *acti
     return btn;
 }
 
+lv_obj_t *create_panel_title(lv_obj_t *parent, const char *text)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_text(label, text);
+    style_label(label, COLOR_MUTED);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
+    return label;
+}
+
+lv_obj_t *create_info_card(lv_obj_t *parent, const char *title, const char *value, int x, int y, int w, int h, lv_obj_t **valueOut = nullptr)
+{
+    lv_obj_t *card = lv_obj_create(parent);
+    style_panel(card);
+    lv_obj_set_size(card, w, h);
+    lv_obj_align(card, LV_ALIGN_TOP_LEFT, x, y);
+
+    lv_obj_t *titleLabel = lv_label_create(card);
+    lv_label_set_text(titleLabel, title);
+    style_label(titleLabel, COLOR_MUTED);
+    lv_obj_align(titleLabel, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *valueLabel = lv_label_create(card);
+    lv_label_set_text(valueLabel, value);
+    style_label(valueLabel, COLOR_WHITE);
+    lv_obj_align(valueLabel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    if (valueOut) {
+        *valueOut = valueLabel;
+    }
+    return card;
+}
+
 void update_sim_weight()
 {
     char buf[24];
-    snprintf(buf, sizeof(buf), "%ld,%d g", static_cast<long>(simTenths / 10), abs(simTenths % 10));
+    format_grams(buf, sizeof(buf), simTenths);
     set_text(weightLabel, buf);
 
     char sim[64];
@@ -199,111 +691,291 @@ void update_sim_weight()
     set_text(simLabel, sim);
 }
 
-}  // namespace
-
-void ui_t4s3_create(uint16_t width, uint16_t height)
+void create_wifi_quality_icon(lv_obj_t *screen, int x, int y, uint8_t quality)
 {
-    lv_obj_t *screen = lv_scr_act();
-    style_screen(screen);
+    for (uint8_t i = 0; i < 4; ++i) {
+        const int h = 6 + i * 4;
+        lv_obj_t *bar = lv_obj_create(screen);
+        style_plain_block(bar, i < quality ? COLOR_GREEN : COLOR_DIM);
+        lv_obj_set_size(bar, 5, h);
+        lv_obj_align(bar, LV_ALIGN_TOP_LEFT, x + i * 8, y + (18 - h));
+    }
+}
 
+void create_header(lv_obj_t *screen)
+{
     lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "Kaffeewaage");
+    lv_label_set_text(title, "Single-Dose-Waage");
     style_label(title, COLOR_GREEN);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 12);
 
-    lv_obj_t *mode = lv_label_create(screen);
-    lv_label_set_text_fmt(mode, "T4-S3  |  %ux%u  |  Demo ohne Waegezelle", width, height);
-    style_label(mode, COLOR_MUTED);
-    lv_obj_align(mode, LV_ALIGN_TOP_RIGHT, -18, 12);
+    clockLabel = lv_label_create(screen);
+    lv_obj_set_width(clockLabel, 190);
+    lv_obj_set_style_text_align(clockLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    style_label(clockLabel, COLOR_WHITE);
+    lv_obj_align(clockLabel, LV_ALIGN_TOP_RIGHT, -74, 12);
+    update_clock_display();
 
-    lv_obj_t *weightPanel = lv_obj_create(screen);
-    style_panel(weightPanel);
-    lv_obj_set_size(weightPanel, 365, 258);
-    lv_obj_align(weightPanel, LV_ALIGN_TOP_LEFT, 18, 54);
+    create_wifi_quality_icon(screen, 540, 10, 3);
+}
 
-    lv_obj_t *weightTitle = lv_label_create(weightPanel);
-    lv_label_set_text(weightTitle, "Gewicht");
-    style_label(weightTitle, COLOR_MUTED);
-    lv_obj_align(weightTitle, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    weightLabel = lv_label_create(weightPanel);
-    lv_label_set_text(weightLabel, "0,0 g");
-    lv_obj_set_width(weightLabel, 230);
-    lv_label_set_long_mode(weightLabel, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(weightLabel, LV_TEXT_ALIGN_RIGHT, 0);
-    style_label(weightLabel, COLOR_WHITE);
-    lv_obj_align(weightLabel, LV_ALIGN_CENTER, -20, -10);
-
-    lv_obj_t *timerTitle = lv_label_create(weightPanel);
-    lv_label_set_text(timerTitle, "Timer");
-    style_label(timerTitle, COLOR_MUTED);
-    lv_obj_align(timerTitle, LV_ALIGN_BOTTOM_RIGHT, 0, -30);
-
-    timerLabel = lv_label_create(weightPanel);
-    lv_label_set_text(timerLabel, "00:00:0");
-    lv_obj_set_width(timerLabel, 105);
-    lv_label_set_long_mode(timerLabel, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(timerLabel, LV_TEXT_ALIGN_RIGHT, 0);
-    style_label(timerLabel, COLOR_WHITE);
-    lv_obj_align(timerLabel, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-
-    simLabel = lv_label_create(weightPanel);
-    lv_label_set_text(simLabel, "Demo-Gewicht: 0,0 g");
-    lv_obj_set_width(simLabel, 210);
-    lv_label_set_long_mode(simLabel, LV_LABEL_LONG_DOT);
-    style_label(simLabel, COLOR_GREEN);
-    lv_obj_align(simLabel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-
-    lv_obj_t *buttonPanel = lv_obj_create(screen);
-    style_panel(buttonPanel);
-    lv_obj_set_size(buttonPanel, 195, 258);
-    lv_obj_align(buttonPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
-
-    lv_obj_t *buttonTitle = lv_label_create(buttonPanel);
-    lv_label_set_text(buttonTitle, "Aktionen");
-    style_label(buttonTitle, COLOR_MUTED);
-    lv_obj_align(buttonTitle, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    lv_obj_t *tara = create_button(buttonPanel, "Tara", "tara");
-    lv_obj_align(tara, LV_ALIGN_TOP_MID, 0, 35);
-
-    lv_obj_t *save = create_button(buttonPanel, "Save", "save");
-    lv_obj_align(save, LV_ALIGN_TOP_MID, 0, 100);
-
-    lv_obj_t *timer = create_button(buttonPanel, "Timer", "timer");
-    lv_obj_align(timer, LV_ALIGN_TOP_MID, 0, 165);
-
+void create_footer(lv_obj_t *screen, const char *statusText, const char *hintText)
+{
     statusLabel = lv_label_create(screen);
-    lv_label_set_text(statusLabel, "Status: Demo-Modus bereit - keine Waegezelle erforderlich");
+    lv_label_set_text(statusLabel, statusText);
     lv_obj_set_width(statusLabel, 560);
     lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_DOT);
     style_label(statusLabel, COLOR_WHITE);
     lv_obj_align(statusLabel, LV_ALIGN_BOTTOM_LEFT, 18, -84);
 
     touchLabel = lv_label_create(screen);
-    lv_label_set_text(touchLabel, "Home aktiv: Gewicht, Tara, Save und Timer als Touch-Prototyp");
+    lv_label_set_text(touchLabel, hintText);
     lv_obj_set_width(touchLabel, 560);
     lv_label_set_long_mode(touchLabel, LV_LABEL_LONG_DOT);
     style_label(touchLabel, COLOR_MUTED);
     lv_obj_align(touchLabel, LV_ALIGN_BOTTOM_LEFT, 18, -62);
+}
 
-    lv_obj_t *navPanel = lv_obj_create(screen);
-    style_panel(navPanel);
-    lv_obj_set_size(navPanel, 564, 50);
-    lv_obj_set_style_pad_all(navPanel, 5, 0);
-    lv_obj_align(navPanel, LV_ALIGN_BOTTOM_MID, 0, -8);
+void create_nav(lv_obj_t *screen)
+{
+    lv_obj_t *navWaage = create_nav_button(screen, "Waage", "nav_waage", activePage == Page::Waage);
+    lv_obj_align(navWaage, LV_ALIGN_BOTTOM_LEFT, 18, -8);
 
-    lv_obj_t *navHome = create_nav_button(navPanel, "Waage", "nav_home", true);
-    lv_obj_align(navHome, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *navStoppuhr = create_nav_button(screen, "Stoppuhr", "nav_stoppuhr", activePage == Page::Stoppuhr);
+    lv_obj_align(navStoppuhr, LV_ALIGN_BOTTOM_LEFT, 158, -8);
 
-    lv_obj_t *navGefaesse = create_nav_button(navPanel, "Gefaesse", "nav_gefaesse", false);
-    lv_obj_align(navGefaesse, LV_ALIGN_LEFT_MID, 140, 0);
+    lv_obj_t *navDaten = create_nav_button(screen, "Daten", "nav_daten", activePage == Page::Daten);
+    lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 298, -8);
 
-    lv_obj_t *navStats = create_nav_button(navPanel, "Daten", "nav_stats", false);
-    lv_obj_align(navStats, LV_ALIGN_LEFT_MID, 280, 0);
+    lv_obj_t *navSettings = create_nav_button(screen, "Settings", "nav_settings", activePage == Page::Settings);
+    lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 438, -8);
+}
 
-    lv_obj_t *navSetup = create_nav_button(navPanel, "Settings", "Settings", false);
-    lv_obj_align(navSetup, LV_ALIGN_LEFT_MID, 420, 0);
+void create_waage_page(lv_obj_t *screen)
+{
+    lv_obj_t *dataPanel = lv_obj_create(screen);
+    style_panel(dataPanel);
+    lv_obj_set_size(dataPanel, 365, 258);
+    lv_obj_align(dataPanel, LV_ALIGN_TOP_LEFT, 18, 54);
+    lv_obj_clear_flag(dataPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(dataPanel, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_clear_flag(dataPanel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(dataPanel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(dataPanel, "Gewicht");
+
+    lv_obj_t *autoBox = lv_btn_create(dataPanel);
+    lv_obj_set_size(autoBox, 82, 32);
+    lv_obj_align(autoBox, LV_ALIGN_TOP_RIGHT, 0, -4);
+    lv_obj_set_style_bg_color(autoBox, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(autoBox, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(autoBox, 0, 0);
+    lv_obj_set_style_radius(autoBox, 12, 0);
+    lv_obj_set_style_pad_all(autoBox, 4, 0);
+    lv_obj_add_event_cb(autoBox, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>("autodetect"));
+
+    autodetectStateLabel = lv_label_create(autoBox);
+    lv_obj_set_width(autodetectStateLabel, 48);
+    lv_obj_set_style_text_align(autodetectStateLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    style_label(autodetectStateLabel, COLOR_MUTED);
+    lv_obj_align(autodetectStateLabel, LV_ALIGN_LEFT_MID, 0, 0);
+
+    autodetectLed = lv_obj_create(autoBox);
+    style_plain_block(autodetectLed, autodetectEnabled ? COLOR_GREEN : COLOR_DIM);
+    lv_obj_set_size(autodetectLed, 12, 12);
+    lv_obj_set_style_radius(autodetectLed, LV_RADIUS_CIRCLE, 0);
+    lv_obj_align(autodetectLed, LV_ALIGN_RIGHT_MID, -2, 0);
+    update_autodetect_display();
+
+    weightLabel = lv_label_create(dataPanel);
+    lv_label_set_text(weightLabel, "0,0 g");
+    lv_obj_set_width(weightLabel, 330);
+    lv_label_set_long_mode(weightLabel, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(weightLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(weightLabel, COLOR_WHITE);
+    lv_obj_set_style_text_font(weightLabel, &lv_font_montserrat_48, 0);
+    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -28);
+
+    lv_obj_t *targetBox = lv_btn_create(dataPanel);
+    lv_obj_set_size(targetBox, 337, 58);
+    lv_obj_align(targetBox, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(targetBox, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(targetBox, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(targetBox, lv_color_hex(COLOR_GREEN_DARK), 0);
+    lv_obj_set_style_border_width(targetBox, 1, 0);
+    lv_obj_set_style_radius(targetBox, 10, 0);
+    lv_obj_set_style_pad_all(targetBox, 10, 0);
+    lv_obj_add_event_cb(targetBox, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>("target_open"));
+
+    lv_obj_t *targetTitle = lv_label_create(targetBox);
+    lv_label_set_text(targetTitle, "Sollgewicht");
+    style_label(targetTitle, COLOR_MUTED);
+    lv_obj_align(targetTitle, LV_ALIGN_LEFT_MID, 0, 0);
+
+    targetLabel = lv_label_create(targetBox);
+    lv_obj_set_width(targetLabel, 110);
+    lv_obj_set_style_text_align(targetLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    style_label(targetLabel, COLOR_GREEN);
+    lv_obj_align(targetLabel, LV_ALIGN_RIGHT_MID, 0, 0);
+    update_target_display();
+    lv_obj_move_foreground(weightLabel);
+
+
+    lv_obj_t *inputPanel = lv_obj_create(screen);
+    style_plain_block(inputPanel, COLOR_BG);
+    lv_obj_set_size(inputPanel, 195, 258);
+    lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
+
+    lv_obj_t *tara = create_button(inputPanel, "Tara", "tara", 175, 78);
+    lv_obj_align(tara, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *save = create_button(inputPanel, "Save", "save", 175, 78);
+    lv_obj_align(save, LV_ALIGN_TOP_MID, 0, 90);
+
+    lv_obj_t *vesselBtn = create_button(inputPanel, vessel_name(currentVesselIndex), "vessel_select", 175, 78);
+    lv_obj_align(vesselBtn, LV_ALIGN_TOP_MID, 0, 180);
+
+    create_footer(screen,
+                  "Status: Waage-Demo bereit - keine Waegezelle erforderlich",
+                  "Sollgewicht links antippen. Siebtraeger rechts waehlen. Auto oben im Gewichtsfeld antippen.");
+}
+void create_stoppuhr_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+
+    create_panel_title(panel, "Stoppuhr");
+
+    timerLabel = lv_label_create(panel);
+    lv_label_set_text(timerLabel, "00:00:0");
+    lv_obj_set_width(timerLabel, 260);
+    lv_label_set_long_mode(timerLabel, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(timerLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    style_label(timerLabel, COLOR_WHITE);
+    lv_obj_align(timerLabel, LV_ALIGN_CENTER, -105, -10);
+    update_timer_display();
+
+    lv_obj_t *start = create_button(panel, timerRunning ? "Stop" : "Start", "timer_start_stop", 180, 64);
+    lv_obj_align(start, LV_ALIGN_RIGHT_MID, -15, -42);
+
+    lv_obj_t *reset = create_button(panel, "Reset", "timer_reset", 180, 64);
+    lv_obj_align(reset, LV_ALIGN_RIGHT_MID, -15, 42);
+
+    lv_obj_t *hint = lv_label_create(panel);
+    lv_label_set_text(hint, "Demo-Stoppuhr ohne Waagenlogik. Zeit bleibt beim Seitenwechsel erhalten.");
+    lv_obj_set_width(hint, 330);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    style_label(hint, COLOR_MUTED);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    create_footer(screen,
+                  "Status: Stoppuhr bereit",
+                  "Stoppuhr aktiv: Start/Stop und Reset funktionieren bereits als LVGL-Touch-Seite");
+}
+
+void create_daten_page(lv_obj_t *screen)
+{
+    char shotsToday[16];
+    char gramsToday[24];
+    char totalShots[16];
+    char totalGrams[24];
+
+    snprintf(shotsToday, sizeof(shotsToday), "%u", demoShotsToday);
+    format_grams(gramsToday, sizeof(gramsToday), demoGramsTodayTenths);
+    snprintf(totalShots, sizeof(totalShots), "%u", demoTotalShots);
+    format_grams(totalGrams, sizeof(totalGrams), demoTotalGramsTenths);
+
+    create_info_card(screen, "Shots heute", shotsToday, 18, 54, 175, 90, &shotsTodayLabel);
+    create_info_card(screen, "Mahlmenge heute", gramsToday, 212, 54, 175, 90, &gramsTodayLabel);
+    create_info_card(screen, "Gesamt-Shots", totalShots, 406, 54, 175, 90, &totalShotsLabel);
+
+    create_info_card(screen, "Gesamtmenge", totalGrams, 18, 162, 175, 90, &totalGramsLabel);
+    create_info_card(screen, "Wartung", "ok", 212, 162, 175, 90);
+    create_info_card(screen, "Autodetect", autodetectEnabled ? "AN" : "AUS", 406, 162, 175, 90);
+
+    lv_obj_t *note = lv_label_create(screen);
+    lv_label_set_text(note, "Demo-Daten: Save auf der Waage-Seite erhoeht Shots und Mahlmenge. Spaeter kommen echte Werte aus AppState/Storage.");
+    lv_obj_set_width(note, 560);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    style_label(note, COLOR_MUTED);
+    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 20, 275);
+
+    create_footer(screen,
+                  "Status: Daten-Demo bereit",
+                  "Daten aktiv: Demo-Shots, Demo-Mahlmenge, Wartung und Autodetect-Status");
+}
+
+void create_settings_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+
+    create_panel_title(panel, "Settings");
+
+    const char *rows[][2] = {
+        {"WLAN", "spaeter Status, Signalqualitaet und Setup-Hilfe"},
+        {"Kalibrierung", "spaeter Waage kalibrieren und Tara-Ablauf"},
+        {"Gefaesse", "spaeter Siebtraeger und Gefaesse einmessen"},
+        {"System / OTA", "spaeter Version, Neustart und Update-Hinweise"},
+    };
+
+    for (int i = 0; i < 4; ++i) {
+        lv_obj_t *title = lv_label_create(panel);
+        lv_label_set_text(title, rows[i][0]);
+        style_label(title, COLOR_GREEN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 38 + i * 48);
+
+        lv_obj_t *value = lv_label_create(panel);
+        lv_label_set_text(value, rows[i][1]);
+        lv_obj_set_width(value, 390);
+        lv_label_set_long_mode(value, LV_LABEL_LONG_DOT);
+        style_label(value, COLOR_MUTED);
+        lv_obj_align(value, LV_ALIGN_TOP_LEFT, 140, 38 + i * 48);
+    }
+
+    create_footer(screen,
+                  "Status: Settings-Demo bereit",
+                  "Settings aktiv: Platzhalter fuer WLAN, Kalibrierung, Gefaesse und System/OTA");
+}
+
+void build_current_page()
+{
+    lv_obj_t *screen = lv_scr_act();
+    lv_obj_clean(screen);
+    reset_dynamic_labels();
+    style_screen(screen);
+    create_header(screen);
+
+    switch (activePage) {
+    case Page::Waage:
+        create_waage_page(screen);
+        break;
+    case Page::Stoppuhr:
+        create_stoppuhr_page(screen);
+        break;
+    case Page::Daten:
+        create_daten_page(screen);
+        break;
+    case Page::Settings:
+        create_settings_page(screen);
+        break;
+    }
+
+    create_nav(screen);
+}
+
+}  // namespace
+
+void ui_t4s3_create(uint16_t width, uint16_t height)
+{
+    screenWidth = width;
+    screenHeight = height;
+    activePage = Page::Waage;
+    build_current_page();
 }
 
 void ui_t4s3_tick()
@@ -313,6 +985,12 @@ void ui_t4s3_tick()
     if (timerRunning && now - lastTimerMs >= 100) {
         lastTimerMs = now;
         update_timer_display();
+    }
+
+    static uint32_t lastClockMs = 0;
+    if (now - lastClockMs >= 1000) {
+        lastClockMs = now;
+        update_clock_display();
     }
 
     if (now - lastSimMs < 350) {
@@ -328,3 +1006,4 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
