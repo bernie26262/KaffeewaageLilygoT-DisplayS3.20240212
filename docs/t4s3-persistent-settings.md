@@ -1,0 +1,41 @@
+# T4-S3 Persistente Einstellungen
+
+Dieser Stand speichert zunächst nur UI-nahe Einstellungen des T4-S3-LVGL-HMI in NVS/Preferences.
+
+Namespace:
+
+```text
+t4s3ui
+```
+
+Gespeichert werden:
+
+```text
+timeoutMin   Bildschirmtimeout in Minuten: 1 / 5 / 10 / 30
+autodetect   Autodetect AN/AUS
+selST        aktuell gewählter Siebträger: 0..3
+targetST0    Sollgewicht Bodenloser ST in Zehntelgramm
+targetST1    Sollgewicht 1er-Siebtraeger in Zehntelgramm
+targetST2    Sollgewicht 2er-Siebtraeger in Zehntelgramm
+targetST3    Sollgewicht Custom ST in Zehntelgramm
+targetStep   Schrittweite für Sollgewicht in Zehntelgramm: 0,1 / 0,5 / 1,0 g
+```
+
+Wichtig:
+
+- Siebträger-Gewichte werden nicht gespeichert.
+- Siebträger dienen auf der Single-Dose-Waage nur als Profil für das Sollgewicht.
+- Auto-Tara / Autodetect basiert später auf Gefäßen, nicht auf Siebträger-Gewichten.
+- Gefäßgewichte, Kalibrierwerte, Wartungszeiten und Statistikwerte werden in späteren Schritten ergänzt.
+
+Standardwerte:
+
+```text
+Bodenloser ST    18,0 g
+1er-Siebtraeger   9,0 g
+2er-Siebtraeger  18,0 g
+Custom ST        18,0 g
+Schrittweite      0,5 g
+Timeout           5 min
+Autodetect        AN
+```

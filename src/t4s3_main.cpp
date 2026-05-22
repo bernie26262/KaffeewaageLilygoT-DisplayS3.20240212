@@ -6,6 +6,7 @@
 #include "t4s3_pins.h"
 #include "t4s3_wifi.h"
 #include "t4s3_time.h"
+#include "t4s3_settings.h"
 
 LilyGo_Class amoled;
 
@@ -113,6 +114,8 @@ void setup()
     amoled.setBrightness(kDisplayBrightnessAwake);
     beginLvglHelper(amoled);
 
+    t4s3_settings_begin();
+
     Serial.printf("[T4S3] Board: %s, rotation=%u, width=%u, height=%u\n",
                   amoled.getName(),
                   amoled.getRotation(),
@@ -155,3 +158,4 @@ void loop()
 
     delay(5);
 }
+

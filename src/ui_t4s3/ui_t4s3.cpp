@@ -2,6 +2,7 @@
 
 #include "../t4s3_wifi.h"
 #include "../t4s3_time.h"
+#include "../t4s3_settings.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -93,6 +94,7 @@ int32_t demoTotalGramsTenths = 0;
 int32_t demoMachineGramsTenths = 0;
 int32_t demoGrinderGramsTenths = 0;
 int32_t demoFilterGramsTenths = 0;
+int32_t targetTenthsBySiebtraeger[4] = {180, 90, 180, 180};
 int32_t demoTargetTenths = 180;
 int32_t draftTargetTenths = 180;
 int32_t targetStepTenths = 5;
@@ -114,6 +116,8 @@ void open_restart_overlay();
 void close_restart_overlay();
 lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, int width, int height);
 void update_status(const char *msg);
+void load_saved_ui_settings();
+void save_current_ui_settings();
 
 void reset_dynamic_labels()
 {
@@ -216,6 +220,55 @@ void change_screen_timeout(int8_t delta)
 }
 
 
+
+void timeout_index_from_minutes(uint16_t minutes)
+{
+    for (uint8_t i = 0; i < sizeof(SCREEN_TIMEOUT_MINUTES) / sizeof(SCREEN_TIMEOUT_MINUTES[0]); ++i) {
+        if (SCREEN_TIMEOUT_MINUTES[i] == minutes) {
+            screenTimeoutIndex = i;
+            return;
+        }
+    }
+
+    screenTimeoutIndex = 1;  // default: 5 min
+}
+
+void save_current_ui_settings()
+{
+    T4S3UiSettings settings;
+    settings.screenTimeoutMinutes = current_screen_timeout_minutes();
+    settings.autodetectEnabled = autodetectEnabled;
+    settings.selectedSiebtraeger = currentVesselIndex;
+    settings.targetTenthsBySiebtraeger[0] = targetTenthsBySiebtraeger[0];
+    settings.targetTenthsBySiebtraeger[1] = targetTenthsBySiebtraeger[1];
+    settings.targetTenthsBySiebtraeger[2] = targetTenthsBySiebtraeger[2];
+    settings.targetTenthsBySiebtraeger[3] = targetTenthsBySiebtraeger[3];
+    settings.targetStepTenths = targetStepTenths;
+
+    t4s3_settings_save(settings);
+}
+
+void load_saved_ui_settings()
+{
+    T4S3UiSettings settings;
+    t4s3_settings_load(settings);
+
+    timeout_index_from_minutes(settings.screenTimeoutMinutes);
+    autodetectEnabled = settings.autodetectEnabled;
+
+    currentVesselIndex = settings.selectedSiebtraeger < 4 ? settings.selectedSiebtraeger : 0;
+    draftVesselIndex = currentVesselIndex;
+
+    for (uint8_t i = 0; i < 4; ++i) {
+        targetTenthsBySiebtraeger[i] = settings.targetTenthsBySiebtraeger[i];
+    }
+
+    targetStepTenths = settings.targetStepTenths;
+    draftTargetStepTenths = targetStepTenths;
+
+    demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
+    draftTargetTenths = demoTargetTenths;
+}
 bool consume_suppressed_click()
 {
     if (!suppressNextClick) {
@@ -501,6 +554,7 @@ static void button_event_cb(lv_event_t *event)
         autodetectEnabled = !autodetectEnabled;
         update_autodetect_display();
         update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
+        save_current_ui_settings();
     } else if (strcmp(action, "target_open") == 0) {
         open_target_overlay();
     } else if (strcmp(action, "target_overlay_minus") == 0) {
@@ -615,6 +669,8 @@ void close_target_overlay(bool save)
     if (save) {
         demoTargetTenths = draftTargetTenths;
         targetStepTenths = draftTargetStepTenths;
+        targetTenthsBySiebtraeger[currentVesselIndex] = demoTargetTenths;
+        save_current_ui_settings();
         update_target_display();
     lv_obj_move_foreground(weightLabel);
 
@@ -780,7 +836,11 @@ void close_vessel_overlay(bool save)
 {
     if (save) {
         currentVesselIndex = draftVesselIndex;
+        demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
+        draftTargetTenths = demoTargetTenths;
         update_vessel_display();
+        update_target_display();
+        save_current_ui_settings();
 
         char msg[72];
         snprintf(msg, sizeof(msg), "Siebtraeger gespeichert: %s", vessel_name(currentVesselIndex));
@@ -1668,6 +1728,7 @@ void ui_t4s3_create(uint16_t width, uint16_t height)
     screenWidth = width;
     screenHeight = height;
     activePage = Page::Waage;
+    load_saved_ui_settings();
     lastUserActivityMs = millis();
     build_current_page();
 }
@@ -1702,6 +1763,9 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
+
+
 
 
 
