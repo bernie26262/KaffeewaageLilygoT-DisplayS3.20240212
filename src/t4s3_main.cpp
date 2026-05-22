@@ -4,6 +4,8 @@
 
 #include "ui_t4s3/ui_t4s3.h"
 #include "t4s3_pins.h"
+#include "t4s3_wifi.h"
+#include "t4s3_time.h"
 
 LilyGo_Class amoled;
 
@@ -121,6 +123,8 @@ void setup()
                   coffee_t4s3_pins::HX711_SCK_PIN);
 
     ui_t4s3_create(amoled.width(), amoled.height());
+    t4s3_wifi_begin();
+    t4s3_time_begin();
     ui_t4s3_notify_activity();
     lv_disp_trig_activity(nullptr);
     g_sleepAllowedAfterWakeMs = millis() + kWakeGraceMs;
@@ -130,6 +134,8 @@ void loop()
 {
     const uint32_t now = millis();
 
+    t4s3_wifi_tick();
+    t4s3_time_tick();
     ui_t4s3_tick();
     lv_task_handler();
 
