@@ -39,3 +39,21 @@ Schrittweite      0,5 g
 Timeout           5 min
 Autodetect        AN
 ```
+
+## Demo-Statistikwerte
+
+Zusätzlich werden jetzt die im T4-S3-Prototyp angezeigten Statistikwerte gespeichert:
+
+```text
+shotsTotal    Shots gesamt
+shotsMach     Shots seit Reinigung Kaffeemaschine
+shotsGrind    Shots seit Reinigung Kaffeemuehle
+shotsFilter   Shots seit Filterwechsel
+
+gramsTotal    Mahlgut gesamt in Zehntelgramm
+gramsMach     Mahlgut seit Reinigung Kaffeemaschine in Zehntelgramm
+gramsGrind    Mahlgut seit Reinigung Kaffeemuehle in Zehntelgramm
+gramsFilter   Mahlgut seit Filterwechsel in Zehntelgramm
+```
+
+Diese Werte sind weiterhin Prototyp-/Demo-Werte, bis die echte Waagenlogik und HX711-Anbindung aktiv sind.

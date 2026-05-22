@@ -245,7 +245,14 @@ void save_current_ui_settings()
     settings.targetTenthsBySiebtraeger[3] = targetTenthsBySiebtraeger[3];
     settings.targetStepTenths = targetStepTenths;
 
-    t4s3_settings_save(settings);
+        settings.totalShots = demoTotalShots;
+    settings.machineShots = demoMachineShots;
+    settings.grinderShots = demoGrinderShots;
+    settings.filterShots = demoFilterShots;
+    settings.totalGramsTenths = demoTotalGramsTenths;
+    settings.machineGramsTenths = demoMachineGramsTenths;
+    settings.grinderGramsTenths = demoGrinderGramsTenths;
+    settings.filterGramsTenths = demoFilterGramsTenths;t4s3_settings_save(settings);
 }
 
 void load_saved_ui_settings()
@@ -268,7 +275,15 @@ void load_saved_ui_settings()
 
     demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
     draftTargetTenths = demoTargetTenths;
-}
+
+    demoTotalShots = settings.totalShots;
+    demoMachineShots = settings.machineShots;
+    demoGrinderShots = settings.grinderShots;
+    demoFilterShots = settings.filterShots;
+    demoTotalGramsTenths = settings.totalGramsTenths;
+    demoMachineGramsTenths = settings.machineGramsTenths;
+    demoGrinderGramsTenths = settings.grinderGramsTenths;
+    demoFilterGramsTenths = settings.filterGramsTenths;}
 bool consume_suppressed_click()
 {
     if (!suppressNextClick) {
@@ -550,6 +565,7 @@ static void button_event_cb(lv_event_t *event)
         format_grams(grams, sizeof(grams), simTenths);
         snprintf(msg, sizeof(msg), "Save gedrueckt - Demo-Bezug %s gespeichert", grams);
         update_status(msg);
+        save_current_ui_settings();
     } else if (strcmp(action, "autodetect") == 0) {
         autodetectEnabled = !autodetectEnabled;
         update_autodetect_display();
@@ -762,7 +778,7 @@ void open_target_overlay()
     }
 
     draftTargetTenths = demoTargetTenths;
-    draftTargetStepTenths = targetStepTenths;
+draftTargetStepTenths = targetStepTenths;
 
     lv_obj_t *screen = lv_scr_act();
 
@@ -838,7 +854,7 @@ void close_vessel_overlay(bool save)
         currentVesselIndex = draftVesselIndex;
         demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
         draftTargetTenths = demoTargetTenths;
-        update_vessel_display();
+update_vessel_display();
         update_target_display();
         save_current_ui_settings();
 
@@ -1763,6 +1779,8 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
+
 
 
 

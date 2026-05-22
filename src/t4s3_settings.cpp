@@ -26,7 +26,14 @@ void fill_defaults(T4S3UiSettings &settings)
     settings.targetTenthsBySiebtraeger[2] = DEFAULT_TARGET_2ER_TENTHS;
     settings.targetTenthsBySiebtraeger[3] = DEFAULT_TARGET_CUSTOM_TENTHS;
     settings.targetStepTenths = DEFAULT_TARGET_STEP_TENTHS;
-}
+    settings.totalShots = 0;
+    settings.machineShots = 0;
+    settings.grinderShots = 0;
+    settings.filterShots = 0;
+    settings.totalGramsTenths = 0;
+    settings.machineGramsTenths = 0;
+    settings.grinderGramsTenths = 0;
+    settings.filterGramsTenths = 0;}
 
 uint16_t sanitize_timeout(uint16_t minutes)
 {
@@ -113,7 +120,16 @@ void t4s3_settings_load(T4S3UiSettings &settings)
     settings.targetStepTenths =
         sanitize_step(prefs.getInt("targetStep", settings.targetStepTenths));
 
-    Serial.printf("[T4S3][Settings] loaded: timeout=%u min, auto=%u, ST=%u, targets=%ld/%ld/%ld/%ld, step=%ld\n",
+    
+    settings.totalShots = prefs.getUInt("shotsTotal", settings.totalShots);
+    settings.machineShots = prefs.getUInt("shotsMach", settings.machineShots);
+    settings.grinderShots = prefs.getUInt("shotsGrind", settings.grinderShots);
+    settings.filterShots = prefs.getUInt("shotsFilter", settings.filterShots);
+
+    settings.totalGramsTenths = prefs.getInt("gramsTotal", settings.totalGramsTenths);
+    settings.machineGramsTenths = prefs.getInt("gramsMach", settings.machineGramsTenths);
+    settings.grinderGramsTenths = prefs.getInt("gramsGrind", settings.grinderGramsTenths);
+    settings.filterGramsTenths = prefs.getInt("gramsFilter", settings.filterGramsTenths);Serial.printf("[T4S3][Settings] loaded: timeout=%u min, auto=%u, ST=%u, targets=%ld/%ld/%ld/%ld, step=%ld\n",
                   settings.screenTimeoutMinutes,
                   settings.autodetectEnabled ? 1 : 0,
                   settings.selectedSiebtraeger,
@@ -142,5 +158,15 @@ void t4s3_settings_save(const T4S3UiSettings &settings)
     prefs.putInt("targetST3", sanitize_target(settings.targetTenthsBySiebtraeger[3], DEFAULT_TARGET_CUSTOM_TENTHS));
     prefs.putInt("targetStep", sanitize_step(settings.targetStepTenths));
 
-    Serial.println("[T4S3][Settings] saved UI settings");
+    
+    prefs.putUInt("shotsTotal", settings.totalShots);
+    prefs.putUInt("shotsMach", settings.machineShots);
+    prefs.putUInt("shotsGrind", settings.grinderShots);
+    prefs.putUInt("shotsFilter", settings.filterShots);
+
+    prefs.putInt("gramsTotal", settings.totalGramsTenths);
+    prefs.putInt("gramsMach", settings.machineGramsTenths);
+    prefs.putInt("gramsGrind", settings.grinderGramsTenths);
+    prefs.putInt("gramsFilter", settings.filterGramsTenths);Serial.println("[T4S3][Settings] saved UI settings");
 }
+
