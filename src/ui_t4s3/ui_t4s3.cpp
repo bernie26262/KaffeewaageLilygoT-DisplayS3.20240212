@@ -1,4 +1,5 @@
 #include "ui_t4s3.h"
+#include "coffee_ui_umlaut_font.h"
 
 #include "../t4s3_wifi.h"
 #include "../t4s3_time.h"
@@ -324,7 +325,7 @@ bool consume_suppressed_click()
 
     suppressNextClick = false;
     lastUserActivityMs = millis();
-    update_status("Display aufgeweckt - erste Beruehrung ignoriert");
+    update_status("Display aufgeweckt - erste Berührung ignoriert");
     return true;
 }
 
@@ -332,8 +333,8 @@ const char *vessel_name(uint8_t index)
 {
     switch (index) {
     case 0: return "Bodenloser ST";
-    case 1: return "1er-Siebtraeger";
-    case 2: return "2er-Siebtraeger";
+    case 1: return "1er-Siebträger";
+    case 2: return "2er-Siebträger";
     case 3: return "Custom ST";
     default: return "Bodenloser ST";
     }
@@ -455,6 +456,7 @@ void style_panel(lv_obj_t *obj)
 void style_label(lv_obj_t *obj, uint32_t color)
 {
     lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+    lv_obj_set_style_text_font(obj, coffee_ui_font(), 0);
 }
 
 void style_button(lv_obj_t *btn)
@@ -579,7 +581,7 @@ const char *maintenance_action_title(const char *action)
         return "Kaffeemaschine";
     }
     if (strcmp(action, "maintenance_reset_grinder") == 0) {
-        return "Kaffeemuehle";
+        return "Kaffeemühle";
     }
     if (strcmp(action, "maintenance_reset_filter") == 0) {
         return "Filter";
@@ -714,7 +716,7 @@ void update_maintenance_display()
 
     update_maintenance_row_display(maintenanceGrinderLeftLabel,
                                    maintenanceGrinderTimeLabel,
-                                   "Kaffeemuehle",
+                                   "Kaffeemühle",
                                    maintenanceGrinderEpoch,
                                    MAINTENANCE_GRINDER_INTERVAL_SEC);
 
@@ -771,7 +773,7 @@ void perform_maintenance_reset(const char *action)
 {
     const uint32_t nowEpoch = t4s3_time_now_epoch();
     if (nowEpoch == 0) {
-        update_status("Wartung kann erst nach NTP-Sync zurueckgesetzt werden");
+        update_status("Wartung kann erst nach NTP-Sync zurückgesetzt werden");
         return;
     }
 
@@ -794,7 +796,7 @@ void perform_maintenance_reset(const char *action)
     maintenanceRefreshPending = true;
 
     char msg[96];
-    snprintf(msg, sizeof(msg), "%s zurueckgesetzt", maintenance_action_title(action));
+    snprintf(msg, sizeof(msg), "%s zurückgesetzt", maintenance_action_title(action));
     update_status(msg);
 }
 
@@ -844,7 +846,7 @@ void open_maintenance_reset_overlay(const char *action)
         maintenancePendingAction = action;
         lv_obj_clear_flag(maintenanceResetOverlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(maintenanceResetOverlay);
-        update_status("Wartungs-Reset bestaetigen oder abbrechen");
+        update_status("Wartungs-Reset bestätigen oder abbrechen");
         return;
     }
 
@@ -870,7 +872,7 @@ void open_maintenance_reset_overlay(const char *action)
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *title = lv_label_create(panel);
-    lv_label_set_text(title, "Wartung zuruecksetzen");
+    lv_label_set_text(title, "Wartung zurücksetzen");
     style_label(title, COLOR_GREEN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
 
@@ -900,7 +902,7 @@ void open_maintenance_reset_overlay(const char *action)
     lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, -18, 0);
 
     lv_obj_move_foreground(maintenanceResetOverlay);
-    update_status("Wartungs-Reset bestaetigen oder abbrechen");
+    update_status("Wartungs-Reset bestätigen oder abbrechen");
 }
 static void button_event_cb(lv_event_t *event)
 {
@@ -921,7 +923,7 @@ static void button_event_cb(lv_event_t *event)
     if (strcmp(action, "tara") == 0) {
         simTenths = 0;
         set_text(weightLabel, "0,0 g");
-        update_status("Tara gedrueckt - Demo-Gewicht auf 0,0 g gesetzt");
+        update_status("Tara gedrückt - Demo-Gewicht auf 0,0 g gesetzt");
     } else if (strcmp(action, "save") == 0) {
         if (simTenths <= 0) {
             update_status("Save ignoriert - Demo-Gewicht ist 0,0 g");
@@ -940,7 +942,7 @@ static void button_event_cb(lv_event_t *event)
         char msg[96];
         char grams[24];
         format_grams(grams, sizeof(grams), simTenths);
-        snprintf(msg, sizeof(msg), "Save gedrueckt - Demo-Bezug %s gespeichert", grams);
+        snprintf(msg, sizeof(msg), "Save gedrückt - Demo-Bezug %s gespeichert", grams);
         update_status(msg);
         save_current_ui_settings();
     } else if (strcmp(action, "autodetect") == 0) {
@@ -1031,13 +1033,13 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "settings_waage") == 0) {
         navigate_to(Page::SettingsWaage);
     } else if (strcmp(action, "scale_calibration") == 0) {
-        update_status("Kalibrierung: Assistent folgt spaeter");
+        update_status("Kalibrierung: Assistent folgt später");
     } else if (strcmp(action, "vessels_measure") == 0) {
-        update_status("Gefaesse einmessen: Assistent folgt spaeter");
+        update_status("Gefäße einmessen: Assistent folgt später");
     } else if (strcmp(action, "vessels_manage") == 0) {
-        update_status("Gefaesse verwalten: Liste / Loeschen folgt spaeter");
+        update_status("Gefäße verwalten: Liste / Löschen folgt später");
     } else if (strcmp(action, "totals_edit") == 0) {
-        update_status("Gesamtwerte aendern: Eingabe folgt spaeter");
+        update_status("Gesamtwerte ändern: Eingabe folgt später");
     } else if (strcmp(action, "settings_wlan") == 0) {
         navigate_to(Page::SettingsWlan);
     } else if (strcmp(action, "wlan_start_setup") == 0) {
@@ -1054,13 +1056,13 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "timeout_plus") == 0) {
         change_screen_timeout(1);
     } else if (strcmp(action, "system_logs") == 0) {
-        update_status("Logs / Diagnose: Anzeige folgt spaeter");
+        update_status("Logs / Diagnose: Anzeige folgt später");
     } else if (strcmp(action, "system_restart") == 0) {
         open_restart_overlay();
     } else if (strcmp(action, "restart_cancel") == 0) {
         close_restart_overlay();
     } else if (strcmp(action, "restart_confirm") == 0) {
-        update_status("Neustart wird ausgefuehrt ...");
+        update_status("Neustart wird ausgeführt ...");
         delay(120);
         ESP.restart();
     }
@@ -1083,7 +1085,7 @@ void close_target_overlay(bool save)
         snprintf(msg, sizeof(msg), "Sollgewicht gespeichert: %s", grams);
         update_status(msg);
     } else {
-        update_status("Sollgewicht nicht geaendert");
+        update_status("Sollgewicht nicht geändert");
     }
 
     if (targetOverlay) {
@@ -1156,7 +1158,7 @@ void open_restart_overlay()
     lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, -18, 0);
 
     lv_obj_move_foreground(restartOverlay);
-    update_status("Neustart bestaetigen oder abbrechen");
+    update_status("Neustart bestätigen oder abbrechen");
 }
 void open_target_overlay()
 {
@@ -1246,10 +1248,10 @@ update_vessel_display();
         save_current_ui_settings();
 
         char msg[72];
-        snprintf(msg, sizeof(msg), "Siebtraeger gespeichert: %s", vessel_name(currentVesselIndex));
+        snprintf(msg, sizeof(msg), "Siebträger gespeichert: %s", vessel_name(currentVesselIndex));
         update_status(msg);
     } else {
-        update_status("Siebtraeger-Auswahl nicht geaendert");
+        update_status("Siebträger-Auswahl nicht geändert");
     }
 
     if (vesselOverlay) {
@@ -1286,7 +1288,7 @@ void open_vessel_overlay()
     lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *title = lv_label_create(panel);
-    lv_label_set_text(title, "Siebtraeger waehlen");
+    lv_label_set_text(title, "Siebträger wählen");
     style_label(title, COLOR_GREEN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 4);
 
@@ -1308,7 +1310,7 @@ void open_vessel_overlay()
     }
     update_vessel_overlay_display();
 
-    update_status("Siebtraeger direkt per Touch waehlen");
+    update_status("Siebträger direkt per Touch wählen");
 }
 
 
@@ -1595,8 +1597,8 @@ void create_waage_page(lv_obj_t *screen)
     lv_obj_align(vesselBtn, LV_ALIGN_TOP_MID, 0, 180);
 
     create_footer(screen,
-                  "Status: Waage-Demo bereit - keine Waegezelle erforderlich",
-                  "Sollgewicht links antippen. Siebtraeger rechts waehlen. Auto oben im Gewichtsfeld antippen.");
+                  "Status: Waage-Demo bereit - keine Wägezelle erforderlich",
+                  "Sollgewicht links antippen. Siebträger rechts wählen. Auto oben im Gewichtsfeld antippen.");
 }
 void create_stoppuhr_page(lv_obj_t *screen)
 {
@@ -1620,7 +1622,7 @@ void create_stoppuhr_page(lv_obj_t *screen)
     update_timer_display();
 
     lv_obj_t *timerInfo = lv_label_create(timerPanel);
-    lv_label_set_text(timerInfo, timerRunning ? "laeuft" : "bereit");
+    lv_label_set_text(timerInfo, timerRunning ? "läuft" : "bereit");
     lv_obj_set_width(timerInfo, 330);
     lv_obj_set_style_text_align(timerInfo, LV_TEXT_ALIGN_CENTER, 0);
     style_label(timerInfo, timerRunning ? COLOR_GREEN : COLOR_MUTED);
@@ -1702,7 +1704,7 @@ void create_daten_page(lv_obj_t *screen)
     addRow(shotsPanel, "Gesamt", totalShots, 30, &totalShotsLabel);
     addSection(shotsPanel, "seit Reinigung / Wechsel", 58);
     addRow(shotsPanel, "Kaffeemaschine", machineShots, 84, &shotsMachineLabel);
-    addRow(shotsPanel, "Kaffeemuehle", grinderShots, 110, &shotsGrinderLabel);
+    addRow(shotsPanel, "Kaffeemühle", grinderShots, 110, &shotsGrinderLabel);
     addRow(shotsPanel, "Filter", filterShots, 136, &shotsFilterLabel);
 
     lv_obj_t *gramsPanel = lv_obj_create(screen);
@@ -1716,7 +1718,7 @@ void create_daten_page(lv_obj_t *screen)
     addRow(gramsPanel, "Gesamt", totalGrams, 30, &totalGramsLabel);
     addSection(gramsPanel, "seit Reinigung / Wechsel", 58);
     addRow(gramsPanel, "Kaffeemaschine", machineGrams, 84, &gramsMachineLabel);
-    addRow(gramsPanel, "Kaffeemuehle", grinderGrams, 110, &gramsGrinderLabel);
+    addRow(gramsPanel, "Kaffeemühle", grinderGrams, 110, &gramsGrinderLabel);
     addRow(gramsPanel, "Filter", filterGrams, 136, &gramsFilterLabel);
 
     lv_obj_t *systemPanel = lv_obj_create(screen);
@@ -1840,7 +1842,7 @@ void create_settings_wlan_page(lv_obj_t *screen)
 
     create_panel_title(panel, "WLAN / Netzwerk");
 
-    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_t *back = create_button(panel, "Zurück", "settings_back", 112, 40);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
 
     wlanStatusLabel = lv_label_create(panel);
@@ -1875,9 +1877,9 @@ void create_settings_waage_page(lv_obj_t *screen)
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
-    create_panel_title(panel, "Waage / Gefaesse");
+    create_panel_title(panel, "Waage / Gefäße");
 
-    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_t *back = create_button(panel, "Zurück", "settings_back", 112, 40);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
 
     struct ScaleCard {
@@ -1891,8 +1893,8 @@ void create_settings_waage_page(lv_obj_t *screen)
 
     const ScaleCard cards[] = {
         {"Kalibrierung", "bekanntes Gewicht", "Waage abgleichen", "scale_calibration", 0, 42},
-        {"Gefaesse einmessen", "Gewicht erfassen", "fuer Autodetect", "vessels_measure", 274, 42},
-        {"Gefaesse verwalten", "anzeigen / loeschen", "gespeicherte Gefaesse", "vessels_manage", 0, 142},
+        {"Gefäße einmessen", "Gewicht erfassen", "für Autodetect", "vessels_measure", 274, 42},
+        {"Gefäße verwalten", "anzeigen / löschen", "gespeicherte Gefäße", "vessels_manage", 0, 142},
         {"Gesamtwerte", "Shots und Mahlgut", "korrigieren", "totals_edit", 274, 142},
     };
 
@@ -1924,8 +1926,8 @@ void create_settings_waage_page(lv_obj_t *screen)
     }
 
     create_footer(screen,
-                  "Status: Waage / Gefaesse-Demo bereit",
-                  "Kalibrierung, Gefaesse und Gesamtwerte folgen als Detailseiten");
+                  "Status: Waage / Gefäße-Demo bereit",
+                  "Kalibrierung, Gefäße und Gesamtwerte folgen als Detailseiten");
 }
 
 void create_settings_wartung_page(lv_obj_t *screen)
@@ -1939,13 +1941,13 @@ void create_settings_wartung_page(lv_obj_t *screen)
 
     create_panel_title(panel, "Wartung");
 
-    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_t *back = create_button(panel, "Zurück", "settings_back", 112, 40);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
 
     ensure_maintenance_epochs_initialized();
 
     lv_obj_t *hint = lv_label_create(panel);
-    lv_label_set_text(hint, "Intervalle: Kaffeemaschine 10 Tage, Muehle 28 Tage, Filter 12 Wochen");
+    lv_label_set_text(hint, "Intervalle: Kaffeemaschine 10 Tage, Mühle 28 Tage, Filter 12 Wochen");
     lv_obj_set_width(hint, 410);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
     style_label(hint, COLOR_MUTED);
@@ -1966,7 +1968,7 @@ void create_settings_wartung_page(lv_obj_t *screen)
                        dirFilter, sizeof(dirFilter), timeFilter, sizeof(timeFilter));
 
     create_maintenance_row(panel, "Kaffeemaschine", dirMachine, timeMachine, "maintenance_reset_machine", 72);
-    create_maintenance_row(panel, "Kaffeemuehle", dirGrinder, timeGrinder, "maintenance_reset_grinder", 128);
+    create_maintenance_row(panel, "Kaffeemühle", dirGrinder, timeGrinder, "maintenance_reset_grinder", 128);
     create_maintenance_row(panel, "Filter", dirFilter, timeFilter, "maintenance_reset_filter", 184);
 
     
@@ -1985,7 +1987,7 @@ void create_settings_system_page(lv_obj_t *screen)
 
     create_panel_title(panel, "System");
 
-    lv_obj_t *back = create_button(panel, "Zurueck", "settings_back", 112, 40);
+    lv_obj_t *back = create_button(panel, "Zurück", "settings_back", 112, 40);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
 
     lv_obj_t *timeTitle = lv_label_create(panel);
@@ -2058,8 +2060,8 @@ void create_settings_page(lv_obj_t *screen)
 
     const SettingsCard cards[] = {
         {"Wartung", "Reinigung / Filterwechsel", "Zeit bis oder seit Wartung", "settings_wartung", 0, 36},
-        {"Waage / Gefaesse", "Kalibrieren, einmessen", "Gesamtwerte korrigieren", "settings_waage", 274, 36},
-        {"WLAN", "SSID, IP, Signal", "spaeter Setup-WLAN", "settings_wlan", 0, 138},
+        {"Waage / Gefäße", "Kalibrieren, einmessen", "Gesamtwerte korrigieren", "settings_waage", 274, 36},
+        {"WLAN", "SSID, IP, Signal", "später Setup-WLAN", "settings_wlan", 0, 138},
         {"System", "Timeout, Neustart", "Logs / Diagnose", "settings_system", 274, 138},
     };
 
@@ -2092,7 +2094,7 @@ void create_settings_page(lv_obj_t *screen)
 
     create_footer(screen,
                   "Status: Settings-Demo bereit",
-                  "Settings: Wartung, Waage / Gefaesse, WLAN und System");
+                  "Settings: Wartung, Waage / Gefäße, WLAN und System");
 }
 
 void build_current_page()
