@@ -906,15 +906,22 @@ void perform_maintenance_reset(const char *action)
 
     if (strcmp(action, "maintenance_reset_machine") == 0) {
         maintenanceMachineEpoch = nowEpoch;
+        demoMachineShots = 0;
+        demoMachineGramsTenths = 0;
     } else if (strcmp(action, "maintenance_reset_grinder") == 0) {
         maintenanceGrinderEpoch = nowEpoch;
+        demoGrinderShots = 0;
+        demoGrinderGramsTenths = 0;
     } else if (strcmp(action, "maintenance_reset_filter") == 0) {
         maintenanceFilterEpoch = nowEpoch;
+        demoFilterShots = 0;
+        demoFilterGramsTenths = 0;
     } else {
         return;
     }
 
     save_maintenance_epochs();
+    save_current_ui_settings();
 
     // Nicht direkt im Reset-Pfad LVGL-Objekte aktualisieren.
     // Das hatte LoadProhibited-Crashes verursacht. Stattdessen kurz warten
