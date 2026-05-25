@@ -15,7 +15,9 @@ struct T4S3UiSettings {
     int32_t totalGramsTenths;
     int32_t machineGramsTenths;
     int32_t grinderGramsTenths;
-    int32_t filterGramsTenths;};
+    int32_t filterGramsTenths;
+    int32_t gefaessWeightTenths[4];
+};
 
 void t4s3_settings_begin();
 void t4s3_settings_load(T4S3UiSettings &settings);

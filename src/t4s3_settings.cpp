@@ -15,6 +15,7 @@ constexpr int32_t DEFAULT_TARGET_1ER_TENTHS = 90;
 constexpr int32_t DEFAULT_TARGET_2ER_TENTHS = 180;
 constexpr int32_t DEFAULT_TARGET_CUSTOM_TENTHS = 180;
 constexpr int32_t DEFAULT_TARGET_STEP_TENTHS = 5;
+constexpr int32_t GEFAESS_WEIGHT_UNSET_TENTHS = -1;
 
 void fill_defaults(T4S3UiSettings &settings)
 {
@@ -33,7 +34,11 @@ void fill_defaults(T4S3UiSettings &settings)
     settings.totalGramsTenths = 0;
     settings.machineGramsTenths = 0;
     settings.grinderGramsTenths = 0;
-    settings.filterGramsTenths = 0;}
+    settings.filterGramsTenths = 0;
+    for (uint8_t i = 0; i < 4; ++i) {
+        settings.gefaessWeightTenths[i] = GEFAESS_WEIGHT_UNSET_TENTHS;
+    }
+}
 
 uint16_t sanitize_timeout(uint16_t minutes)
 {
@@ -66,6 +71,19 @@ int32_t sanitize_step(int32_t tenths)
     default:
         return DEFAULT_TARGET_STEP_TENTHS;
     }
+}
+
+int32_t sanitize_gefaess_weight(int32_t tenths)
+{
+    // -1 bedeutet: Gefäß noch nicht eingemessen.
+    // Plausibler Bereich für Gefäße: 0,1 g bis 1000,0 g.
+    if (tenths == GEFAESS_WEIGHT_UNSET_TENTHS) {
+        return GEFAESS_WEIGHT_UNSET_TENTHS;
+    }
+    if (tenths < 1 || tenths > 10000) {
+        return GEFAESS_WEIGHT_UNSET_TENTHS;
+    }
+    return tenths;
 }
 
 }  // namespace
@@ -129,7 +147,16 @@ void t4s3_settings_load(T4S3UiSettings &settings)
     settings.totalGramsTenths = prefs.getInt("gramsTotal", settings.totalGramsTenths);
     settings.machineGramsTenths = prefs.getInt("gramsMach", settings.machineGramsTenths);
     settings.grinderGramsTenths = prefs.getInt("gramsGrind", settings.grinderGramsTenths);
-    settings.filterGramsTenths = prefs.getInt("gramsFilter", settings.filterGramsTenths);Serial.printf("[T4S3][Settings] loaded: timeout=%u min, auto=%u, ST=%u, targets=%ld/%ld/%ld/%ld, step=%ld\n",
+    settings.filterGramsTenths = prefs.getInt("gramsFilter", settings.filterGramsTenths);
+
+    for (uint8_t i = 0; i < 4; ++i) {
+        char key[12];
+        snprintf(key, sizeof(key), "gefW%u", i);
+        settings.gefaessWeightTenths[i] =
+            sanitize_gefaess_weight(prefs.getInt(key, settings.gefaessWeightTenths[i]));
+    }
+
+    Serial.printf("[T4S3][Settings] loaded: timeout=%u min, auto=%u, ST=%u, targets=%ld/%ld/%ld/%ld, step=%ld\n",
                   settings.screenTimeoutMinutes,
                   settings.autodetectEnabled ? 1 : 0,
                   settings.selectedSiebtraeger,
@@ -167,7 +194,15 @@ void t4s3_settings_save(const T4S3UiSettings &settings)
     prefs.putInt("gramsTotal", settings.totalGramsTenths);
     prefs.putInt("gramsMach", settings.machineGramsTenths);
     prefs.putInt("gramsGrind", settings.grinderGramsTenths);
-    prefs.putInt("gramsFilter", settings.filterGramsTenths);Serial.println("[T4S3][Settings] saved UI settings");
+    prefs.putInt("gramsFilter", settings.filterGramsTenths);
+
+    for (uint8_t i = 0; i < 4; ++i) {
+        char key[12];
+        snprintf(key, sizeof(key), "gefW%u", i);
+        prefs.putInt(key, sanitize_gefaess_weight(settings.gefaessWeightTenths[i]));
+    }
+
+    Serial.println("[T4S3][Settings] saved UI settings");
 }
 
 

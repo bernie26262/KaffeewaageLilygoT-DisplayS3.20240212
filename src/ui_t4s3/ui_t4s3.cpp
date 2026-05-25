@@ -50,6 +50,7 @@ lv_obj_t *autodetectButtonLabel = nullptr;
 lv_obj_t *autodetectStateLabel = nullptr;
 lv_obj_t *autodetectLed = nullptr;
 lv_obj_t *vesselLabel = nullptr;
+lv_obj_t *gefaessStoredLabel = nullptr;
 lv_obj_t *totalShotsLabel = nullptr;
 lv_obj_t *shotsMachineLabel = nullptr;
 lv_obj_t *shotsGrinderLabel = nullptr;
@@ -101,6 +102,7 @@ int32_t demoMachineGramsTenths = 0;
 int32_t demoGrinderGramsTenths = 0;
 int32_t demoFilterGramsTenths = 0;
 int32_t targetTenthsBySiebtraeger[4] = {180, 90, 180, 180};
+int32_t gefaessWeightTenths[4] = {-1, -1, -1, -1};
 int32_t demoTargetTenths = 180;
 int32_t draftTargetTenths = 180;
 int32_t targetStepTenths = 5;
@@ -160,6 +162,7 @@ void reset_dynamic_labels()
     autodetectStateLabel = nullptr;
     autodetectLed = nullptr;
     vesselLabel = nullptr;
+    gefaessStoredLabel = nullptr;
     totalShotsLabel = nullptr;
     shotsMachineLabel = nullptr;
     shotsGrinderLabel = nullptr;
@@ -348,7 +351,11 @@ void save_current_ui_settings()
     settings.targetTenthsBySiebtraeger[3] = targetTenthsBySiebtraeger[3];
     settings.targetStepTenths = targetStepTenths;
 
-        settings.totalShots = demoTotalShots;
+    for (uint8_t i = 0; i < 4; ++i) {
+        settings.gefaessWeightTenths[i] = gefaessWeightTenths[i];
+    }
+
+    settings.totalShots = demoTotalShots;
     settings.machineShots = demoMachineShots;
     settings.grinderShots = demoGrinderShots;
     settings.filterShots = demoFilterShots;
@@ -378,6 +385,10 @@ void load_saved_ui_settings()
 
     demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
     draftTargetTenths = demoTargetTenths;
+
+    for (uint8_t i = 0; i < 4; ++i) {
+        gefaessWeightTenths[i] = settings.gefaessWeightTenths[i];
+    }
 
     demoTotalShots = settings.totalShots;
     demoMachineShots = settings.machineShots;
@@ -446,6 +457,25 @@ void format_grams(char *buf, size_t len, int32_t tenths)
              sign,
              static_cast<long>(absTenths / 10),
              static_cast<long>(absTenths % 10));
+}
+
+
+uint8_t stored_gefaess_count()
+{
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < 4; ++i) {
+        if (gefaessWeightTenths[i] >= 0) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void update_gefaess_storage_display()
+{
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%u/4 eingemessen", stored_gefaess_count());
+    set_text(gefaessStoredLabel, buf);
 }
 
 void update_demo_stats_display()
@@ -1987,7 +2017,7 @@ void create_settings_waage_page(lv_obj_t *screen)
     const ScaleCard cards[] = {
         {"Kalibrierung", "bekanntes Gewicht", "Waage abgleichen", "scale_calibration", 0, 42},
         {"Gefäße einmessen", "Gewicht erfassen", "für Autodetect", "vessels_measure", 274, 42},
-        {"Gefäße verwalten", "anzeigen / löschen", "gespeicherte Gefäße", "vessels_manage", 0, 142},
+        {"Gefäße verwalten", "anzeigen / löschen", "0/4 eingemessen", "vessels_manage", 0, 142},
         {"Gesamtwerte", "Shots und Mahlgut", "korrigieren", "totals_edit", 274, 142},
     };
 
@@ -2016,7 +2046,13 @@ void create_settings_waage_page(lv_obj_t *screen)
         lv_label_set_long_mode(line2, LV_LABEL_LONG_DOT);
         style_label(line2, COLOR_MUTED);
         lv_obj_align(line2, LV_ALIGN_TOP_LEFT, 0, 54);
+
+        if (strcmp(card.action, "vessels_manage") == 0) {
+            gefaessStoredLabel = line2;
+        }
     }
+
+    update_gefaess_storage_display();
 
     create_footer(screen,
                   "Status: Waage / Gefäße-Demo bereit",
