@@ -35,7 +35,7 @@ void fill_defaults(T4S3UiSettings &settings)
     settings.machineGramsTenths = 0;
     settings.grinderGramsTenths = 0;
     settings.filterGramsTenths = 0;
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         settings.gefaessWeightTenths[i] = GEFAESS_WEIGHT_UNSET_TENTHS;
     }
 }
@@ -149,7 +149,7 @@ void t4s3_settings_load(T4S3UiSettings &settings)
     settings.grinderGramsTenths = prefs.getInt("gramsGrind", settings.grinderGramsTenths);
     settings.filterGramsTenths = prefs.getInt("gramsFilter", settings.filterGramsTenths);
 
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         char key[12];
         snprintf(key, sizeof(key), "gefW%u", i);
         settings.gefaessWeightTenths[i] =
@@ -196,7 +196,7 @@ void t4s3_settings_save(const T4S3UiSettings &settings)
     prefs.putInt("gramsGrind", settings.grinderGramsTenths);
     prefs.putInt("gramsFilter", settings.filterGramsTenths);
 
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         char key[12];
         snprintf(key, sizeof(key), "gefW%u", i);
         prefs.putInt(key, sanitize_gefaess_weight(settings.gefaessWeightTenths[i]));

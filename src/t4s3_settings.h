@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+constexpr uint8_t T4S3_GEFAESS_SLOT_COUNT = 3;
+
 struct T4S3UiSettings {
     uint16_t screenTimeoutMinutes;
     bool autodetectEnabled;
@@ -16,7 +18,7 @@ struct T4S3UiSettings {
     int32_t machineGramsTenths;
     int32_t grinderGramsTenths;
     int32_t filterGramsTenths;
-    int32_t gefaessWeightTenths[4];
+    int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT];
 };
 
 void t4s3_settings_begin();

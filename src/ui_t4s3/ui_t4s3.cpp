@@ -12,6 +12,8 @@
 
 namespace {
 
+constexpr uint8_t kMaxGefaessSlots = 3;
+
 constexpr uint32_t COLOR_BG = 0x000000;
 constexpr uint32_t COLOR_PANEL = 0x07120a;
 constexpr uint32_t COLOR_GREEN = 0x2E8B57;
@@ -63,6 +65,8 @@ lv_obj_t *targetOverlay = nullptr;
 lv_obj_t *targetOverlayValueLabel = nullptr;
 lv_obj_t *targetOverlayStepLabel = nullptr;
 lv_obj_t *vesselOverlay = nullptr;
+lv_obj_t *gefaessManageOverlay = nullptr;
+lv_obj_t *gefaessManageLabels[T4S3_GEFAESS_SLOT_COUNT] = {nullptr, nullptr, nullptr};
 lv_obj_t *restartOverlay = nullptr;
 lv_obj_t *vesselOptionLabels[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *screenTimeoutValueLabel = nullptr;
@@ -102,7 +106,7 @@ int32_t demoMachineGramsTenths = 0;
 int32_t demoGrinderGramsTenths = 0;
 int32_t demoFilterGramsTenths = 0;
 int32_t targetTenthsBySiebtraeger[4] = {180, 90, 180, 180};
-int32_t gefaessWeightTenths[4] = {-1, -1, -1, -1};
+int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT] = {-1, -1, -1};
 int32_t demoTargetTenths = 180;
 int32_t draftTargetTenths = 180;
 int32_t targetStepTenths = 5;
@@ -135,6 +139,9 @@ void open_target_overlay();
 void close_target_overlay(bool save);
 void open_vessel_overlay();
 void close_vessel_overlay(bool save);
+void open_gefaess_manage_overlay();
+void close_gefaess_manage_overlay();
+void update_gefaess_manage_display();
 void open_restart_overlay();
 void close_restart_overlay();
 
@@ -192,8 +199,9 @@ void reset_dynamic_labels()
         headerWifiBars[i] = nullptr;
         wlanQualityBars[i] = nullptr;
     }
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < kMaxGefaessSlots; ++i) {
         vesselOptionLabels[i] = nullptr;
+        gefaessManageLabels[i] = nullptr;
     }
 }
 
@@ -351,7 +359,7 @@ void save_current_ui_settings()
     settings.targetTenthsBySiebtraeger[3] = targetTenthsBySiebtraeger[3];
     settings.targetStepTenths = targetStepTenths;
 
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         settings.gefaessWeightTenths[i] = gefaessWeightTenths[i];
     }
 
@@ -386,7 +394,7 @@ void load_saved_ui_settings()
     demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
     draftTargetTenths = demoTargetTenths;
 
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         gefaessWeightTenths[i] = settings.gefaessWeightTenths[i];
     }
 
@@ -436,7 +444,7 @@ void update_vessel_display()
 
 void update_vessel_overlay_display()
 {
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < kMaxGefaessSlots; ++i) {
         if (!vesselOptionLabels[i]) {
             continue;
         }
@@ -463,7 +471,7 @@ void format_grams(char *buf, size_t len, int32_t tenths)
 uint8_t stored_gefaess_count()
 {
     uint8_t count = 0;
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         if (gefaessWeightTenths[i] >= 0) {
             ++count;
         }
@@ -474,8 +482,27 @@ uint8_t stored_gefaess_count()
 void update_gefaess_storage_display()
 {
     char buf[40];
-    snprintf(buf, sizeof(buf), "%u/4 eingemessen", stored_gefaess_count());
+    snprintf(buf, sizeof(buf), "%u/%u eingemessen", stored_gefaess_count(), static_cast<unsigned>(T4S3_GEFAESS_SLOT_COUNT));
     set_text(gefaessStoredLabel, buf);
+}
+
+void update_gefaess_manage_display()
+{
+    char buf[48];
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
+        if (!gefaessManageLabels[i]) {
+            continue;
+        }
+
+        if (gefaessWeightTenths[i] >= 0) {
+            char grams[18];
+            format_grams(grams, sizeof(grams), gefaessWeightTenths[i]);
+            snprintf(buf, sizeof(buf), "Gefäß %u: %s", static_cast<unsigned>(i + 1), grams);
+        } else {
+            snprintf(buf, sizeof(buf), "Gefäß %u: nicht eingemessen", static_cast<unsigned>(i + 1));
+        }
+        set_text_if_changed(gefaessManageLabels[i], buf);
+    }
 }
 
 void update_demo_stats_display()
@@ -1137,7 +1164,9 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "vessels_measure") == 0) {
         update_status("Gefäße einmessen: Assistent folgt später");
     } else if (strcmp(action, "vessels_manage") == 0) {
-        update_status("Gefäße verwalten: Liste / Löschen folgt später");
+        open_gefaess_manage_overlay();
+    } else if (strcmp(action, "gefaess_manage_close") == 0) {
+        close_gefaess_manage_overlay();
     } else if (strcmp(action, "totals_edit") == 0) {
         update_status("Gesamtwerte ändern: Eingabe folgt später");
     } else if (strcmp(action, "settings_wlan") == 0) {
@@ -1282,7 +1311,7 @@ draftTargetStepTenths = targetStepTenths;
 
     lv_obj_t *panel = lv_obj_create(targetOverlay);
     style_panel(panel);
-    lv_obj_set_size(panel, 430, 330);
+    lv_obj_set_size(panel, 430, 350);
     lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *title = lv_label_create(panel);
@@ -1357,10 +1386,93 @@ update_vessel_display();
     if (vesselOverlay) {
         lv_obj_del(vesselOverlay);
         vesselOverlay = nullptr;
-        for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < kMaxGefaessSlots; ++i) {
             vesselOptionLabels[i] = nullptr;
         }
     }
+}
+
+void close_gefaess_manage_overlay()
+{
+    if (gefaessManageOverlay && lv_obj_is_valid(gefaessManageOverlay)) {
+        lv_obj_del(gefaessManageOverlay);
+    }
+    gefaessManageOverlay = nullptr;
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
+        gefaessManageLabels[i] = nullptr;
+    }
+}
+
+void open_gefaess_manage_overlay()
+{
+    if (gefaessManageOverlay) {
+        close_gefaess_manage_overlay();
+    }
+
+    lv_obj_t *screen = lv_scr_act();
+    if (!screen) {
+        return;
+    }
+
+    gefaessManageOverlay = lv_obj_create(screen);
+    lv_obj_set_size(gefaessManageOverlay, screenWidth, screenHeight);
+    lv_obj_align(gefaessManageOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(gefaessManageOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(gefaessManageOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(gefaessManageOverlay, 0, 0);
+    lv_obj_set_style_pad_all(gefaessManageOverlay, 0, 0);
+    lv_obj_clear_flag(gefaessManageOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(gefaessManageOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 350);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Gefäße verwalten");
+    style_label(title, COLOR_WHITE);
+    lv_obj_set_width(title, 370);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *hint = lv_label_create(panel);
+    lv_label_set_text(hint, "Gespeicherte Gefäßgewichte für Autodetect");
+    style_label(hint, COLOR_MUTED);
+    lv_obj_set_width(hint, 370);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
+    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, 36);
+
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
+        lv_obj_t *row = lv_obj_create(panel);
+        lv_obj_set_size(row, 370, 50);
+        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 76 + i * 58);
+        lv_obj_set_style_bg_color(row, lv_color_hex(COLOR_GREEN_DARK), 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_30, 0);
+        lv_obj_set_style_border_color(row, lv_color_hex(COLOR_GREEN), 0);
+        lv_obj_set_style_border_opa(row, LV_OPA_40, 0);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_radius(row, 10, 0);
+        lv_obj_set_style_pad_left(row, 12, 0);
+        lv_obj_set_style_pad_right(row, 12, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        gefaessManageLabels[i] = lv_label_create(row);
+        style_label(gefaessManageLabels[i], COLOR_WHITE);
+        lv_obj_set_width(gefaessManageLabels[i], 330);
+        lv_label_set_long_mode(gefaessManageLabels[i], LV_LABEL_LONG_DOT);
+        lv_obj_align(gefaessManageLabels[i], LV_ALIGN_LEFT_MID, 0, 0);
+    }
+
+    lv_obj_t *measure = create_button(panel, "Gefäß einmessen", "vessels_measure", 210, 44);
+    lv_obj_align(measure, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    lv_obj_t *close = create_button(panel, "Schließen", "gefaess_manage_close", 145, 44);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+
+    update_gefaess_manage_display();
+    update_status("Gefäße verwalten geöffnet");
 }
 
 void open_vessel_overlay()
@@ -1399,7 +1511,7 @@ void open_vessel_overlay()
         "vessel_option_3",
     };
 
-    for (uint8_t i = 0; i < 4; ++i) {
+    for (uint8_t i = 0; i < kMaxGefaessSlots; ++i) {
         lv_obj_t *option = create_button(panel, "", actions[i], 350, 48);
         lv_obj_align(option, LV_ALIGN_TOP_MID, 0, 48 + i * 55);
 
@@ -2016,9 +2128,8 @@ void create_settings_waage_page(lv_obj_t *screen)
 
     const ScaleCard cards[] = {
         {"Kalibrierung", "bekanntes Gewicht", "Waage abgleichen", "scale_calibration", 0, 42},
-        {"Gefäße einmessen", "Gewicht erfassen", "für Autodetect", "vessels_measure", 274, 42},
-        {"Gefäße verwalten", "anzeigen / löschen", "0/4 eingemessen", "vessels_manage", 0, 142},
-        {"Gesamtwerte", "Shots und Mahlgut", "korrigieren", "totals_edit", 274, 142},
+        {"Gefäße verwalten", "anzeigen / löschen", "0/3 eingemessen", "vessels_manage", 274, 42},
+        {"Gesamtwerte", "Shots und Mahlgut", "korrigieren", "totals_edit", 0, 142},
     };
 
     for (const auto &card : cards) {
@@ -2351,6 +2462,8 @@ void ui_t4s3_tick()
     }
     update_sim_weight();
 }
+
+
 
 
 
