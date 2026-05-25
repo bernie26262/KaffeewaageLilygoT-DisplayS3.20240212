@@ -69,6 +69,10 @@ lv_obj_t *systemTimeStatusLabel = nullptr;
 lv_obj_t *systemTimeLocalLabel = nullptr;
 lv_obj_t *systemTimeZoneLabel = nullptr;
 lv_obj_t *systemTimeSourceLabel = nullptr;
+lv_obj_t *systemUptimeLabel = nullptr;
+lv_obj_t *systemDataSsidLabel = nullptr;
+lv_obj_t *systemDataIpLabel = nullptr;
+lv_obj_t *systemDataSignalLabel = nullptr;
 lv_obj_t *headerWifiBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *wlanStatusLabel = nullptr;
 lv_obj_t *wlanSsidLabel = nullptr;
@@ -171,6 +175,10 @@ void reset_dynamic_labels()
     systemTimeLocalLabel = nullptr;
     systemTimeZoneLabel = nullptr;
     systemTimeSourceLabel = nullptr;
+    systemUptimeLabel = nullptr;
+    systemDataSsidLabel = nullptr;
+    systemDataIpLabel = nullptr;
+    systemDataSignalLabel = nullptr;
     wlanStatusLabel = nullptr;
     wlanSsidLabel = nullptr;
     wlanIpLabel = nullptr;
@@ -199,6 +207,22 @@ void set_text(lv_obj_t *obj, const char *text)
     }
 
     lv_label_set_text(obj, text);
+}
+
+void set_text_if_changed(lv_obj_t *obj, const char *text)
+{
+    if (!obj || !text) {
+        return;
+    }
+
+    if (!lv_obj_is_valid(obj)) {
+        return;
+    }
+
+    const char *current = lv_label_get_text(obj);
+    if (!current || strcmp(current, text) != 0) {
+        lv_label_set_text(obj, text);
+    }
 }
 
 uint16_t current_screen_timeout_minutes()
@@ -233,6 +257,52 @@ void update_system_time_display()
     set_text(systemTimeLocalLabel, buf);
     set_text(systemTimeZoneLabel, t4s3_time_zone_label());
     set_text(systemTimeSourceLabel, t4s3_time_source_label());
+}
+
+void format_uptime(char *buf, size_t len, uint32_t uptimeMs)
+{
+    uint32_t totalSeconds = uptimeMs / 1000UL;
+    const uint32_t days = totalSeconds / 86400UL;
+    totalSeconds %= 86400UL;
+    const uint32_t hours = totalSeconds / 3600UL;
+    totalSeconds %= 3600UL;
+    const uint32_t minutes = totalSeconds / 60UL;
+    const uint32_t seconds = totalSeconds % 60UL;
+
+    if (days == 0) {
+        snprintf(buf, len, "%02lu:%02lu:%02lu",
+                 static_cast<unsigned long>(hours),
+                 static_cast<unsigned long>(minutes),
+                 static_cast<unsigned long>(seconds));
+    } else {
+        snprintf(buf, len, "%lu %s %02lu:%02lu:%02lu",
+                 static_cast<unsigned long>(days),
+                 days == 1 ? "Tag" : "Tage",
+                 static_cast<unsigned long>(hours),
+                 static_cast<unsigned long>(minutes),
+                 static_cast<unsigned long>(seconds));
+    }
+}
+
+void update_system_uptime_display()
+{
+    char buf[48];
+    format_uptime(buf, sizeof(buf), millis());
+    set_text(systemUptimeLabel, buf);
+}
+
+void update_data_system_wifi_display()
+{
+    if (!systemDataSsidLabel && !systemDataIpLabel && !systemDataSignalLabel) {
+        return;
+    }
+
+    T4S3WifiStatus wifi;
+    t4s3_wifi_get_status(wifi);
+
+    set_text_if_changed(systemDataSsidLabel, wifi.ssid);
+    set_text_if_changed(systemDataIpLabel, wifi.ip);
+    set_text_if_changed(systemDataSignalLabel, wifi.signal);
 }
 
 void change_screen_timeout(int8_t delta)
@@ -1737,22 +1807,45 @@ void create_daten_page(lv_obj_t *screen)
     t4s3_wifi_get_status(wifi);
 
     lv_obj_t *left = lv_label_create(systemPanel);
-    char leftText[96];
-    snprintf(leftText, sizeof(leftText), "Uptime: 00:05:04\nWLAN: %s", wifi.ssid);
-    lv_label_set_text(left, leftText);
-    lv_obj_set_width(left, 265);
+    lv_label_set_text(left, "Uptime:\nWLAN:");
+    lv_obj_set_width(left, 92);
     lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
     style_label(left, COLOR_WHITE);
     lv_obj_align(left, LV_ALIGN_TOP_LEFT, 0, 26);
 
+    systemUptimeLabel = lv_label_create(systemPanel);
+    lv_obj_set_width(systemUptimeLabel, 168);
+    lv_label_set_long_mode(systemUptimeLabel, LV_LABEL_LONG_DOT);
+    style_label(systemUptimeLabel, COLOR_WHITE);
+    lv_obj_align(systemUptimeLabel, LV_ALIGN_TOP_LEFT, 92, 26);
+
+    systemDataSsidLabel = lv_label_create(systemPanel);
+    lv_obj_set_width(systemDataSsidLabel, 168);
+    lv_label_set_long_mode(systemDataSsidLabel, LV_LABEL_LONG_DOT);
+    style_label(systemDataSsidLabel, COLOR_WHITE);
+    lv_obj_align(systemDataSsidLabel, LV_ALIGN_TOP_LEFT, 92, 46);
+
     lv_obj_t *right = lv_label_create(systemPanel);
-    char rightText[96];
-    snprintf(rightText, sizeof(rightText), "IP: %s\nSignal: %s", wifi.ip, wifi.signal);
-    lv_label_set_text(right, rightText);
-    lv_obj_set_width(right, 265);
+    lv_label_set_text(right, "IP:\nSignal:");
+    lv_obj_set_width(right, 66);
     lv_label_set_long_mode(right, LV_LABEL_LONG_DOT);
     style_label(right, COLOR_WHITE);
-    lv_obj_align(right, LV_ALIGN_TOP_RIGHT, 0, 26);
+    lv_obj_align(right, LV_ALIGN_TOP_LEFT, 280, 26);
+
+    systemDataIpLabel = lv_label_create(systemPanel);
+    lv_obj_set_width(systemDataIpLabel, 205);
+    lv_label_set_long_mode(systemDataIpLabel, LV_LABEL_LONG_DOT);
+    style_label(systemDataIpLabel, COLOR_WHITE);
+    lv_obj_align(systemDataIpLabel, LV_ALIGN_TOP_LEFT, 346, 26);
+
+    systemDataSignalLabel = lv_label_create(systemPanel);
+    lv_obj_set_width(systemDataSignalLabel, 205);
+    lv_label_set_long_mode(systemDataSignalLabel, LV_LABEL_LONG_DOT);
+    style_label(systemDataSignalLabel, COLOR_WHITE);
+    lv_obj_align(systemDataSignalLabel, LV_ALIGN_TOP_LEFT, 346, 46);
+
+    update_system_uptime_display();
+    update_data_system_wifi_display();
 
     create_footer(screen,
                   "Status: Daten-Demo bereit",
@@ -2188,6 +2281,7 @@ void ui_t4s3_tick()
         lastClockMs = now;
 
         update_clock_display();
+        update_system_uptime_display();
         update_header_wifi_display();
         update_wlan_page_display();
 
