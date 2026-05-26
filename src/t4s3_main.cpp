@@ -2,6 +2,10 @@
 #include <LilyGo_AMOLED.h>
 #include <LV_Helper.h>
 
+#if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+#include <HX711_ADC.h>
+#endif
+
 #include "ui_t4s3/ui_t4s3.h"
 #include "t4s3_pins.h"
 #include "t4s3_wifi.h"
@@ -17,6 +21,14 @@ static constexpr uint32_t kWakeGraceMs = 3000UL;
 static bool g_displaySleeping = false;
 static uint32_t g_sleepAllowedAfterWakeMs = 0;
 static lv_obj_t *g_sleepOverlay = nullptr;
+
+#if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+static HX711_ADC g_loadCell(coffee_t4s3_pins::HX711_DOUT_PIN,
+                            coffee_t4s3_pins::HX711_SCK_PIN);
+static bool g_hx711Ready = false;
+static uint32_t g_lastHx711LogMs = 0;
+static float g_lastHx711Raw = 0.0f;
+#endif
 
 static void deleteSleepOverlay()
 {
@@ -63,6 +75,57 @@ static void sleepOverlayEvent(lv_event_t *event)
         g_sleepAllowedAfterWakeMs = millis() + kWakeGraceMs;
     }
 }
+
+#if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+static void beginHx711Test()
+{
+    Serial.printf("[HX711] init start: DOUT=IO%u, SCK=IO%u\n",
+                  coffee_t4s3_pins::HX711_DOUT_PIN,
+                  coffee_t4s3_pins::HX711_SCK_PIN);
+
+    g_loadCell.begin();
+
+    constexpr unsigned long kStabilizingTimeMs = 2000UL;
+    constexpr bool kDoTareAtStartup = true;
+
+    g_loadCell.start(kStabilizingTimeMs, kDoTareAtStartup);
+
+    if (g_loadCell.getTareTimeoutFlag()) {
+        Serial.println("[HX711] start failed: tare timeout / no signal");
+        g_hx711Ready = false;
+        return;
+    }
+
+    g_loadCell.setCalFactor(1.0f);
+    g_hx711Ready = true;
+    Serial.println("[HX711] ready; logging raw values on new samples");
+}
+
+static void tickHx711Test(uint32_t now)
+{
+    const bool newData = g_loadCell.update();
+
+    if (!g_hx711Ready) {
+        if (now - g_lastHx711LogMs >= 1000UL) {
+            g_lastHx711LogMs = now;
+            Serial.println("[HX711] not ready");
+        }
+        return;
+    }
+
+    if (!newData) {
+        return;
+    }
+
+    g_lastHx711Raw = g_loadCell.getData();
+    ui_t4s3_set_hx711_raw_value(static_cast<int32_t>(g_lastHx711Raw));
+
+    if (now - g_lastHx711LogMs >= 250UL) {
+        g_lastHx711LogMs = now;
+        Serial.printf("[HX711] raw=%.2f\n", g_lastHx711Raw);
+    }
+}
+#endif
 
 static void createSleepOverlay()
 {
@@ -121,9 +184,16 @@ void setup()
                   amoled.getRotation(),
                   amoled.width(),
                   amoled.height());
+#if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+    Serial.printf("[T4S3] Reserved HX711 pins: DOUT=IO%u, SCK=IO%u (HX711 test active)\n",
+                  coffee_t4s3_pins::HX711_DOUT_PIN,
+                  coffee_t4s3_pins::HX711_SCK_PIN);
+    beginHx711Test();
+#else
     Serial.printf("[T4S3] Reserved HX711 pins: DOUT=IO%u, SCK=IO%u (simulator active)\n",
                   coffee_t4s3_pins::HX711_DOUT_PIN,
                   coffee_t4s3_pins::HX711_SCK_PIN);
+#endif
 
     ui_t4s3_create(amoled.width(), amoled.height());
     t4s3_wifi_begin();
@@ -139,6 +209,9 @@ void loop()
 
     t4s3_wifi_tick();
     t4s3_time_tick();
+#if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+    tickHx711Test(now);
+#endif
     ui_t4s3_tick();
     lv_task_handler();
 

@@ -9,3 +9,4 @@ uint16_t ui_t4s3_get_screen_timeout_minutes();
 uint32_t ui_t4s3_get_last_activity_ms();
 void ui_t4s3_notify_activity();
 void ui_t4s3_prepare_wakeup_touch();
+void ui_t4s3_set_hx711_raw_value(int32_t rawValue);

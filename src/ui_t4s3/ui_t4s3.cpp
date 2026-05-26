@@ -83,6 +83,7 @@ lv_obj_t *systemUptimeLabel = nullptr;
 lv_obj_t *systemDataSsidLabel = nullptr;
 lv_obj_t *systemDataIpLabel = nullptr;
 lv_obj_t *systemDataSignalLabel = nullptr;
+lv_obj_t *systemHx711RawLabel = nullptr;
 lv_obj_t *headerWifiBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *wlanStatusLabel = nullptr;
 lv_obj_t *wlanSsidLabel = nullptr;
@@ -207,6 +208,7 @@ void reset_dynamic_labels()
     systemDataSsidLabel = nullptr;
     systemDataIpLabel = nullptr;
     systemDataSignalLabel = nullptr;
+    systemHx711RawLabel = nullptr;
     wlanStatusLabel = nullptr;
     wlanSsidLabel = nullptr;
     wlanIpLabel = nullptr;
@@ -334,6 +336,13 @@ void update_data_system_wifi_display()
     set_text_if_changed(systemDataSsidLabel, wifi.ssid);
     set_text_if_changed(systemDataIpLabel, wifi.ip);
     set_text_if_changed(systemDataSignalLabel, wifi.signal);
+}
+
+void update_hx711_raw_display(int32_t rawValue)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", static_cast<long>(rawValue));
+    set_text_if_changed(systemHx711RawLabel, buf);
 }
 
 void change_screen_timeout(int8_t delta)
@@ -2266,7 +2275,7 @@ void create_daten_page(lv_obj_t *screen)
 
     lv_obj_t *systemPanel = lv_obj_create(screen);
     style_panel(systemPanel);
-    lv_obj_set_size(systemPanel, 564, 80);
+    lv_obj_set_size(systemPanel, 564, 104);
     lv_obj_align(systemPanel, LV_ALIGN_TOP_LEFT, 18, 248);
     lv_obj_clear_flag(systemPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(systemPanel, LV_SCROLLBAR_MODE_OFF);
@@ -2280,7 +2289,7 @@ void create_daten_page(lv_obj_t *screen)
     t4s3_wifi_get_status(wifi);
 
     lv_obj_t *left = lv_label_create(systemPanel);
-    lv_label_set_text(left, "Uptime:\nWLAN:");
+    lv_label_set_text(left, "Uptime:\nWLAN:\nHX711:");
     lv_obj_set_width(left, 92);
     lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
     style_label(left, COLOR_WHITE);
@@ -2293,8 +2302,10 @@ void create_daten_page(lv_obj_t *screen)
     lv_obj_align(systemUptimeLabel, LV_ALIGN_TOP_LEFT, 92, 26);
 
     systemDataSsidLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemDataSsidLabel, 168);
+    lv_obj_set_width(systemDataSsidLabel, 140);
     lv_label_set_long_mode(systemDataSsidLabel, LV_LABEL_LONG_DOT);
+    lv_label_set_text(systemDataSsidLabel, "");
+    lv_obj_set_height(systemDataSsidLabel, 18);
     style_label(systemDataSsidLabel, COLOR_WHITE);
     lv_obj_align(systemDataSsidLabel, LV_ALIGN_TOP_LEFT, 92, 46);
 
@@ -2316,6 +2327,13 @@ void create_daten_page(lv_obj_t *screen)
     lv_label_set_long_mode(systemDataSignalLabel, LV_LABEL_LONG_DOT);
     style_label(systemDataSignalLabel, COLOR_WHITE);
     lv_obj_align(systemDataSignalLabel, LV_ALIGN_TOP_LEFT, 346, 46);
+
+    systemHx711RawLabel = lv_label_create(systemPanel);
+    lv_obj_set_width(systemHx711RawLabel, 205);
+    lv_label_set_long_mode(systemHx711RawLabel, LV_LABEL_LONG_DOT);
+    style_label(systemHx711RawLabel, COLOR_WHITE);
+    lv_obj_align(systemHx711RawLabel, LV_ALIGN_TOP_LEFT, 92, 66);
+    set_text(systemHx711RawLabel, "-");
 
     update_system_uptime_display();
     update_data_system_wifi_display();
@@ -2731,6 +2749,11 @@ void ui_t4s3_prepare_wakeup_touch()
     lastUserActivityMs = millis();
 }
 
+void ui_t4s3_set_hx711_raw_value(int32_t rawValue)
+{
+    update_hx711_raw_display(rawValue);
+}
+
 void ui_t4s3_create(uint16_t width, uint16_t height)
 {
     screenWidth = width;
@@ -2794,6 +2817,7 @@ void ui_t4s3_tick()
     update_sim_weight();
     update_gefaess_measure_weight_display();
 }
+
 
 
 
