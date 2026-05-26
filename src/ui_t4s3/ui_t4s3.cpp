@@ -4,6 +4,7 @@
 #include "../t4s3_wifi.h"
 #include "../t4s3_time.h"
 #include "../t4s3_settings.h"
+#include "../t4s3_scale.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -73,6 +74,9 @@ uint8_t gefaessDeleteSlot = 0;
 lv_obj_t *gefaessMeasureOverlay = nullptr;
 lv_obj_t *gefaessMeasureWeightLabel = nullptr;
 lv_obj_t *restartOverlay = nullptr;
+lv_obj_t *scaleCalibrationOverlay = nullptr;
+lv_obj_t *scaleCalibrationWeightLabel = nullptr;
+lv_obj_t *scaleCalibrationFactorLabel = nullptr;
 lv_obj_t *vesselOptionLabels[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *screenTimeoutValueLabel = nullptr;
 lv_obj_t *systemTimeStatusLabel = nullptr;
@@ -84,6 +88,7 @@ lv_obj_t *systemDataSsidLabel = nullptr;
 lv_obj_t *systemDataIpLabel = nullptr;
 lv_obj_t *systemDataSignalLabel = nullptr;
 lv_obj_t *systemHx711RawLabel = nullptr;
+lv_obj_t *systemHx711GramsLabel = nullptr;
 lv_obj_t *headerWifiBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *wlanStatusLabel = nullptr;
 lv_obj_t *wlanSsidLabel = nullptr;
@@ -153,6 +158,9 @@ void open_gefaess_manage_overlay();
 void close_gefaess_manage_overlay();
 void open_gefaess_delete_overlay(uint8_t slot);
 void close_gefaess_delete_overlay();
+void open_scale_calibration_overlay();
+void close_scale_calibration_overlay();
+void update_scale_calibration_display();
 void update_gefaess_manage_display();
 void open_gefaess_measure_overlay();
 void close_gefaess_measure_overlay();
@@ -199,6 +207,8 @@ void reset_dynamic_labels()
     targetOverlayValueLabel = nullptr;
     targetOverlayStepLabel = nullptr;
     gefaessMeasureWeightLabel = nullptr;
+    scaleCalibrationWeightLabel = nullptr;
+    scaleCalibrationFactorLabel = nullptr;
     screenTimeoutValueLabel = nullptr;
     systemTimeStatusLabel = nullptr;
     systemTimeLocalLabel = nullptr;
@@ -209,6 +219,7 @@ void reset_dynamic_labels()
     systemDataIpLabel = nullptr;
     systemDataSignalLabel = nullptr;
     systemHx711RawLabel = nullptr;
+    systemHx711GramsLabel = nullptr;
     wlanStatusLabel = nullptr;
     wlanSsidLabel = nullptr;
     wlanIpLabel = nullptr;
@@ -344,6 +355,19 @@ void update_hx711_raw_display(int32_t rawValue)
     snprintf(buf, sizeof(buf), "%ld", static_cast<long>(rawValue));
     set_text_if_changed(systemHx711RawLabel, buf);
 }
+
+void update_hx711_grams_display(float grams, bool valid)
+{
+    char buf[32];
+    if (!valid) {
+        snprintf(buf, sizeof(buf), "-");
+    } else {
+        snprintf(buf, sizeof(buf), "%.1f g", static_cast<double>(grams));
+    }
+    set_text_if_changed(systemHx711GramsLabel, buf);
+    set_text_if_changed(scaleCalibrationWeightLabel, buf);
+}
+
 
 void change_screen_timeout(int8_t delta)
 {
@@ -602,6 +626,99 @@ void open_gefaess_delete_overlay(uint8_t slot)
 
     lv_obj_t *confirm = create_button(panel, "Löschen", "gefaess_delete_confirm", 150, 48);
     lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+}
+
+
+void update_scale_calibration_display()
+{
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%.1f g", static_cast<double>(t4s3_scale_current_grams()));
+    set_text_if_changed(scaleCalibrationWeightLabel, buf);
+
+    snprintf(buf, sizeof(buf), "Faktor: %.1f raw/g", static_cast<double>(t4s3_scale_calibration_factor()));
+    set_text_if_changed(scaleCalibrationFactorLabel, buf);
+}
+
+void close_scale_calibration_overlay()
+{
+    if (scaleCalibrationOverlay && lv_obj_is_valid(scaleCalibrationOverlay)) {
+        lv_obj_del(scaleCalibrationOverlay);
+    }
+    scaleCalibrationOverlay = nullptr;
+    scaleCalibrationWeightLabel = nullptr;
+    scaleCalibrationFactorLabel = nullptr;
+}
+
+void open_scale_calibration_overlay()
+{
+    close_scale_calibration_overlay();
+
+    lv_obj_t *screen = lv_scr_act();
+    if (!screen) {
+        return;
+    }
+
+    scaleCalibrationOverlay = lv_obj_create(screen);
+    lv_obj_set_size(scaleCalibrationOverlay, screenWidth, screenHeight);
+    lv_obj_align(scaleCalibrationOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(scaleCalibrationOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(scaleCalibrationOverlay, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(scaleCalibrationOverlay, 0, 0);
+    lv_obj_set_style_pad_all(scaleCalibrationOverlay, 0, 0);
+    lv_obj_clear_flag(scaleCalibrationOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(scaleCalibrationOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 300);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Waage kalibrieren");
+    style_label(title, COLOR_WHITE);
+    lv_obj_set_width(title, 360);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *hint = lv_label_create(panel);
+    lv_label_set_text(hint, "1. Waage entlasten und Tara drücken.\n2. Bekanntes Gewicht auflegen.\n3. Passendes Kalibriergewicht wählen.");
+    style_label(hint, COLOR_MUTED);
+    lv_obj_set_width(hint, 380);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, 36);
+
+    lv_obj_t *weightTitle = lv_label_create(panel);
+    lv_label_set_text(weightTitle, "Aktuelles Gewicht:");
+    style_label(weightTitle, COLOR_MUTED);
+    lv_obj_align(weightTitle, LV_ALIGN_TOP_LEFT, 0, 118);
+
+    scaleCalibrationWeightLabel = lv_label_create(panel);
+    lv_obj_set_width(scaleCalibrationWeightLabel, 150);
+    lv_label_set_long_mode(scaleCalibrationWeightLabel, LV_LABEL_LONG_DOT);
+    style_label(scaleCalibrationWeightLabel, COLOR_WHITE);
+    lv_obj_align(scaleCalibrationWeightLabel, LV_ALIGN_TOP_LEFT, 190, 118);
+
+    scaleCalibrationFactorLabel = lv_label_create(panel);
+    lv_obj_set_width(scaleCalibrationFactorLabel, 300);
+    lv_label_set_long_mode(scaleCalibrationFactorLabel, LV_LABEL_LONG_DOT);
+    style_label(scaleCalibrationFactorLabel, COLOR_MUTED);
+    lv_obj_align(scaleCalibrationFactorLabel, LV_ALIGN_TOP_LEFT, 0, 148);
+
+    lv_obj_t *tare = create_button(panel, "Tara", "scale_cal_tare", 120, 42);
+    lv_obj_align(tare, LV_ALIGN_TOP_LEFT, 0, 184);
+
+    lv_obj_t *cal100 = create_button(panel, "100 g", "scale_cal_100", 120, 42);
+    lv_obj_align(cal100, LV_ALIGN_TOP_LEFT, 135, 184);
+
+    lv_obj_t *cal200 = create_button(panel, "200 g", "scale_cal_200", 120, 42);
+    lv_obj_align(cal200, LV_ALIGN_TOP_LEFT, 270, 184);
+
+    lv_obj_t *close = create_button(panel, "Schließen", "scale_cal_close", 160, 42);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, 0, 236);
+
+    update_scale_calibration_display();
+    update_status("Kalibrierung geöffnet");
 }
 
 
@@ -1429,7 +1546,30 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "settings_waage") == 0) {
         navigate_to(Page::SettingsWaage);
     } else if (strcmp(action, "scale_calibration") == 0) {
-        update_status("Kalibrierung: Assistent folgt später");
+        open_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_close") == 0) {
+        close_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_tare") == 0) {
+        if (t4s3_scale_tare()) {
+            update_scale_calibration_display();
+            update_status("Tara gesetzt");
+        } else {
+            update_status("Tara nicht möglich - HX711 nicht bereit");
+        }
+    } else if (strcmp(action, "scale_cal_100") == 0) {
+        if (t4s3_scale_calibrate(100.0f)) {
+            update_scale_calibration_display();
+            update_status("Kalibrierung mit 100 g gespeichert");
+        } else {
+            update_status("Kalibrierung fehlgeschlagen");
+        }
+    } else if (strcmp(action, "scale_cal_200") == 0) {
+        if (t4s3_scale_calibrate(200.0f)) {
+            update_scale_calibration_display();
+            update_status("Kalibrierung mit 200 g gespeichert");
+        } else {
+            update_status("Kalibrierung fehlgeschlagen");
+        }
     } else if (strcmp(action, "vessels_measure") == 0) {
         open_gefaess_measure_overlay();
     } else if (strcmp(action, "vessels_manage") == 0) {
@@ -2275,7 +2415,7 @@ void create_daten_page(lv_obj_t *screen)
 
     lv_obj_t *systemPanel = lv_obj_create(screen);
     style_panel(systemPanel);
-    lv_obj_set_size(systemPanel, 564, 104);
+    lv_obj_set_size(systemPanel, 564, 124);
     lv_obj_align(systemPanel, LV_ALIGN_TOP_LEFT, 18, 248);
     lv_obj_clear_flag(systemPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(systemPanel, LV_SCROLLBAR_MODE_OFF);
@@ -2289,7 +2429,7 @@ void create_daten_page(lv_obj_t *screen)
     t4s3_wifi_get_status(wifi);
 
     lv_obj_t *left = lv_label_create(systemPanel);
-    lv_label_set_text(left, "Uptime:\nWLAN:\nHX711:");
+    lv_label_set_text(left, "Uptime:\nWLAN:\nRAW:\nGewicht:");
     lv_obj_set_width(left, 92);
     lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
     style_label(left, COLOR_WHITE);
@@ -2334,6 +2474,13 @@ void create_daten_page(lv_obj_t *screen)
     style_label(systemHx711RawLabel, COLOR_WHITE);
     lv_obj_align(systemHx711RawLabel, LV_ALIGN_TOP_LEFT, 92, 66);
     set_text(systemHx711RawLabel, "-");
+
+    systemHx711GramsLabel = lv_label_create(systemPanel);
+    lv_obj_set_width(systemHx711GramsLabel, 205);
+    lv_label_set_long_mode(systemHx711GramsLabel, LV_LABEL_LONG_DOT);
+    style_label(systemHx711GramsLabel, COLOR_WHITE);
+    lv_obj_align(systemHx711GramsLabel, LV_ALIGN_TOP_LEFT, 92, 86);
+    set_text(systemHx711GramsLabel, "-");
 
     update_system_uptime_display();
     update_data_system_wifi_display();
@@ -2752,6 +2899,11 @@ void ui_t4s3_prepare_wakeup_touch()
 void ui_t4s3_set_hx711_raw_value(int32_t rawValue)
 {
     update_hx711_raw_display(rawValue);
+}
+
+void ui_t4s3_set_hx711_grams_value(float grams, bool valid)
+{
+    update_hx711_grams_display(grams, valid);
 }
 
 void ui_t4s3_create(uint16_t width, uint16_t height)

@@ -1,6 +1,7 @@
 #include "t4s3_settings.h"
 
 #include <Preferences.h>
+#include <math.h>
 
 namespace {
 
@@ -250,4 +251,41 @@ void t4s3_settings_save_maintenance(uint32_t machineEpoch,
                   static_cast<unsigned long>(machineEpoch),
                   static_cast<unsigned long>(grinderEpoch),
                   static_cast<unsigned long>(filterEpoch));
+}
+
+
+float t4s3_settings_load_hx711_cal_factor(float fallback)
+{
+    t4s3_settings_begin();
+
+    if (!prefsReady) {
+        Serial.println("[T4S3][Settings] HX711 calibration load skipped (NVS unavailable)");
+        return fallback;
+    }
+
+    const float factor = prefs.getFloat("hxCal", fallback);
+    if (!isfinite(factor) || factor < 1.0f || factor > 1000000.0f) {
+        return fallback;
+    }
+
+    Serial.printf("[T4S3][Settings] HX711 calibration factor loaded: %.4f raw/g\n", factor);
+    return factor;
+}
+
+void t4s3_settings_save_hx711_cal_factor(float factor)
+{
+    t4s3_settings_begin();
+
+    if (!prefsReady) {
+        Serial.println("[T4S3][Settings] HX711 calibration save skipped (NVS unavailable)");
+        return;
+    }
+
+    if (!isfinite(factor) || factor < 1.0f || factor > 1000000.0f) {
+        Serial.printf("[T4S3][Settings] HX711 calibration factor rejected: %.4f\n", factor);
+        return;
+    }
+
+    prefs.putFloat("hxCal", factor);
+    Serial.printf("[T4S3][Settings] HX711 calibration factor saved: %.4f raw/g\n", factor);
 }

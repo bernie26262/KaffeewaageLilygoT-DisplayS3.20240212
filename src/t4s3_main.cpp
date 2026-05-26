@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <LilyGo_AMOLED.h>
 #include <LV_Helper.h>
+#include <math.h>
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 #include <HX711_ADC.h>
@@ -11,6 +12,7 @@
 #include "t4s3_wifi.h"
 #include "t4s3_time.h"
 #include "t4s3_settings.h"
+#include "t4s3_scale.h"
 
 LilyGo_Class amoled;
 
@@ -28,6 +30,27 @@ static HX711_ADC g_loadCell(coffee_t4s3_pins::HX711_DOUT_PIN,
 static bool g_hx711Ready = false;
 static uint32_t g_lastHx711LogMs = 0;
 static float g_lastHx711Raw = 0.0f;
+static float g_lastHx711Filtered = 0.0f;
+
+// Separate HX711 paths:
+// - fast: responsive UI / shot dynamics
+// - stable: calm reference for tare/autodetect/save decisions later
+// - display: adaptive value, fast during movement and calm when settled
+static float g_fastWeightRaw = 0.0f;
+static float g_stableWeightRaw = 0.0f;
+static float g_displayWeightRaw = 0.0f;
+static bool g_weightPipelineInitialized = false;
+static bool g_weightMoving = false;
+static bool g_weightStable = false;
+static uint32_t g_lastMovementMs = 0;
+
+static constexpr float kMovementThresholdRaw = 120.0f;
+static constexpr uint32_t kStableDelayMs = 700UL;
+
+static float g_hx711CalFactorRawPerGram = 1000.0f;
+static float g_hxHistory[5] = {0};
+static uint8_t g_hxHistoryIndex = 0;
+static bool g_hxHistoryFilled = false;
 #endif
 
 static void deleteSleepOverlay()
@@ -96,9 +119,13 @@ static void beginHx711Test()
         return;
     }
 
+    // Keep the HX711_ADC calibration factor at 1.0 so getData() remains a raw-like
+    // value. We calculate grams ourselves from filtered raw / raw-per-gram factor.
     g_loadCell.setCalFactor(1.0f);
+    g_hx711CalFactorRawPerGram = t4s3_settings_load_hx711_cal_factor(1000.0f);
     g_hx711Ready = true;
-    Serial.println("[HX711] ready; logging raw values on new samples");
+    Serial.printf("[HX711] ready; cal=%.4f raw/g; logging raw values on new samples\n",
+                  g_hx711CalFactorRawPerGram);
 }
 
 static void tickHx711Test(uint32_t now)
@@ -118,12 +145,148 @@ static void tickHx711Test(uint32_t now)
     }
 
     g_lastHx711Raw = g_loadCell.getData();
+
+    g_hxHistory[g_hxHistoryIndex] = g_lastHx711Raw;
+    g_hxHistoryIndex = (g_hxHistoryIndex + 1) % 5;
+    if (g_hxHistoryIndex == 0) {
+        g_hxHistoryFilled = true;
+    }
+
+    float median = g_lastHx711Raw;
+    if (g_hxHistoryFilled) {
+        float temp[5];
+        memcpy(temp, g_hxHistory, sizeof(temp));
+        for (int i = 0; i < 4; ++i) {
+            for (int j = i + 1; j < 5; ++j) {
+                if (temp[j] < temp[i]) {
+                    float t = temp[i];
+                    temp[i] = temp[j];
+                    temp[j] = t;
+                }
+            }
+        }
+        median = temp[2];
+    }
+
+    if (!g_weightPipelineInitialized) {
+        g_fastWeightRaw = median;
+        g_stableWeightRaw = median;
+        g_displayWeightRaw = median;
+        g_lastHx711Filtered = median;
+        g_weightPipelineInitialized = true;
+        g_lastMovementMs = now;
+    } else {
+        const float previousFast = g_fastWeightRaw;
+
+        // Fast path: follows changes quickly, but still suppresses sample noise.
+        g_fastWeightRaw = g_fastWeightRaw * 0.65f + median * 0.35f;
+
+        // Stable path: calm, slow reference for future stability decisions.
+        g_stableWeightRaw = g_stableWeightRaw * 0.92f + median * 0.08f;
+
+        const float movementDelta = fabsf(g_fastWeightRaw - previousFast);
+        if (movementDelta > kMovementThresholdRaw) {
+            g_lastMovementMs = now;
+            g_weightMoving = true;
+            g_weightStable = false;
+        } else if ((now - g_lastMovementMs) > kStableDelayMs) {
+            g_weightMoving = false;
+            g_weightStable = true;
+        } else {
+            g_weightMoving = false;
+            g_weightStable = false;
+        }
+
+        // Adaptive display path:
+        // - during movement: follow fast path
+        // - while settling: blend toward stable path
+        // - once stable: strongly favor stable path
+        if (g_weightMoving) {
+            g_displayWeightRaw = g_fastWeightRaw;
+        } else if (g_weightStable) {
+            g_displayWeightRaw = g_displayWeightRaw * 0.80f + g_stableWeightRaw * 0.20f;
+        } else {
+            g_displayWeightRaw = g_displayWeightRaw * 0.85f + g_stableWeightRaw * 0.15f;
+        }
+
+        g_lastHx711Filtered = g_displayWeightRaw;
+    }
+
     ui_t4s3_set_hx711_raw_value(static_cast<int32_t>(g_lastHx711Raw));
+    ui_t4s3_set_hx711_grams_value(t4s3_scale_current_grams(), g_hx711Ready);
 
     if (now - g_lastHx711LogMs >= 250UL) {
         g_lastHx711LogMs = now;
-        Serial.printf("[HX711] raw=%.2f\n", g_lastHx711Raw);
+        Serial.printf("[HX711] raw=%.2f fast=%.2f stable=%.2f display=%.2f grams=%.2f moving=%d stable=%d cal=%.4f\n",
+                      g_lastHx711Raw,
+                      g_fastWeightRaw,
+                      g_stableWeightRaw,
+                      g_displayWeightRaw,
+                      t4s3_scale_current_grams(),
+                      g_weightMoving ? 1 : 0,
+                      g_weightStable ? 1 : 0,
+                      g_hx711CalFactorRawPerGram);
     }
+}
+
+bool t4s3_scale_is_ready()
+{
+    return g_hx711Ready;
+}
+
+bool t4s3_scale_tare()
+{
+    if (!g_hx711Ready) {
+        return false;
+    }
+
+    g_loadCell.tare();
+    g_lastHx711Raw = 0.0f;
+    g_lastHx711Filtered = 0.0f;
+    g_fastWeightRaw = 0.0f;
+    g_stableWeightRaw = 0.0f;
+    g_displayWeightRaw = 0.0f;
+    g_weightPipelineInitialized = false;
+    g_weightMoving = false;
+    g_weightStable = false;
+    g_lastMovementMs = millis();
+    memset(g_hxHistory, 0, sizeof(g_hxHistory));
+    g_hxHistoryIndex = 0;
+    g_hxHistoryFilled = false;
+    Serial.println("[HX711] tare done");
+    return true;
+}
+
+bool t4s3_scale_calibrate(float knownGrams)
+{
+    if (!g_hx711Ready || knownGrams <= 0.0f) {
+        return false;
+    }
+
+    const float raw = fabsf(g_displayWeightRaw);
+    if (!isfinite(raw) || raw < 100.0f) {
+        Serial.printf("[HX711] calibration rejected: raw=%.2f known=%.2f\n", raw, knownGrams);
+        return false;
+    }
+
+    g_hx711CalFactorRawPerGram = raw / knownGrams;
+    t4s3_settings_save_hx711_cal_factor(g_hx711CalFactorRawPerGram);
+    Serial.printf("[HX711] calibration set: %.4f raw/g from %.2f raw and %.2f g\n",
+                  g_hx711CalFactorRawPerGram, raw, knownGrams);
+    return true;
+}
+
+float t4s3_scale_current_grams()
+{
+    if (!g_hx711Ready || g_hx711CalFactorRawPerGram <= 0.0f) {
+        return 0.0f;
+    }
+    return g_displayWeightRaw / g_hx711CalFactorRawPerGram;
+}
+
+float t4s3_scale_calibration_factor()
+{
+    return g_hx711CalFactorRawPerGram;
 }
 #endif
 
@@ -231,4 +394,5 @@ void loop()
 
     delay(5);
 }
+
 

@@ -32,3 +32,6 @@ void t4s3_settings_load_maintenance(uint32_t &machineEpoch,
 void t4s3_settings_save_maintenance(uint32_t machineEpoch,
                                     uint32_t grinderEpoch,
                                     uint32_t filterEpoch);
+
+float t4s3_settings_load_hx711_cal_factor(float fallback);
+void t4s3_settings_save_hx711_cal_factor(float factor);

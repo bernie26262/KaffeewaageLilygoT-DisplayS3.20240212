@@ -10,3 +10,4 @@ uint32_t ui_t4s3_get_last_activity_ms();
 void ui_t4s3_notify_activity();
 void ui_t4s3_prepare_wakeup_touch();
 void ui_t4s3_set_hx711_raw_value(int32_t rawValue);
+void ui_t4s3_set_hx711_grams_value(float grams, bool valid);
