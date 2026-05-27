@@ -642,7 +642,7 @@ const fmtDayClockDuration = seconds => {
   const s = total % 60;
   const clock = `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
   if (days === 1) return `1 Tag, ${clock}`;
-  if (days > 1) return `${days} Tage, ${clock}`;
+  if (days > 1) return `${days} Tagen, ${clock}`;
   return clock;
 };
 const fmtDateTime = (epoch, valid) => {
