@@ -2784,6 +2784,18 @@ void RefreshTFTDisplay()
   {
     RedrawTFTTime();
   }
+  // Nach dem allgemeinen Loeschen des Inhaltsbereichs muessen auch
+  // Warnungen auf allen Seiten mit warnungenDisplayed[] komplett neu
+  // gezeichnet werden. Sonst erscheinen sie beim Seitenwechsel kurz
+  // und werden anschliessend von ClearTFTContentArea() ueberdeckt.
+  if (warnungenDisplayed[pageID] == 1)
+  {
+    RedrawTFTWarnungen();
+    oldanzahlWarnungenDisplayed = anzahlWarnungen;
+    olddisplayMuehleReinigen = displayMuehleReinigen;
+    olddisplayKaffeemReinigen = displayKaffeemReinigen;
+    olddisplayFilterwechseln = displayFilterwechseln;
+  }
   if (timeTillCleanMuehleDisplayed[pageID] == 1)
   {
     RedrawTFTTimeToCleanMuehle();
