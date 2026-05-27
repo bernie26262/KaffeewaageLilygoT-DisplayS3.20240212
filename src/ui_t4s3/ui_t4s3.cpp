@@ -107,6 +107,8 @@ uint32_t timerStartedMs = 0;
 bool timerRunning = false;
 int32_t simTenths = 0;
 int8_t simDir = 1;
+float hx711DisplayGrams = 0.0f;
+bool hx711DisplayValid = false;
 bool autodetectEnabled = true;
 uint16_t demoTotalShots = 0;
 uint16_t demoMachineShots = 0;
@@ -178,6 +180,7 @@ lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, 
 void style_panel(lv_obj_t *obj);
 void style_label(lv_obj_t *obj, uint32_t color);
 void update_status(const char *msg);
+void format_grams_float(char *buf, size_t len, float grams);
 void load_saved_ui_settings();
 void save_current_ui_settings();
 
@@ -358,14 +361,25 @@ void update_hx711_raw_display(int32_t rawValue)
 
 void update_hx711_grams_display(float grams, bool valid)
 {
+    hx711DisplayGrams = grams;
+    hx711DisplayValid = valid;
+
     char buf[32];
     if (!valid) {
         snprintf(buf, sizeof(buf), "-");
     } else {
-        snprintf(buf, sizeof(buf), "%.1f g", static_cast<double>(grams));
+        format_grams_float(buf, sizeof(buf), grams);
     }
+
     set_text_if_changed(systemHx711GramsLabel, buf);
     set_text_if_changed(scaleCalibrationWeightLabel, buf);
+
+    // First integration step: show the real HX711 DISPLAY value on the
+    // main scale page, but leave save/autodetect logic untouched for now.
+    if (valid) {
+        set_text_if_changed(weightLabel, buf);
+        set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+    }
 }
 
 
@@ -518,6 +532,17 @@ void format_grams(char *buf, size_t len, int32_t tenths)
              sign,
              static_cast<long>(absTenths / 10),
              static_cast<long>(absTenths % 10));
+}
+
+void format_grams_float(char *buf, size_t len, float grams)
+{
+    const char *sign = grams < 0.0f ? "-" : "";
+    float absGrams = fabsf(grams);
+    const int32_t tenths = static_cast<int32_t>(absGrams * 10.0f + 0.5f);
+    snprintf(buf, len, "%s%ld,%ld g",
+             sign,
+             static_cast<long>(tenths / 10),
+             static_cast<long>(tenths % 10));
 }
 
 
@@ -1434,9 +1459,23 @@ static void button_event_cb(lv_event_t *event)
     }
 
     if (strcmp(action, "tara") == 0) {
-        simTenths = 0;
-        set_text(weightLabel, "0,0 g");
-        update_status("Tara gedrückt - Demo-Gewicht auf 0,0 g gesetzt");
+        if (t4s3_scale_is_ready()) {
+            if (t4s3_scale_tare()) {
+                hx711DisplayGrams = 0.0f;
+                hx711DisplayValid = true;
+                set_text(weightLabel, "0,0 g");
+                set_text_if_changed(systemHx711GramsLabel, "0,0 g");
+                set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
+                set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+                update_status("Tara gesetzt");
+            } else {
+                update_status("Tara fehlgeschlagen - HX711 nicht bereit");
+            }
+        } else {
+            simTenths = 0;
+            set_text(weightLabel, "0,0 g");
+            update_status("Tara gedrückt - Demo-Gewicht auf 0,0 g gesetzt");
+        }
     } else if (strcmp(action, "save") == 0) {
         if (simTenths <= 0) {
             update_status("Save ignoriert - Demo-Gewicht ist 0,0 g");
@@ -2078,6 +2117,10 @@ lv_obj_t *create_info_card(lv_obj_t *parent, const char *title, const char *valu
 
 void update_sim_weight()
 {
+    if (hx711DisplayValid) {
+        return;
+    }
+
     char buf[24];
     format_grams(buf, sizeof(buf), simTenths);
     set_text(weightLabel, buf);
@@ -2960,13 +3003,15 @@ void ui_t4s3_tick()
     }
     lastSimMs = now;
 
-    simTenths += simDir;
-    if (simTenths >= 42) {
-        simDir = -1;
-    } else if (simTenths <= 0) {
-        simDir = 1;
+    if (!hx711DisplayValid) {
+        simTenths += simDir;
+        if (simTenths >= 42) {
+            simDir = -1;
+        } else if (simTenths <= 0) {
+            simDir = 1;
+        }
+        update_sim_weight();
     }
-    update_sim_weight();
     update_gefaess_measure_weight_display();
 }
 
