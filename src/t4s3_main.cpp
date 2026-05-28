@@ -19,10 +19,15 @@ LilyGo_Class amoled;
 static constexpr uint8_t kDisplayBrightnessAwake = 128;
 static constexpr uint8_t kDisplayBrightnessSleep = 0;
 static constexpr uint32_t kWakeGraceMs = 3000UL;
+static constexpr float kDisplayWakeWeightDeltaGrams = 30.0f;
 
 static bool g_displaySleeping = false;
 static uint32_t g_sleepAllowedAfterWakeMs = 0;
 static lv_obj_t *g_sleepOverlay = nullptr;
+static bool g_sleepWeightReferenceValid = false;
+static float g_sleepWeightReferenceGrams = 0.0f;
+static bool g_weightActivityReferenceValid = false;
+static float g_weightActivityReferenceGrams = 0.0f;
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 static HX711_ADC g_loadCell(coffee_t4s3_pins::HX711_DOUT_PIN,
@@ -61,7 +66,7 @@ static void deleteSleepOverlay()
     }
 }
 
-static void wakeDisplay(const char *reason)
+static void wakeDisplay(const char *reason, bool keepOverlay = false)
 {
     if (!g_displaySleeping) {
         return;
@@ -69,6 +74,11 @@ static void wakeDisplay(const char *reason)
 
     amoled.setBrightness(kDisplayBrightnessAwake);
     g_displaySleeping = false;
+    g_sleepWeightReferenceValid = false;
+
+    if (!keepOverlay) {
+        deleteSleepOverlay();
+    }
 
     // Reset LVGL's own inactivity timer and our grace timer.
     lv_disp_trig_activity(nullptr);
@@ -85,7 +95,7 @@ static void sleepOverlayEvent(lv_event_t *event)
     if (code == LV_EVENT_PRESSED) {
         // The first touch after timeout is handled by this fullscreen overlay.
         // It wakes the display, but it cannot hit any real button underneath.
-        wakeDisplay("touch");
+        wakeDisplay("touch", true);
         return;
     }
 
@@ -100,6 +110,8 @@ static void sleepOverlayEvent(lv_event_t *event)
 }
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+static void updateDisplayWakeByWeight();
+
 static void beginHx711Test()
 {
     Serial.printf("[HX711] init start: DOUT=IO%u, SCK=IO%u\n",
@@ -214,6 +226,7 @@ static void tickHx711Test(uint32_t now)
 
     ui_t4s3_set_hx711_raw_value(static_cast<int32_t>(g_lastHx711Raw));
     ui_t4s3_set_hx711_grams_value(t4s3_scale_current_grams(), g_hx711Ready);
+    updateDisplayWakeByWeight();
 
     if (now - g_lastHx711LogMs >= 250UL) {
         g_lastHx711LogMs = now;
@@ -258,6 +271,8 @@ bool t4s3_scale_tare()
     memset(g_hxHistory, 0, sizeof(g_hxHistory));
     g_hxHistoryIndex = 0;
     g_hxHistoryFilled = false;
+    g_sleepWeightReferenceValid = false;
+    g_weightActivityReferenceValid = false;
     Serial.println("[HX711] tare done");
     return true;
 }
@@ -287,6 +302,48 @@ float t4s3_scale_current_grams()
         return 0.0f;
     }
     return g_displayWeightRaw / g_hx711CalFactorRawPerGram;
+}
+
+static void updateDisplayWakeByWeight()
+{
+    if (!g_hx711Ready || g_hx711CalFactorRawPerGram <= 0.0f) {
+        return;
+    }
+
+    const float currentGrams = t4s3_scale_current_grams();
+    if (!isfinite(currentGrams)) {
+        return;
+    }
+
+    if (!g_weightActivityReferenceValid) {
+        g_weightActivityReferenceGrams = currentGrams;
+        g_weightActivityReferenceValid = true;
+    }
+
+    if (g_displaySleeping) {
+        if (!g_sleepWeightReferenceValid) {
+            g_sleepWeightReferenceGrams = currentGrams;
+            g_sleepWeightReferenceValid = true;
+            return;
+        }
+
+        if (fabsf(currentGrams - g_sleepWeightReferenceGrams) >= kDisplayWakeWeightDeltaGrams) {
+            g_weightActivityReferenceGrams = currentGrams;
+            g_weightActivityReferenceValid = true;
+            wakeDisplay("weight");
+        }
+        return;
+    }
+
+    if (fabsf(currentGrams - g_weightActivityReferenceGrams) >= kDisplayWakeWeightDeltaGrams) {
+        g_weightActivityReferenceGrams = currentGrams;
+        g_weightActivityReferenceValid = true;
+
+        lv_disp_trig_activity(nullptr);
+        ui_t4s3_notify_activity();
+
+        Serial.println("[T4S3] Display timeout postponed by weight change");
+    }
 }
 
 float t4s3_scale_calibration_factor()
@@ -321,6 +378,19 @@ static void sleepDisplay()
 
     createSleepOverlay();
     lv_refr_now(nullptr);
+
+#if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
+    if (g_hx711Ready) {
+        g_sleepWeightReferenceGrams = t4s3_scale_current_grams();
+        g_sleepWeightReferenceValid = isfinite(g_sleepWeightReferenceGrams);
+        if (g_sleepWeightReferenceValid) {
+            g_weightActivityReferenceGrams = g_sleepWeightReferenceGrams;
+            g_weightActivityReferenceValid = true;
+        }
+    } else {
+        g_sleepWeightReferenceValid = false;
+    }
+#endif
 
     amoled.setBrightness(kDisplayBrightnessSleep);
     g_displaySleeping = true;
