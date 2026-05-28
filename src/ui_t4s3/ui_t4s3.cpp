@@ -40,6 +40,8 @@ enum class Page : uint8_t {
     Waage,
     Stoppuhr,
     Daten,
+    DatenMahldaten,
+    DatenSystem,
     Settings,
     SettingsWartung,
     SettingsWaage,
@@ -205,6 +207,11 @@ void update_autodetect_gefaess_preview();
 void update_save_button_display();
 void set_save_ready(bool ready);
 void update_save_ready_from_weight();
+bool recover_negative_startup_tare_if_needed();
+int32_t current_save_weight_tenths();
+void update_demo_stats_display();
+
+void add_saved_dose(int32_t doseTenths);
 void format_grams(char *buf, size_t len, int32_t tenths);
 void format_grams_float(char *buf, size_t len, float grams);
 void load_saved_ui_settings();
@@ -383,9 +390,8 @@ void update_data_system_wifi_display()
 
 void update_hx711_raw_display(int32_t rawValue)
 {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%ld", static_cast<long>(rawValue));
-    set_text_if_changed(systemHx711RawLabel, buf);
+    // RAW bleibt intern/seriell nutzbar, wird aber nicht mehr dauerhaft im HMI angezeigt.
+    (void)rawValue;
 }
 
 void update_hx711_grams_display(float grams, bool valid)
@@ -411,6 +417,10 @@ void update_hx711_grams_display(float grams, bool valid)
         if (autodetectDetectedGefaess == kNoDetectedGefaess) {
             set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
         }
+    }
+
+    if (recover_negative_startup_tare_if_needed()) {
+        return;
     }
 
     update_autodetect_gefaess_preview();
@@ -577,6 +587,56 @@ void set_save_ready(bool ready)
 
     saveReady = ready;
     update_save_button_display();
+}
+
+bool recover_negative_startup_tare_if_needed()
+{
+    const bool blocked =
+        activePage != Page::Waage ||
+        !hx711DisplayValid ||
+        !t4s3_scale_is_ready() ||
+        !t4s3_scale_is_stable() ||
+        vesselOverlay ||
+        gefaessManageOverlay ||
+        gefaessMeasureOverlay ||
+        scaleCalibrationOverlay ||
+        maintenanceResetOverlay ||
+        restartOverlay;
+
+    if (blocked) {
+        return false;
+    }
+
+    // Normales Abheben nach eigener Auto-/Manuell-Tara wird bereits in den
+    // Modus-State-Machines behandelt. Diese Recovery ist fuer den Startfall:
+    // ESP startet mit Gefaess auf der Waage und steht deshalb bei 0,0 g.
+    if (autodetectAutoTaredGefaess != kNoDetectedGefaess || manualTareSaveArmed || saveReady) {
+        return false;
+    }
+
+    if (hx711DisplayGrams > -kGefaessRemovedThresholdGrams) {
+        return false;
+    }
+
+    set_save_ready(false);
+    autodetectAutoTaredGefaess = kNoDetectedGefaess;
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+
+    if (t4s3_scale_tare()) {
+        hx711DisplayGrams = 0.0f;
+        hx711DisplayValid = true;
+        set_text(weightLabel, "0,0 g");
+        set_text_if_changed(systemHx711GramsLabel, "0,0 g");
+        set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
+        set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+        update_status("Negatives Gewicht erkannt - Tara gesetzt");
+    } else {
+        update_status("Tara nach negativem Gewicht fehlgeschlagen");
+    }
+
+    return true;
 }
 
 void update_save_ready_from_weight()
@@ -1305,6 +1365,33 @@ void open_gefaess_measure_overlay()
     update_status("Gefäß einmessen gestartet");
 }
 
+int32_t current_save_weight_tenths()
+{
+    if (hx711DisplayValid && t4s3_scale_is_ready()) {
+        return static_cast<int32_t>(hx711DisplayGrams * 10.0f +
+                                    (hx711DisplayGrams >= 0.0f ? 0.5f : -0.5f));
+    }
+
+    return simTenths;
+}
+
+void update_demo_stats_display();
+
+void add_saved_dose(int32_t doseTenths)
+{
+    demoTotalShots++;
+    demoMachineShots++;
+    demoGrinderShots++;
+    demoFilterShots++;
+
+    demoTotalGramsTenths += doseTenths;
+    demoMachineGramsTenths += doseTenths;
+    demoGrinderGramsTenths += doseTenths;
+    demoFilterGramsTenths += doseTenths;
+
+    update_demo_stats_display();
+}
+
 void update_demo_stats_display()
 {
     char buf[32];
@@ -1881,28 +1968,18 @@ static void button_event_cb(lv_event_t *event)
             return;
         }
 
-        const int32_t saveTenths = hx711DisplayValid
-                                       ? static_cast<int32_t>(hx711DisplayGrams * 10.0f + (hx711DisplayGrams >= 0.0f ? 0.5f : -0.5f))
-                                       : simTenths;
+        const int32_t saveTenths = current_save_weight_tenths();
         if (saveTenths <= 0) {
             update_status("Save ignoriert - Gewicht ist 0,0 g");
             return;
         }
 
-        demoTotalShots++;
-        demoMachineShots++;
-        demoGrinderShots++;
-        demoFilterShots++;
-        demoTotalGramsTenths += saveTenths;
-        demoMachineGramsTenths += saveTenths;
-        demoGrinderGramsTenths += saveTenths;
-        demoFilterGramsTenths += saveTenths;
-        update_demo_stats_display();
+        add_saved_dose(saveTenths);
 
         char msg[96];
         char grams[24];
         format_grams(grams, sizeof(grams), saveTenths);
-        snprintf(msg, sizeof(msg), "Save gedrückt - Bezug %s gespeichert", grams);
+        snprintf(msg, sizeof(msg), "Bezug %s gespeichert", grams);
         update_status(msg);
         manualTareSaveArmed = false;
         set_save_ready(false);
@@ -1977,6 +2054,12 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "nav_stoppuhr") == 0) {
         navigate_to(Page::Stoppuhr);
     } else if (strcmp(action, "nav_daten") == 0) {
+        navigate_to(Page::Daten);
+    } else if (strcmp(action, "data_stats") == 0) {
+        navigate_to(Page::DatenMahldaten);
+    } else if (strcmp(action, "data_system") == 0) {
+        navigate_to(Page::DatenSystem);
+    } else if (strcmp(action, "data_back") == 0) {
         navigate_to(Page::Daten);
     } else if (strcmp(action, "nav_settings") == 0) {
         navigate_to(Page::Settings);
@@ -2250,7 +2333,7 @@ void open_restart_overlay()
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 58);
 
     lv_obj_t *hint = lv_label_create(panel);
-    lv_label_set_text(hint, "Nicht gespeicherte Demo-Werte gehen verloren.");
+    lv_label_set_text(hint, "Nicht gespeicherte Änderungen gehen verloren.");
     lv_obj_set_width(hint, 360);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
@@ -2540,7 +2623,7 @@ lv_obj_t *create_nav_button(lv_obj_t *parent, const char *text, const char *acti
 {
     lv_obj_t *btn = lv_btn_create(parent);
     style_nav_button(btn, active);
-    lv_obj_set_size(btn, 128, 46);
+    lv_obj_set_size(btn, 128, 60);
     lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(action));
 
     lv_obj_t *label = lv_label_create(btn);
@@ -2592,7 +2675,7 @@ void update_sim_weight()
     set_text(weightLabel, buf);
 
     char sim[64];
-    snprintf(sim, sizeof(sim), "Demo-Gewicht: %s", buf);
+    snprintf(sim, sizeof(sim), "Fallback-Gewicht: %s", buf);
     set_text(simLabel, sim);
 }
 
@@ -2672,31 +2755,33 @@ void create_header(lv_obj_t *screen)
 
 void create_footer(lv_obj_t *screen, const char *statusText, const char *hintText)
 {
+    // Auf dem kleinen AMOLED ist eine einzeilige Statusleiste deutlich lesbarer.
+    // Detail-/Hilfetexte führten zu Überlagerungen mit der Navigation.
+    (void)hintText;
+
     statusLabel = lv_label_create(screen);
     lv_label_set_text(statusLabel, statusText);
     lv_obj_set_width(statusLabel, 560);
     lv_label_set_long_mode(statusLabel, LV_LABEL_LONG_DOT);
     style_label(statusLabel, COLOR_WHITE);
-    lv_obj_align(statusLabel, LV_ALIGN_BOTTOM_LEFT, 18, -84);
+    lv_obj_align(statusLabel, LV_ALIGN_BOTTOM_LEFT, 18, -98);
 
-    touchLabel = lv_label_create(screen);
-    lv_label_set_text(touchLabel, hintText);
-    lv_obj_set_width(touchLabel, 560);
-    lv_label_set_long_mode(touchLabel, LV_LABEL_LONG_DOT);
-    style_label(touchLabel, COLOR_MUTED);
-    lv_obj_align(touchLabel, LV_ALIGN_BOTTOM_LEFT, 18, -62);
+    touchLabel = nullptr;
 }
 
 void create_nav(lv_obj_t *screen)
 {
     lv_obj_t *navWaage = create_nav_button(screen, "Waage", "nav_waage", activePage == Page::Waage);
-    lv_obj_align(navWaage, LV_ALIGN_BOTTOM_LEFT, 18, -8);
+    lv_obj_align(navWaage, LV_ALIGN_BOTTOM_LEFT, 18, -16);
 
     lv_obj_t *navStoppuhr = create_nav_button(screen, "Stoppuhr", "nav_stoppuhr", activePage == Page::Stoppuhr);
-    lv_obj_align(navStoppuhr, LV_ALIGN_BOTTOM_LEFT, 158, -8);
+    lv_obj_align(navStoppuhr, LV_ALIGN_BOTTOM_LEFT, 158, -16);
 
-    lv_obj_t *navDaten = create_nav_button(screen, "Daten", "nav_daten", activePage == Page::Daten);
-    lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 298, -8);
+    const bool dataActive = activePage == Page::Daten ||
+                            activePage == Page::DatenMahldaten ||
+                            activePage == Page::DatenSystem;
+    lv_obj_t *navDaten = create_nav_button(screen, "Daten", "nav_daten", dataActive);
+    lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 298, -16);
 
     const bool settingsActive = activePage == Page::Settings ||
                                 activePage == Page::SettingsWartung ||
@@ -2704,7 +2789,7 @@ void create_nav(lv_obj_t *screen)
                                 activePage == Page::SettingsWlan ||
                                 activePage == Page::SettingsSystem;
     lv_obj_t *navSettings = create_nav_button(screen, "Settings", "nav_settings", settingsActive);
-    lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 438, -8);
+    lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 438, -16);
 }
 
 void create_waage_page(lv_obj_t *screen)
@@ -2799,8 +2884,8 @@ void create_waage_page(lv_obj_t *screen)
     lv_obj_align(vesselBtn, LV_ALIGN_TOP_MID, 0, 180);
 
     create_footer(screen,
-                  "Status: Waage-Demo bereit - keine Wägezelle erforderlich",
-                  "Sollgewicht links antippen. Siebträger rechts wählen. Auto oben im Gewichtsfeld antippen.");
+                  "Waage bereit",
+                  "");
 }
 void create_stoppuhr_page(lv_obj_t *screen)
 {
@@ -2842,11 +2927,60 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_align(reset, LV_ALIGN_TOP_MID, 0, 90);
 
     create_footer(screen,
-                  "Status: Stoppuhr bereit",
-                  "Start/Stop und Reset sind als Touch-Bedienung vorbereitet.");
+                  "Stoppuhr bereit",
+                  "");
 }
 
 void create_daten_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "Daten");
+
+    struct DataCard {
+        const char *title;
+        const char *line1;
+        const char *action;
+        int y;
+    };
+
+    const DataCard cards[] = {
+        {"Mahldaten", "Shots und Mahlgut", "data_stats", 42},
+        {"System", "Uptime, WLAN und Waage", "data_system", 132},
+    };
+
+    for (const auto &card : cards) {
+        lv_obj_t *btn = lv_btn_create(panel);
+        style_button(btn);
+        lv_obj_set_size(btn, 526, 78);
+        lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 0, card.y);
+        lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
+
+        lv_obj_t *title = lv_label_create(btn);
+        lv_label_set_text(title, card.title);
+        style_label(title, COLOR_GREEN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, -2);
+
+        lv_obj_t *line1 = lv_label_create(btn);
+        lv_label_set_text(line1, card.line1);
+        lv_obj_set_width(line1, 470);
+        lv_label_set_long_mode(line1, LV_LABEL_LONG_DOT);
+        style_label(line1, COLOR_WHITE);
+        lv_obj_align(line1, LV_ALIGN_TOP_LEFT, 0, 28);
+
+    }
+
+    create_footer(screen,
+                  "Daten bereit",
+                  "");
+}
+
+void create_daten_mahldaten_page(lv_obj_t *screen)
 {
     char totalShots[16];
     char machineShots[16];
@@ -2895,10 +3029,21 @@ void create_daten_page(lv_obj_t *screen)
         lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, y);
     };
 
-    lv_obj_t *shotsPanel = lv_obj_create(screen);
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "Mahldaten");
+    lv_obj_t *back = create_button(panel, "Zurück", "data_back", 112, 40);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
+
+    lv_obj_t *shotsPanel = lv_obj_create(panel);
     style_panel(shotsPanel);
-    lv_obj_set_size(shotsPanel, 270, 180);
-    lv_obj_align(shotsPanel, LV_ALIGN_TOP_LEFT, 18, 54);
+    lv_obj_set_size(shotsPanel, 260, 174);
+    lv_obj_align(shotsPanel, LV_ALIGN_TOP_LEFT, 0, 58);
     lv_obj_clear_flag(shotsPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(shotsPanel, LV_SCROLLBAR_MODE_OFF);
 
@@ -2909,10 +3054,10 @@ void create_daten_page(lv_obj_t *screen)
     addRow(shotsPanel, "Kaffeemühle", grinderShots, 110, &shotsGrinderLabel);
     addRow(shotsPanel, "Filter", filterShots, 136, &shotsFilterLabel);
 
-    lv_obj_t *gramsPanel = lv_obj_create(screen);
+    lv_obj_t *gramsPanel = lv_obj_create(panel);
     style_panel(gramsPanel);
-    lv_obj_set_size(gramsPanel, 270, 180);
-    lv_obj_align(gramsPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
+    lv_obj_set_size(gramsPanel, 260, 174);
+    lv_obj_align(gramsPanel, LV_ALIGN_TOP_RIGHT, 0, 58);
     lv_obj_clear_flag(gramsPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(gramsPanel, LV_SCROLLBAR_MODE_OFF);
 
@@ -2923,81 +3068,60 @@ void create_daten_page(lv_obj_t *screen)
     addRow(gramsPanel, "Kaffeemühle", grinderGrams, 110, &gramsGrinderLabel);
     addRow(gramsPanel, "Filter", filterGrams, 136, &gramsFilterLabel);
 
-    lv_obj_t *systemPanel = lv_obj_create(screen);
-    style_panel(systemPanel);
-    lv_obj_set_size(systemPanel, 564, 124);
-    lv_obj_align(systemPanel, LV_ALIGN_TOP_LEFT, 18, 248);
-    lv_obj_clear_flag(systemPanel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(systemPanel, LV_SCROLLBAR_MODE_OFF);
+    create_footer(screen,
+                  "Mahldaten bereit",
+                  "");
+}
 
-    lv_obj_t *systemTitle = lv_label_create(systemPanel);
-    lv_label_set_text(systemTitle, "System");
-    style_label(systemTitle, COLOR_MUTED);
-    lv_obj_align(systemTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+void create_daten_system_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "Systemdaten");
+    lv_obj_t *back = create_button(panel, "Zurück", "data_back", 112, 40);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
 
     T4S3WifiStatus wifi;
     t4s3_wifi_get_status(wifi);
 
-    lv_obj_t *left = lv_label_create(systemPanel);
-    lv_label_set_text(left, "Uptime:\nWLAN:\nRAW:\nGewicht:");
-    lv_obj_set_width(left, 92);
-    lv_label_set_long_mode(left, LV_LABEL_LONG_DOT);
-    style_label(left, COLOR_WHITE);
-    lv_obj_align(left, LV_ALIGN_TOP_LEFT, 0, 26);
+    auto addLabelPair = [](lv_obj_t *parent, const char *name, int x, int y, lv_obj_t **valueOut) {
+        lv_obj_t *nameLabel = lv_label_create(parent);
+        lv_label_set_text(nameLabel, name);
+        lv_obj_set_width(nameLabel, 110);
+        lv_label_set_long_mode(nameLabel, LV_LABEL_LONG_DOT);
+        style_label(nameLabel, COLOR_MUTED);
+        lv_obj_align(nameLabel, LV_ALIGN_TOP_LEFT, x, y);
 
-    systemUptimeLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemUptimeLabel, 168);
-    lv_label_set_long_mode(systemUptimeLabel, LV_LABEL_LONG_DOT);
-    style_label(systemUptimeLabel, COLOR_WHITE);
-    lv_obj_align(systemUptimeLabel, LV_ALIGN_TOP_LEFT, 92, 26);
+        lv_obj_t *valueLabel = lv_label_create(parent);
+        lv_obj_set_width(valueLabel, 330);
+        lv_label_set_long_mode(valueLabel, LV_LABEL_LONG_DOT);
+        style_label(valueLabel, COLOR_WHITE);
+        lv_obj_align(valueLabel, LV_ALIGN_TOP_LEFT, x + 120, y);
+        if (valueOut) {
+            *valueOut = valueLabel;
+        }
+    };
 
-    systemDataSsidLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemDataSsidLabel, 140);
-    lv_label_set_long_mode(systemDataSsidLabel, LV_LABEL_LONG_DOT);
-    lv_label_set_text(systemDataSsidLabel, "");
-    lv_obj_set_height(systemDataSsidLabel, 18);
-    style_label(systemDataSsidLabel, COLOR_WHITE);
-    lv_obj_align(systemDataSsidLabel, LV_ALIGN_TOP_LEFT, 92, 46);
+    addLabelPair(panel, "Uptime:", 0, 58, &systemUptimeLabel);
+    addLabelPair(panel, "WLAN:", 0, 88, &systemDataSsidLabel);
+    addLabelPair(panel, "IP:", 0, 118, &systemDataIpLabel);
+    addLabelPair(panel, "Signal:", 0, 148, &systemDataSignalLabel);
+    addLabelPair(panel, "HX711:", 0, 178, &systemHx711GramsLabel);
 
-    lv_obj_t *right = lv_label_create(systemPanel);
-    lv_label_set_text(right, "IP:\nSignal:");
-    lv_obj_set_width(right, 66);
-    lv_label_set_long_mode(right, LV_LABEL_LONG_DOT);
-    style_label(right, COLOR_WHITE);
-    lv_obj_align(right, LV_ALIGN_TOP_LEFT, 280, 26);
-
-    systemDataIpLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemDataIpLabel, 205);
-    lv_label_set_long_mode(systemDataIpLabel, LV_LABEL_LONG_DOT);
-    style_label(systemDataIpLabel, COLOR_WHITE);
-    lv_obj_align(systemDataIpLabel, LV_ALIGN_TOP_LEFT, 346, 26);
-
-    systemDataSignalLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemDataSignalLabel, 205);
-    lv_label_set_long_mode(systemDataSignalLabel, LV_LABEL_LONG_DOT);
-    style_label(systemDataSignalLabel, COLOR_WHITE);
-    lv_obj_align(systemDataSignalLabel, LV_ALIGN_TOP_LEFT, 346, 46);
-
-    systemHx711RawLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemHx711RawLabel, 205);
-    lv_label_set_long_mode(systemHx711RawLabel, LV_LABEL_LONG_DOT);
-    style_label(systemHx711RawLabel, COLOR_WHITE);
-    lv_obj_align(systemHx711RawLabel, LV_ALIGN_TOP_LEFT, 92, 66);
-    set_text(systemHx711RawLabel, "-");
-
-    systemHx711GramsLabel = lv_label_create(systemPanel);
-    lv_obj_set_width(systemHx711GramsLabel, 205);
-    lv_label_set_long_mode(systemHx711GramsLabel, LV_LABEL_LONG_DOT);
-    style_label(systemHx711GramsLabel, COLOR_WHITE);
-    lv_obj_align(systemHx711GramsLabel, LV_ALIGN_TOP_LEFT, 92, 86);
+    systemHx711RawLabel = nullptr;
     set_text(systemHx711GramsLabel, "-");
 
     update_system_uptime_display();
     update_data_system_wifi_display();
 
     create_footer(screen,
-                  "Status: Daten-Demo bereit",
-                  "Daten aktiv: Shots/Mahlgut Demo, WLAN echt");
+                  "Systemdaten bereit",
+                  "");
 }
 
 void create_maintenance_row(lv_obj_t *parent,
@@ -3106,7 +3230,7 @@ void create_settings_wlan_page(lv_obj_t *screen)
 
     create_footer(screen,
                   "WLAN bereit",
-                  "Status kommt aus WiFi / Setup-AP bleibt ohne Scan");
+                  "");
 }
 
 void create_settings_waage_page(lv_obj_t *screen)
@@ -3172,8 +3296,8 @@ void create_settings_waage_page(lv_obj_t *screen)
     update_gefaess_storage_display();
 
     create_footer(screen,
-                  "Status: Waage / Gefäße-Demo bereit",
-                  "Kalibrierung, Gefäße und Gesamtwerte folgen als Detailseiten");
+                  "Waage / Gefäße bereit",
+                  "");
 }
 
 void create_settings_wartung_page(lv_obj_t *screen)
@@ -3218,9 +3342,10 @@ void create_settings_wartung_page(lv_obj_t *screen)
     create_maintenance_row(panel, "Filter", dirFilter, timeFilter, "maintenance_reset_filter", 184);
 
     
-    update_maintenance_display();create_footer(screen,
+    update_maintenance_display();
+    create_footer(screen,
                   "Wartung bereit",
-                  "Reset speichert den aktuellen NTP-Zeitpunkt");
+                  "");
 }
 void create_settings_system_page(lv_obj_t *screen)
 {
@@ -3282,7 +3407,7 @@ void create_settings_system_page(lv_obj_t *screen)
 
     create_footer(screen,
                   "System bereit",
-                  "Zeitstatus, Bildschirmtimeout und Neustart");
+                  "");
 }
 void create_settings_page(lv_obj_t *screen)
 {
@@ -3339,8 +3464,8 @@ void create_settings_page(lv_obj_t *screen)
     }
 
     create_footer(screen,
-                  "Status: Settings-Demo bereit",
-                  "Settings: Wartung, Waage / Gefäße, WLAN und System");
+                  "Settings bereit",
+                  "");
 }
 
 void build_current_page()
@@ -3360,6 +3485,12 @@ void build_current_page()
         break;
     case Page::Daten:
         create_daten_page(screen);
+        break;
+    case Page::DatenMahldaten:
+        create_daten_mahldaten_page(screen);
+        break;
+    case Page::DatenSystem:
+        create_daten_system_page(screen);
         break;
     case Page::Settings:
         create_settings_page(screen);
@@ -3481,6 +3612,8 @@ void ui_t4s3_tick()
     }
     update_gefaess_measure_weight_display();
 }
+
+
 
 
 
