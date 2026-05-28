@@ -46,6 +46,16 @@ void coffeeStorageSaveSiebtraegerSetWeights(
   const float* setWeightST,
   size_t byteCount);
 
+void coffeeStorageSaveSiebtraegerName(
+  Preferences& preferences,
+  uint8_t index,
+  const String& name);
+
+void coffeeStorageLoadSiebtraegerNames(
+  Preferences& preferences,
+  String* names,
+  size_t count);
+
 void coffeeStorageSaveAutodetect(
   Preferences& preferences,
   bool autoDetect);

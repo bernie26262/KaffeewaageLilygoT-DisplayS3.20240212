@@ -21,6 +21,7 @@ struct StopwatchState {
 
 struct SelectionState {
   int siebtraeger = 0;
+  String siebtraeger_names[4];
   int gefaess = 0;
   bool autodetect = false;
 };

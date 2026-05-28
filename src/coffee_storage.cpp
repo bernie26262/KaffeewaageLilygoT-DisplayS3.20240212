@@ -3,6 +3,12 @@
 namespace {
 constexpr const char* STORAGE_NAMESPACE = "savedValues";
 constexpr bool RW_MODE = false;
+constexpr bool RO_MODE = true;
+
+String siebtraegerNameKey(uint8_t index)
+{
+  return String("stName") + String(index);
+}
 }
 
 void coffeeStorageSaveStats(
@@ -97,6 +103,31 @@ void coffeeStorageSaveSiebtraegerSetWeights(
   preferences.end();
 }
 
+void coffeeStorageSaveSiebtraegerName(
+  Preferences& preferences,
+  uint8_t index,
+  const String& name)
+{
+  preferences.begin(STORAGE_NAMESPACE, RW_MODE);
+  preferences.putString(siebtraegerNameKey(index).c_str(), name);
+  preferences.end();
+}
+
+void coffeeStorageLoadSiebtraegerNames(
+  Preferences& preferences,
+  String* names,
+  size_t count)
+{
+  preferences.begin(STORAGE_NAMESPACE, RO_MODE);
+  for (size_t i = 0; i < count; ++i) {
+    const String key = siebtraegerNameKey(static_cast<uint8_t>(i));
+    if (preferences.isKey(key.c_str())) {
+      names[i] = preferences.getString(key.c_str(), names[i]);
+    }
+  }
+  preferences.end();
+}
+
 void coffeeStorageSaveAutodetect(
   Preferences& preferences,
   bool autoDetect)
@@ -145,7 +176,6 @@ void coffeeStorageSaveGefaessWeights(
 
 
 namespace {
-constexpr bool RO_MODE = true;
 
 void loadBytesIfPresent(Preferences& preferences, const char* key, void* data, size_t expectedByteCount)
 {

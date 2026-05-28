@@ -79,12 +79,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
       <div class="scale-select-row small">
         <span class="label">Siebträger</span>
-        <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
-          <option value="0">Bodenloser ST</option>
-          <option value="1">1er-Siebträger</option>
-          <option value="2">2er-Siebträger</option>
-          <option value="3">Custom-ST</option>
-        </select>
+        <select id="siebtraegerSelect" aria-label="Siebträger auswählen"></select>
       </div>
     </div>
   </section>
@@ -169,6 +164,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div class="settings-actions" style="margin-top: 12px;">
         <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
       </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Siebträgernamen</div>
+      <div class="small">Namen für WebUI und HMI bearbeiten. Maximal 16 Zeichen je Siebträger.</div>
+      <div id="siebtraegerNameList" class="siebtraeger-name-list"></div>
     </section>
 
     <section class="card">
@@ -504,6 +505,13 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .gefaess-list { display: grid; gap: 8px; margin-top: 10px; }
     .gefaess-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(148,163,184,.14); }
     .gefaess-row:last-child { border-bottom: 0; }
+    .siebtraeger-name-list { display: grid; gap: 10px; margin-top: 12px; }
+    .siebtraeger-name-row { display: grid; grid-template-columns: minmax(92px, 1fr) minmax(0, 2fr) auto; align-items: center; gap: 10px; }
+    .siebtraeger-name-row input { width: 100%; box-sizing: border-box; }
+    @media (max-width: 540px) {
+      .siebtraeger-name-row { grid-template-columns: 1fr; }
+      .siebtraeger-name-row button { width: 100%; }
+    }
     .gefaess-weight { font-weight: 700; }
     .gefaess-missing { color: var(--muted); }
     .page { display: grid; gap: 14px; }
@@ -653,6 +661,13 @@ const fmtDateTime = (epoch, valid) => {
   });
 };
 const fmtUptime = ms => fmtDayClockDuration(Math.floor(Number(ms || 0) / 1000));
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}[c]));
 
 // ===== Navigation / Log =====
 function addLog(msg) {
@@ -1137,7 +1152,42 @@ function renderStopwatch() {
   el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
 }
 
-// ===== Settings / Gefaesse =====
+// ===== Settings / Siebtraeger / Gefaesse =====
+function renderSiebtraegerOptions(s) {
+  const select = el('siebtraegerSelect');
+  if (!select) return;
+
+  const names = s?.selection?.siebtraeger_names || [];
+  const selected = String(s?.selection?.siebtraeger ?? 0);
+  const labels = [0, 1, 2, 3].map(index => names[index] || `Siebträger ${index + 1}`);
+
+  const signature = labels.join('\u001f');
+  if (select.dataset.signature !== signature) {
+    select.innerHTML = labels.map((name, index) => `<option value="${index}">${escapeHtml(name)}</option>`).join('');
+    select.dataset.signature = signature;
+  }
+  select.value = selected;
+}
+
+function renderSiebtraegerNameSettings(s) {
+  const list = el('siebtraegerNameList');
+  if (!list) return;
+
+  const names = s?.selection?.siebtraeger_names || [];
+  const labels = [0, 1, 2, 3].map(index => names[index] || `Siebträger ${index + 1}`);
+  const signature = labels.join('\u001f');
+  if (list.dataset.signature === signature) return;
+  list.dataset.signature = signature;
+
+  list.innerHTML = labels.map((name, index) => {
+    return `<div class="siebtraeger-name-row">
+      <label for="siebtraegerName${index}">Siebträger ${index + 1}</label>
+      <input id="siebtraegerName${index}" class="siebtraeger-name-input" data-siebtraeger-index="${index}" type="text" maxlength="16" value="${escapeHtml(name)}" aria-label="Name für Siebträger ${index + 1}">
+      <button class="compact secondary save-siebtraeger-name" data-siebtraeger-index="${index}">Speichern</button>
+    </div>`;
+  }).join('');
+}
+
 function renderGefaessSettings(s) {
   const list = el('gefaessList');
   if (!list) return;
@@ -1164,7 +1214,7 @@ function renderWeightAndSelection(s) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
   }
   setText('status', s.status?.label || String(s.status?.mode ?? '---'));
-  el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
+  renderSiebtraegerOptions(s);
 }
 
 function renderAutodetect(s) {
@@ -1268,6 +1318,7 @@ function render(s) {
   renderStatsAndSystem(s);
   renderActionAvailability(s);
   renderMaintenance(s.maintenance);
+  renderSiebtraegerNameSettings(s);
   renderGefaessSettings(s);
 
   if (el('wizardOverlay').classList.contains('show')) {
@@ -1477,6 +1528,40 @@ function handleSiebtraegerChange() {
   sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
 }
 
+function saveSiebtraegerName(index) {
+  const input = el(`siebtraegerName${index}`);
+  if (!input) return;
+
+  const name = input.value.trim().slice(0, 16);
+  if (!name) {
+    openInfoOverlay('Name fehlt', 'Bitte einen Namen für den Siebträger eintragen.');
+    return;
+  }
+
+  input.value = name;
+  sendCommand(`set_siebtraeger_name_${index}_${encodeURIComponent(name)}`, `Siebträger ${index + 1} umbenennen …`);
+}
+
+function handleSiebtraegerNameListClick(e) {
+  const button = e.target.closest('.save-siebtraeger-name');
+  if (!button) return;
+
+  const index = Number(button.dataset.siebtraegerIndex);
+  if (!Number.isInteger(index) || index < 0 || index > 3) return;
+  saveSiebtraegerName(index);
+}
+
+function handleSiebtraegerNameListKeyDown(e) {
+  if (e.key !== 'Enter') return;
+  const input = e.target.closest('.siebtraeger-name-input');
+  if (!input) return;
+  e.preventDefault();
+
+  const index = Number(input.dataset.siebtraegerIndex);
+  if (!Number.isInteger(index) || index < 0 || index > 3) return;
+  saveSiebtraegerName(index);
+}
+
 function handleAutodetectToggleClick() {
   const autodetectOn = !!lastState?.selection?.autodetect;
   sendCommand(autodetectOn ? CMD.autodetectOff : CMD.autodetectOn, autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
@@ -1548,6 +1633,8 @@ function bindSettingsHandlers() {
   el('openCalibrate').addEventListener('click', openCalibrationWizard);
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
+  el('siebtraegerNameList').addEventListener('click', handleSiebtraegerNameListClick);
+  el('siebtraegerNameList').addEventListener('keydown', handleSiebtraegerNameListKeyDown);
   el('wifiCredentialsForm').addEventListener('submit', saveWifiCredentials);
   el('activateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
     'Gespeicherte WLAN-Daten verwenden?',
@@ -2153,7 +2240,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<3072> doc;
+  StaticJsonDocument<3584> doc;
 
   doc["type"] = "state";
 
@@ -2169,6 +2256,10 @@ static String buildStateJson(const AppState& s)
   doc["stopwatch"]["running"] = s.stopwatch.running;
 
   doc["selection"]["siebtraeger"] = s.selection.siebtraeger;
+  JsonArray siebtraegerNames = doc["selection"]["siebtraeger_names"].to<JsonArray>();
+  for (int i = 0; i < 4; ++i) {
+    siebtraegerNames.add(s.selection.siebtraeger_names[i]);
+  }
   doc["selection"]["gefaess"] = s.selection.gefaess;
   doc["selection"]["autodetect"] = s.selection.autodetect;
 

@@ -190,7 +190,9 @@ static const float WEB_STATE_WEIGHT_BROADCAST_DELTA_G = 0.1f;
 // ############################
 bool pageEntered = true;
 byte selectedST;
-String siebtraeger[] = {"Bodenloser ST         ", "1er-Siebtraeger        ", "2er-Siebtraeger        ", "Custom-ST              "};
+static constexpr byte SIEBTRAEGER_COUNT = 4;
+static constexpr uint8_t SIEBTRAEGER_NAME_MAX_CHARS = 16;
+String siebtraeger[SIEBTRAEGER_COUNT] = {"Bodenloser ST         ", "1er-Siebtraeger        ", "2er-Siebtraeger        ", "Custom-ST              "};
 byte selectedGefaess;
 String gefaess[] = {"Gefaess 1             ", "Gefaess 2             ", "Gefaess 3             ", "Gefaess 4             "};
 String menuentryTageReinigung;
@@ -218,6 +220,81 @@ static String fitHmiText(String text, uint8_t width = 24)
     text += ' ';
   }
   return text;
+}
+
+static String trimSiebtraegerName(byte index)
+{
+  if (index >= SIEBTRAEGER_COUNT) {
+    return String();
+  }
+  String name = siebtraeger[index];
+  name.trim();
+  return name;
+}
+
+static String sanitizeSiebtraegerName(String name)
+{
+  name.trim();
+  name.replace("\r", " ");
+  name.replace("\n", " ");
+  while (name.indexOf("  ") >= 0) {
+    name.replace("  ", " ");
+  }
+  if (name.length() > SIEBTRAEGER_NAME_MAX_CHARS) {
+    name = name.substring(0, SIEBTRAEGER_NAME_MAX_CHARS);
+    name.trim();
+  }
+  return name;
+}
+
+static void setSiebtraegerDisplayName(byte index, String name)
+{
+  if (index >= SIEBTRAEGER_COUNT) {
+    return;
+  }
+  name = sanitizeSiebtraegerName(name);
+  if (name.length() == 0) {
+    name = String("Siebtraeger ") + String(index + 1);
+  }
+  siebtraeger[index] = fitHmiText(name);
+}
+
+static void syncSiebtraegerMenuItems();
+
+static void normaliseSiebtraegerNamesForHmi()
+{
+  for (byte i = 0; i < SIEBTRAEGER_COUNT; ++i) {
+    setSiebtraegerDisplayName(i, siebtraeger[i]);
+  }
+  syncSiebtraegerMenuItems();
+}
+
+static int hexValue(char c)
+{
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+static String urlDecode(String encoded)
+{
+  String decoded;
+  decoded.reserve(encoded.length());
+  for (size_t i = 0; i < encoded.length(); ++i) {
+    const char c = encoded.charAt(i);
+    if (c == '%' && i + 2 < encoded.length()) {
+      const int hi = hexValue(encoded.charAt(i + 1));
+      const int lo = hexValue(encoded.charAt(i + 2));
+      if (hi >= 0 && lo >= 0) {
+        decoded += static_cast<char>((hi << 4) | lo);
+        i += 2;
+        continue;
+      }
+    }
+    decoded += (c == '+') ? ' ' : c;
+  }
+  return decoded;
 }
 
 byte pageID = 0;
@@ -283,6 +360,15 @@ String menuItemsOfPage[HMI_PAGE_COUNT][4] =
   {"WLAN-Daten gespeich.",       "Neustart noetig        ",             "Neues WLAN aktiv       ",       "Beenden + Neustart     "},      //26
   
 };   
+
+static void syncSiebtraegerMenuItems()
+{
+  for (byte i = 0; i < SIEBTRAEGER_COUNT; ++i) {
+    menuItemsOfPage[2][i] = siebtraeger[i];
+  }
+  menuItemsOfPage[0][1] = siebtraeger[selectedST];
+  menuItemsOfPage[4][1] = siebtraeger[selectedST];
+}
 
 //pageID                                            0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
 const byte footerOfPageID[] =                      {0, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};                      // es gibt zwei unterschiedliche Footer, die dargestellt werden können
@@ -656,6 +742,9 @@ static void updateCoffeeAppStateFromGlobals()
   appState.stopwatch.running = stopWatchRunning;
 
   appState.selection.siebtraeger = selectedST;
+  for (byte i = 0; i < SIEBTRAEGER_COUNT; ++i) {
+    appState.selection.siebtraeger_names[i] = trimSiebtraegerName(i);
+  }
   appState.selection.gefaess = selectedGefaess;
   appState.selection.autodetect = autoDetect;
 
@@ -917,8 +1006,7 @@ static bool selectSiebtraegerFromWeb(byte index)
   }
 
   selectedST = index;
-  menuItemsOfPage[0][1] = siebtraeger[selectedST];
-  menuItemsOfPage[4][1] = siebtraeger[selectedST];
+  syncSiebtraegerMenuItems();
 
   if (displayOff == 0) {
     RefreshTFTDisplay();
@@ -926,6 +1014,32 @@ static bool selectSiebtraegerFromWeb(byte index)
   }
 
   coffeeStorageSaveSelectedSiebtraeger(preferences, selectedST);
+
+  updateCoffeeAppStateFromGlobals();
+  coffeeWebBroadcastState(appState);
+  return true;
+}
+
+static bool setSiebtraegerNameFromWeb(byte index, String name)
+{
+  if (index >= SIEBTRAEGER_COUNT) {
+    return false;
+  }
+
+  name = sanitizeSiebtraegerName(name);
+  if (name.length() == 0) {
+    return false;
+  }
+
+  setSiebtraegerDisplayName(index, name);
+  syncSiebtraegerMenuItems();
+
+  coffeeStorageSaveSiebtraegerName(preferences, index, trimSiebtraegerName(index));
+
+  if (displayOff == 0) {
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
 
   updateCoffeeAppStateFromGlobals();
   coffeeWebBroadcastState(appState);
@@ -1198,6 +1312,7 @@ static constexpr const char* CMD_RESTART_DEVICE = "restart_device";
 
 static constexpr const char* PREFIX_SELECT_SIEBTRAEGER = "select_siebtraeger_";
 static constexpr const char* PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT = "set_selected_siebtraeger_weight_";
+static constexpr const char* PREFIX_SET_SIEBTRAEGER_NAME = "set_siebtraeger_name_";
 static constexpr const char* PREFIX_SCALE_CALIBRATION_SET_WEIGHT = "scale_calibration_set_weight_";
 static constexpr const char* PREFIX_SCALE_CALIBRATION_APPLY_WEIGHT = "scale_calibration_apply_";
 static constexpr const char* PREFIX_SELECT_GEFAESS = "select_gefaess_";
@@ -1216,6 +1331,16 @@ static bool handleWebSelectionCommand(const char* cmd, bool& handled)
   if (cmdStartsWith(cmd, PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT)) {
     const float weight_g = atof(cmd + strlen(PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT));
     return setSelectedSiebtraegerWeightFromWeb(weight_g);
+  }
+
+  if (cmdStartsWith(cmd, PREFIX_SET_SIEBTRAEGER_NAME)) {
+    const char* payload = cmd + strlen(PREFIX_SET_SIEBTRAEGER_NAME);
+    char* end = nullptr;
+    const long index = strtol(payload, &end, 10);
+    if (end == payload || *end != '_' || index < 0 || index >= SIEBTRAEGER_COUNT) {
+      return false;
+    }
+    return setSiebtraegerNameFromWeb(static_cast<byte>(index), urlDecode(String(end + 1)));
   }
 
   if (cmdStartsWith(cmd, PREFIX_SCALE_CALIBRATION_SET_WEIGHT)) {
@@ -3682,8 +3807,7 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     
     callFunctionOfPage[2] = 0;
     selectedST = encoderPos;
-    menuItemsOfPage[0][1] = siebtraeger[selectedST];       //Siebträger wird nur auf zwei Seiten angezeigt
-    menuItemsOfPage[4][1] = siebtraeger[selectedST];
+    syncSiebtraegerMenuItems();
     //menuItemsOfPage[7][0] = siebtraeger[selectedST];
     //menuItemsOfPage[8][0] = siebtraeger[selectedST];
     //menuItemsOfPage[9][0] = siebtraeger[selectedST];
@@ -4011,6 +4135,8 @@ void setup()
     lastTimeMuehlenReinigungNTP,
     lastTimeKaffeemReinigungNTP,
     lastTimeFilterWechselNTP);
+  coffeeStorageLoadSiebtraegerNames(preferences, siebtraeger, SIEBTRAEGER_COUNT);
+  normaliseSiebtraegerNamesForHmi();
   debug("Nonvolatile Storage (NVS) initialized = ");
   debugln(nvsInitialised);
 
@@ -4039,7 +4165,7 @@ void setup()
   //pinMode(relayMuehle, OUTPUT);
   //digitalWrite(relayMuehle, HIGH);
 
-  menuItemsOfPage[0][1]  = siebtraeger[selectedST];
+  syncSiebtraegerMenuItems();
   //menuItemsOfPage[3][1]  = siebtraeger[selectedST];
   //menuItemsOfPage[7][0]  = siebtraeger[selectedST];
   //menuItemsOfPage[8][0]  = siebtraeger[selectedST];
