@@ -15,6 +15,8 @@ namespace {
 
 constexpr uint8_t kMaxGefaessSlots = 3;
 constexpr uint8_t kMaxSiebtraegerSlots = 4;
+constexpr uint8_t kScaleCalIncrementCount = 4;
+constexpr int32_t kScaleCalIncrementsTenths[kScaleCalIncrementCount] = {10, 50, 100, 1000};
 
 constexpr uint32_t COLOR_BG = 0x000000;
 constexpr uint32_t COLOR_PANEL = 0x07120a;
@@ -77,6 +79,11 @@ lv_obj_t *restartOverlay = nullptr;
 lv_obj_t *scaleCalibrationOverlay = nullptr;
 lv_obj_t *scaleCalibrationWeightLabel = nullptr;
 lv_obj_t *scaleCalibrationFactorLabel = nullptr;
+lv_obj_t *scaleCalibrationTargetWeightLabel = nullptr;
+lv_obj_t *scaleCalibrationIncrementLabel = nullptr;
+uint8_t scaleCalibrationStep = 1;
+int32_t scaleCalibrationTargetTenths = 2000;
+uint8_t scaleCalibrationIncrementIndex = 2;
 lv_obj_t *vesselOptionLabels[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *screenTimeoutValueLabel = nullptr;
 lv_obj_t *systemTimeStatusLabel = nullptr;
@@ -212,6 +219,8 @@ void reset_dynamic_labels()
     gefaessMeasureWeightLabel = nullptr;
     scaleCalibrationWeightLabel = nullptr;
     scaleCalibrationFactorLabel = nullptr;
+    scaleCalibrationTargetWeightLabel = nullptr;
+    scaleCalibrationIncrementLabel = nullptr;
     screenTimeoutValueLabel = nullptr;
     systemTimeStatusLabel = nullptr;
     systemTimeLocalLabel = nullptr;
@@ -373,6 +382,7 @@ void update_hx711_grams_display(float grams, bool valid)
 
     set_text_if_changed(systemHx711GramsLabel, buf);
     set_text_if_changed(scaleCalibrationWeightLabel, buf);
+    update_gefaess_measure_weight_display();
 
     // First integration step: show the real HX711 DISPLAY value on the
     // main scale page, but leave save/autodetect logic untouched for now.
@@ -654,14 +664,56 @@ void open_gefaess_delete_overlay(uint8_t slot)
 }
 
 
+
+float preview_scale_calibration_factor()
+{
+    const float knownGrams = static_cast<float>(scaleCalibrationTargetTenths) / 10.0f;
+    float currentGrams = t4s3_scale_current_grams();
+    if (currentGrams < 0.0f) {
+        currentGrams = -currentGrams;
+    }
+
+    const float currentFactor = t4s3_scale_calibration_factor();
+    if (knownGrams <= 0.0f || currentFactor <= 0.0f) {
+        return 0.0f;
+    }
+
+    const float currentRaw = currentGrams * currentFactor;
+    if (currentRaw < 100.0f) {
+        return 0.0f;
+    }
+
+    return currentRaw / knownGrams;
+}
+
 void update_scale_calibration_display()
 {
     char buf[40];
     snprintf(buf, sizeof(buf), "%.1f g", static_cast<double>(t4s3_scale_current_grams()));
     set_text_if_changed(scaleCalibrationWeightLabel, buf);
 
-    snprintf(buf, sizeof(buf), "Faktor: %.1f raw/g", static_cast<double>(t4s3_scale_calibration_factor()));
+    if (scaleCalibrationStep == 4) {
+        const float factor = preview_scale_calibration_factor();
+        if (factor > 0.0f) {
+            snprintf(buf, sizeof(buf), "Kalibrierfaktor: %.1f raw/g", static_cast<double>(factor));
+        } else {
+            snprintf(buf, sizeof(buf), "Kalibrierfaktor: -");
+        }
+    } else {
+        snprintf(buf, sizeof(buf), "Faktor: %.1f raw/g", static_cast<double>(t4s3_scale_calibration_factor()));
+    }
     set_text_if_changed(scaleCalibrationFactorLabel, buf);
+
+    format_grams(buf, sizeof(buf), scaleCalibrationTargetTenths);
+    set_text_if_changed(scaleCalibrationTargetWeightLabel, buf);
+
+    const int32_t incTenths = kScaleCalIncrementsTenths[scaleCalibrationIncrementIndex];
+    if ((incTenths % 10) == 0) {
+        snprintf(buf, sizeof(buf), "%ld g", static_cast<long>(incTenths / 10));
+    } else {
+        format_grams(buf, sizeof(buf), incTenths);
+    }
+    set_text_if_changed(scaleCalibrationIncrementLabel, buf);
 }
 
 void close_scale_calibration_overlay()
@@ -672,6 +724,8 @@ void close_scale_calibration_overlay()
     scaleCalibrationOverlay = nullptr;
     scaleCalibrationWeightLabel = nullptr;
     scaleCalibrationFactorLabel = nullptr;
+    scaleCalibrationTargetWeightLabel = nullptr;
+    scaleCalibrationIncrementLabel = nullptr;
 }
 
 void open_scale_calibration_overlay()
@@ -694,53 +748,135 @@ void open_scale_calibration_overlay()
 
     lv_obj_t *panel = lv_obj_create(scaleCalibrationOverlay);
     style_panel(panel);
-    lv_obj_set_size(panel, 430, 300);
+    lv_obj_set_size(panel, 430, 310);
     lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *title = lv_label_create(panel);
-    lv_label_set_text(title, "Waage kalibrieren");
+    lv_label_set_text(title, scaleCalibrationStep == 4 ? "Kalibrierung abgeschlossen" : "Waage kalibrieren");
     style_label(title, COLOR_WHITE);
-    lv_obj_set_width(title, 360);
+    lv_obj_set_width(title, 270);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lv_obj_t *hint = lv_label_create(panel);
-    lv_label_set_text(hint, "1. Waage entlasten und Tara drücken.\n2. Bekanntes Gewicht auflegen.\n3. Passendes Kalibriergewicht wählen.");
-    style_label(hint, COLOR_MUTED);
-    lv_obj_set_width(hint, 380);
-    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, 36);
+    lv_obj_t *stepLabel = lv_label_create(panel);
+    char stepText[24];
+    snprintf(stepText, sizeof(stepText), "Schritt %u/4", static_cast<unsigned>(scaleCalibrationStep));
+    lv_label_set_text(stepLabel, stepText);
+    style_label(stepLabel, COLOR_MUTED);
+    lv_obj_set_width(stepLabel, 120);
+    lv_label_set_long_mode(stepLabel, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(stepLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(stepLabel, LV_ALIGN_TOP_RIGHT, 0, 0);
 
-    lv_obj_t *weightTitle = lv_label_create(panel);
-    lv_label_set_text(weightTitle, "Aktuelles Gewicht:");
-    style_label(weightTitle, COLOR_MUTED);
-    lv_obj_align(weightTitle, LV_ALIGN_TOP_LEFT, 0, 118);
+    if (scaleCalibrationStep == 1 || scaleCalibrationStep == 2) {
+        lv_obj_t *hint = lv_label_create(panel);
+        style_label(hint, COLOR_MUTED);
+        lv_obj_set_width(hint, 380);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, 40);
 
-    scaleCalibrationWeightLabel = lv_label_create(panel);
-    lv_obj_set_width(scaleCalibrationWeightLabel, 150);
-    lv_label_set_long_mode(scaleCalibrationWeightLabel, LV_LABEL_LONG_DOT);
-    style_label(scaleCalibrationWeightLabel, COLOR_WHITE);
-    lv_obj_align(scaleCalibrationWeightLabel, LV_ALIGN_TOP_LEFT, 190, 118);
+        if (scaleCalibrationStep == 1) {
+            lv_label_set_text(hint, "Waage entlasten. Danach Tara drücken und mit Weiter fortfahren.");
+        } else {
+            lv_label_set_text(hint, "Kalibriergewicht auflegen und warten, bis die Anzeige ruhig ist.");
+        }
+    }
 
-    scaleCalibrationFactorLabel = lv_label_create(panel);
-    lv_obj_set_width(scaleCalibrationFactorLabel, 300);
-    lv_label_set_long_mode(scaleCalibrationFactorLabel, LV_LABEL_LONG_DOT);
-    style_label(scaleCalibrationFactorLabel, COLOR_MUTED);
-    lv_obj_align(scaleCalibrationFactorLabel, LV_ALIGN_TOP_LEFT, 0, 148);
+    const int weightRowY = (scaleCalibrationStep >= 3) ? 54 : 122;
 
-    lv_obj_t *tare = create_button(panel, "Tara", "scale_cal_tare", 120, 42);
-    lv_obj_align(tare, LV_ALIGN_TOP_LEFT, 0, 184);
+    if (scaleCalibrationStep <= 3) {
+        lv_obj_t *weightTitle = lv_label_create(panel);
+        lv_label_set_text(weightTitle, scaleCalibrationStep == 3 ? "Aktuell:" : "Aktuelles Gewicht:");
+        style_label(weightTitle, COLOR_MUTED);
+        lv_obj_align(weightTitle, LV_ALIGN_TOP_LEFT, 0, weightRowY);
 
-    lv_obj_t *cal100 = create_button(panel, "100 g", "scale_cal_100", 120, 42);
-    lv_obj_align(cal100, LV_ALIGN_TOP_LEFT, 135, 184);
+        scaleCalibrationWeightLabel = lv_label_create(panel);
+        lv_obj_set_width(scaleCalibrationWeightLabel, 150);
+        lv_label_set_long_mode(scaleCalibrationWeightLabel, LV_LABEL_LONG_DOT);
+        style_label(scaleCalibrationWeightLabel, COLOR_WHITE);
+        lv_obj_align(scaleCalibrationWeightLabel, LV_ALIGN_TOP_LEFT, 190, weightRowY);
+    }
 
-    lv_obj_t *cal200 = create_button(panel, "200 g", "scale_cal_200", 120, 42);
-    lv_obj_align(cal200, LV_ALIGN_TOP_LEFT, 270, 184);
+    if (scaleCalibrationStep == 4) {
+        scaleCalibrationFactorLabel = lv_label_create(panel);
+        lv_obj_set_width(scaleCalibrationFactorLabel, 360);
+        lv_label_set_long_mode(scaleCalibrationFactorLabel, LV_LABEL_LONG_DOT);
+        style_label(scaleCalibrationFactorLabel, COLOR_WHITE);
+        lv_obj_align(scaleCalibrationFactorLabel, LV_ALIGN_TOP_LEFT, 0, 78);
+    }
 
-    lv_obj_t *close = create_button(panel, "Schließen", "scale_cal_close", 160, 42);
-    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, 0, 236);
+    if (scaleCalibrationStep == 1) {
+        lv_obj_t *tara = create_button(panel, "Tara", "scale_cal_tare", 130, 46);
+        lv_obj_align(tara, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_t *next = create_button(panel, "Weiter", "scale_cal_to_load", 130, 46);
+        lv_obj_align(next, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_t *close = create_button(panel, "Abbr.", "scale_cal_close", 110, 46);
+        lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    } else if (scaleCalibrationStep == 2) {
+        lv_obj_t *back = create_button(panel, "Zurück", "scale_cal_back_tare", 130, 46);
+        lv_obj_align(back, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_t *next = create_button(panel, "Weiter", "scale_cal_to_weight", 130, 46);
+        lv_obj_align(next, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_t *close = create_button(panel, "Abbr.", "scale_cal_close", 110, 46);
+        lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    } else if (scaleCalibrationStep == 3) {
+        lv_obj_t *targetTitle = lv_label_create(panel);
+        lv_label_set_text(targetTitle, "Kalibriergewicht");
+        style_label(targetTitle, COLOR_MUTED);
+        lv_obj_align(targetTitle, LV_ALIGN_TOP_LEFT, 0, 78);
+
+        lv_obj_t *targetMinus = create_button(panel, "-", "scale_cal_weight_dec", 56, 38);
+        lv_obj_align(targetMinus, LV_ALIGN_TOP_LEFT, 0, 102);
+
+        scaleCalibrationTargetWeightLabel = lv_label_create(panel);
+        lv_obj_set_width(scaleCalibrationTargetWeightLabel, 160);
+        lv_label_set_long_mode(scaleCalibrationTargetWeightLabel, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(scaleCalibrationTargetWeightLabel, LV_TEXT_ALIGN_CENTER, 0);
+        style_label(scaleCalibrationTargetWeightLabel, COLOR_WHITE);
+        lv_obj_align(scaleCalibrationTargetWeightLabel, LV_ALIGN_TOP_LEFT, 72, 109);
+
+        lv_obj_t *targetPlus = create_button(panel, "+", "scale_cal_weight_inc", 56, 38);
+        lv_obj_align(targetPlus, LV_ALIGN_TOP_LEFT, 248, 102);
+
+        lv_obj_t *incrementTitle = lv_label_create(panel);
+        lv_label_set_text(incrementTitle, "Schrittweite");
+        style_label(incrementTitle, COLOR_MUTED);
+        lv_obj_align(incrementTitle, LV_ALIGN_TOP_LEFT, 0, 142);
+
+        lv_obj_t *incrementMinus = create_button(panel, "-", "scale_cal_step_dec", 56, 38);
+        lv_obj_align(incrementMinus, LV_ALIGN_TOP_LEFT, 0, 166);
+
+        scaleCalibrationIncrementLabel = lv_label_create(panel);
+        lv_obj_set_width(scaleCalibrationIncrementLabel, 160);
+        lv_label_set_long_mode(scaleCalibrationIncrementLabel, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(scaleCalibrationIncrementLabel, LV_TEXT_ALIGN_CENTER, 0);
+        style_label(scaleCalibrationIncrementLabel, COLOR_WHITE);
+        lv_obj_align(scaleCalibrationIncrementLabel, LV_ALIGN_TOP_LEFT, 72, 173);
+
+        lv_obj_t *incrementPlus = create_button(panel, "+", "scale_cal_step_inc", 56, 38);
+        lv_obj_align(incrementPlus, LV_ALIGN_TOP_LEFT, 248, 166);
+
+        lv_obj_t *back = create_button(panel, "Zurück", "scale_cal_back_load", 105, 46);
+        lv_obj_align(back, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_t *next = create_button(panel, "Weiter", "scale_cal_to_confirm", 135, 46);
+        lv_obj_align(next, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_t *close = create_button(panel, "Abbr.", "scale_cal_close", 105, 46);
+        lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    } else {
+        lv_obj_t *hint = lv_label_create(panel);
+        lv_label_set_text(hint, "Kalibrierfaktor prüfen und bestätigen.");
+        style_label(hint, COLOR_MUTED);
+        lv_obj_set_width(hint, 360);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 0, 40);
+
+        lv_obj_t *back = create_button(panel, "Zurück", "scale_cal_back_weight", 130, 46);
+        lv_obj_align(back, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_t *save = create_button(panel, "Bestätigen", "scale_cal_save", 160, 46);
+        lv_obj_align(save, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    }
 
     update_scale_calibration_display();
     update_status("Kalibrierung geöffnet");
@@ -749,11 +885,17 @@ void open_scale_calibration_overlay()
 
 int32_t current_gefaess_measure_tenths()
 {
-    int32_t value = simTenths - gefaessMeasureTareTenths;
-    if (value < 0) {
-        value = 0;
+    float grams = 0.0f;
+    if (t4s3_scale_is_ready()) {
+        grams = t4s3_scale_current_grams();
+    } else {
+        grams = (simTenths - gefaessMeasureTareTenths) / 10.0f;
     }
-    return value;
+
+    if (grams < 0.0f) {
+        grams = 0.0f;
+    }
+    return static_cast<int32_t>(grams * 10.0f + 0.5f);
 }
 
 void update_gefaess_measure_weight_display()
@@ -763,7 +905,9 @@ void update_gefaess_measure_weight_display()
     }
 
     char grams[18];
-    if (gefaessMeasureStep == 1) {
+    if (t4s3_scale_is_ready()) {
+        format_grams_float(grams, sizeof(grams), t4s3_scale_current_grams());
+    } else if (gefaessMeasureStep == 1) {
         format_grams(grams, sizeof(grams), simTenths);
     } else {
         format_grams(grams, sizeof(grams), current_gefaess_measure_tenths());
@@ -1585,27 +1729,65 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "settings_waage") == 0) {
         navigate_to(Page::SettingsWaage);
     } else if (strcmp(action, "scale_calibration") == 0) {
+        scaleCalibrationStep = 1;
+        scaleCalibrationTargetTenths = 2000;
+        scaleCalibrationIncrementIndex = 2;
         open_scale_calibration_overlay();
     } else if (strcmp(action, "scale_cal_close") == 0) {
         close_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_to_load") == 0) {
+        scaleCalibrationStep = 2;
+        open_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_back_tare") == 0) {
+        scaleCalibrationStep = 1;
+        open_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_to_weight") == 0) {
+        scaleCalibrationStep = 3;
+        open_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_to_confirm") == 0) {
+        scaleCalibrationStep = 4;
+        open_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_back_weight") == 0) {
+        scaleCalibrationStep = 3;
+        open_scale_calibration_overlay();
+    } else if (strcmp(action, "scale_cal_back_load") == 0) {
+        scaleCalibrationStep = 2;
+        open_scale_calibration_overlay();
     } else if (strcmp(action, "scale_cal_tare") == 0) {
         if (t4s3_scale_tare()) {
+            update_hx711_grams_display(0.0f, true);
             update_scale_calibration_display();
             update_status("Tara gesetzt");
         } else {
             update_status("Tara nicht möglich - HX711 nicht bereit");
         }
-    } else if (strcmp(action, "scale_cal_100") == 0) {
-        if (t4s3_scale_calibrate(100.0f)) {
-            update_scale_calibration_display();
-            update_status("Kalibrierung mit 100 g gespeichert");
+    } else if (strcmp(action, "scale_cal_weight_dec") == 0) {
+        const int32_t inc = kScaleCalIncrementsTenths[scaleCalibrationIncrementIndex];
+        scaleCalibrationTargetTenths = scaleCalibrationTargetTenths > inc ? scaleCalibrationTargetTenths - inc : 10;
+        update_scale_calibration_display();
+    } else if (strcmp(action, "scale_cal_weight_inc") == 0) {
+        const int32_t inc = kScaleCalIncrementsTenths[scaleCalibrationIncrementIndex];
+        scaleCalibrationTargetTenths = scaleCalibrationTargetTenths + inc > 50000 ? 50000 : scaleCalibrationTargetTenths + inc;
+        update_scale_calibration_display();
+    } else if (strcmp(action, "scale_cal_step_dec") == 0) {
+        if (scaleCalibrationIncrementIndex > 0) {
+            --scaleCalibrationIncrementIndex;
         } else {
-            update_status("Kalibrierung fehlgeschlagen");
+            scaleCalibrationIncrementIndex = kScaleCalIncrementCount - 1;
         }
-    } else if (strcmp(action, "scale_cal_200") == 0) {
-        if (t4s3_scale_calibrate(200.0f)) {
-            update_scale_calibration_display();
-            update_status("Kalibrierung mit 200 g gespeichert");
+        update_scale_calibration_display();
+    } else if (strcmp(action, "scale_cal_step_inc") == 0) {
+        scaleCalibrationIncrementIndex = (scaleCalibrationIncrementIndex + 1) % kScaleCalIncrementCount;
+        update_scale_calibration_display();
+    } else if (strcmp(action, "scale_cal_save") == 0) {
+        const float calibrationWeight = static_cast<float>(scaleCalibrationTargetTenths) / 10.0f;
+        if (t4s3_scale_calibrate(calibrationWeight)) {
+            char msg[64];
+            char grams[24];
+            format_grams(grams, sizeof(grams), scaleCalibrationTargetTenths);
+            snprintf(msg, sizeof(msg), "Kalibrierung mit %s gespeichert", grams);
+            close_scale_calibration_overlay();
+            update_status(msg);
         } else {
             update_status("Kalibrierung fehlgeschlagen");
         }
@@ -1647,11 +1829,21 @@ static void button_event_cb(lv_event_t *event)
             render_gefaess_measure_overlay();
         }
     } else if (strcmp(action, "gefaess_measure_tara") == 0) {
-        gefaessMeasureTareTenths = simTenths;
-        simTenths = 0;
-        set_text(weightLabel, "0,0 g");
-        update_gefaess_measure_weight_display();
-        update_status("Tara für Gefäßmessung gesetzt");
+        if (t4s3_scale_is_ready()) {
+            if (t4s3_scale_tare()) {
+                update_hx711_grams_display(0.0f, true);
+                update_gefaess_measure_weight_display();
+                update_status("Tara für Gefäßmessung gesetzt");
+            } else {
+                update_status("Tara nicht möglich - HX711 nicht bereit");
+            }
+        } else {
+            gefaessMeasureTareTenths = simTenths;
+            simTenths = 0;
+            set_text(weightLabel, "0,0 g");
+            update_gefaess_measure_weight_display();
+            update_status("Demo-Tara für Gefäßmessung gesetzt");
+        }
     } else if (strcmp(action, "gefaess_measure_to_load") == 0) {
         gefaessMeasureStep = 2;
         render_gefaess_measure_overlay();
@@ -3014,6 +3206,8 @@ void ui_t4s3_tick()
     }
     update_gefaess_measure_weight_display();
 }
+
+
 
 
 
