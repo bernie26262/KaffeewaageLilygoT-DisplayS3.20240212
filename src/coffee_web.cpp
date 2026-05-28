@@ -60,7 +60,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         </button>
       </div>
     </div>
-    <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
+    <div class="weight-row">
+      <button id="scaleMaintenanceButton" class="maintenance-jump-button hidden" type="button">Wartung: 1 Hinweis</button>
+      <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
+    </div>
     <span style="display:none">Status: <b><span id="status">---</span></b></span>
 
     <div class="scale-controls">
@@ -88,7 +91,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <div id="timerPage" class="page hidden">
   <section class="card">
     <div class="label">Stoppuhr</div>
-    <div class="value" id="stopwatch">00:00:00:0</div>
+    <div class="value stopwatch-value" id="stopwatch">00:00:00:0</div>
     <div class="grid" style="margin-top: 12px;">
       <button id="swToggle" class="secondary" disabled>Start / Stop</button>
       <button id="swReset" class="secondary" disabled>Reset</button>
@@ -97,10 +100,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="statsPage" class="page hidden">
-  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
-    <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
-    <ul class="maintenance-list" id="maintenanceList"></ul>
-  </section>
+  <button id="statsMaintenanceButton" class="maintenance-jump-button stats-maintenance-button hidden" type="button">Wartung: 1 Hinweis</button>
 
   <section class="card">
     <div class="stats-grid">
@@ -350,7 +350,6 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .pill.ok { background: var(--accent-soft); color: #bbf7d0; border-color: rgba(85,195,66,.36); }
     /* ===== Wartung ===== */
     .maintenance { display: none; border-left: 6px solid var(--accent); }
-    .maintenance-alert { order: -1; }
     .maintenance.show { display: block; }
     .maintenance.ok { border-left-color: var(--accent); background: linear-gradient(180deg, rgba(20,34,53,.96), rgba(11,31,22,.92)); }
     .maintenance.warn { border-left-color: var(--danger); background: linear-gradient(180deg, rgba(45,23,28,.96), rgba(24,16,24,.92)); }
@@ -361,9 +360,30 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .maintenance-item { margin: 4px 0; }
     .maintenance-item.ok { color: #bbf7d0; }
     .maintenance-item.due { color: #fecaca; font-weight: 750; }
+    .maintenance-jump-button {
+      width: auto;
+      min-width: 0;
+      justify-self: start;
+      align-self: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(239,68,68,.55);
+      background: rgba(239,68,68,.18);
+      color: #fecaca;
+      box-shadow: none;
+      font-size: .95rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .maintenance-jump-button:hover { background: rgba(239,68,68,.26); }
+    .maintenance-jump-button:active { transform: translateY(1px); }
+    .maintenance-jump-button.hidden { display: none; }
+    .stats-maintenance-button { margin: 0 0 12px 0; }
     /* ===== Autodetect / Gewichtskarte ===== */
     .scale-card { display: grid; gap: 12px; }
     .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .weight-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
+    .weight-row .weight { flex: 1 1 auto; min-width: 0; margin-left: auto; }
     .autodetect-row { display: inline-flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0; padding: 0; border-bottom: 0; white-space: nowrap; }
     .autodetect-toggle {
       width: auto;
@@ -385,7 +405,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .autodetect-led { width: 11px; height: 11px; border-radius: 50%; background: #64748b; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
     .autodetect-led.on { background: var(--accent); box-shadow: 0 0 0 3px rgba(85,195,66,.20), 0 0 12px rgba(85,195,66,.75); }
     .weight {
-      font-size: 4rem;
+      font-size: 3rem;
       line-height: 1;
       font-weight: 800;
       letter-spacing: -0.06em;
@@ -395,7 +415,18 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       color: #f8fafc;
       text-shadow: 0 10px 28px rgba(0,0,0,.36);
     }
-    .weight .unit { font-size: 2rem; letter-spacing: 0; margin-left: 6px; color: var(--muted-2); }
+    .weight .unit { font-size: 1.5rem; letter-spacing: 0; margin-left: 6px; color: var(--muted-2); }
+    .stopwatch-value {
+      font-size: 3rem;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: -0.06em;
+      margin: 12px 0 4px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #f8fafc;
+      text-shadow: 0 10px 28px rgba(0,0,0,.36);
+    }
     .scale-controls { display: grid; gap: 12px; margin-top: 14px; }
     .scale-target-row, .scale-select-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .scale-target-row .label, .scale-select-row .label { min-width: 92px; }
@@ -404,6 +435,17 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .label { color: var(--muted); font-size: .86rem; }
     .value { font-size: 1.25rem; font-weight: 650; margin-top: 4px; color: var(--text); }
+    .value.stopwatch-value {
+      font-size: 3rem;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: -0.06em;
+      margin: 12px 0 4px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #f8fafc;
+      text-shadow: 0 10px 28px rgba(0,0,0,.36);
+    }
     button {
       width: 100%;
       border: 1px solid rgba(85,195,66,.36);
@@ -600,7 +642,9 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     @media (max-width: 640px) {
       body { padding: 14px 14px calc(96px + env(safe-area-inset-bottom)); }
       .grid, .stats-grid { grid-template-columns: 1fr; }
-      .weight { font-size: 3.4rem; }
+      .weight, .stopwatch-value { font-size: 2.55rem; }
+      .weight-row { flex-direction: column; align-items: stretch; }
+      .maintenance-jump-button { width: 100%; justify-content: center; }
       .weight-head { align-items: flex-start; }
       .autodetect-row { margin-left: auto; }
       button.compact, .button-row, .nav-button { width: 100%; }
@@ -651,13 +695,17 @@ const fmtKg = g => (Number(g || 0) / 1000).toFixed(2);
 const fmtWholeG = g => String(Math.round(Number(g || 0)));
 const pad2 = n => String(Math.max(0, Math.floor(Number(n) || 0))).padStart(2, '0');
 const fmtStopwatchTime = ms => {
-  ms = Number(ms || 0);
+  ms = Math.max(0, Number(ms || 0));
   const totalSeconds = Math.floor(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
+  const days = Math.floor(totalSeconds / 86400);
+  const h = Math.floor((totalSeconds % 86400) / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = totalSeconds % 60;
   const d = Math.floor((ms % 1000) / 100);
-  return `${pad2(h)}:${pad2(m)}:${pad2(s)}:${d}`;
+  const clock = `${pad2(h)}:${pad2(m)}:${pad2(s)}:${d}`;
+  if (days === 1) return `1 Tag, ${clock}`;
+  if (days > 1) return `${days} Tage, ${clock}`;
+  return clock;
 };
 const fmtDayClockDuration = seconds => {
   const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
@@ -716,6 +764,11 @@ function showSettingsTab(targetPanelId) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-current', active ? 'page' : 'false');
   });
+}
+
+function openMaintenanceSettings() {
+  showTab('settingsPage');
+  showSettingsTab('settingsMaintenancePanel');
 }
 
 // ===== Bestaetigungs-Overlay =====
@@ -1078,15 +1131,23 @@ function adjustedMaintenanceSeconds(key, fallbackSecondsToDue) {
   return Math.floor(diffMs / 1000);
 }
 
+function maintenanceButtonText(dueCount) {
+  if (dueCount <= 0) return 'Wartung: ok';
+  return dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
+}
+
+function updateMaintenanceJumpButton(button, dueCount) {
+  if (!button) return;
+  button.classList.toggle('hidden', dueCount <= 0);
+  button.textContent = maintenanceButtonText(dueCount);
+}
+
 function renderMaintenance(m) {
-  const card = el('maintenanceCard');
-  const title = el('maintenanceTitle');
-  const list = el('maintenanceList');
+  const scaleButton = el('scaleMaintenanceButton');
+  const statsButton = el('statsMaintenanceButton');
   const detailCard = el('maintenanceDetailCard');
   const detailTitle = el('maintenanceDetailTitle');
   const detailList = el('maintenanceDetailList');
-
-  if (!card || !title || !list) return;
 
   const lines = [
     maintenanceLine('Kaffeemaschine reinigen', adjustedMaintenanceSeconds('machine', m?.machine_seconds_to_due)),
@@ -1098,41 +1159,21 @@ function renderMaintenance(m) {
   // Dadurch erscheint der Warnhinweis auch dann sofort, wenn ein Countdown im geöffneten Browser auf 0 kippt.
   const dueCount = lines.filter(line => line.due).length;
 
-  // Dashboard: nur anzeigen, wenn Wartung wirklich fällig ist.
-  card.classList.toggle('show', dueCount > 0);
-  card.classList.toggle('warn', dueCount > 0);
-  card.classList.toggle('ok', false);
-
-  if (!lastState?.time?.valid) {
-    if (dueCount > 0) {
-      title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
-      list.innerHTML = '<li class="maintenance-item due">Wartung erforderlich. Uhrzeit noch nicht synchronisiert.</li>';
-    } else {
-      title.textContent = 'Wartung: ok';
-      list.innerHTML = '';
-    }
-
-    if (detailCard && detailTitle && detailList) {
-      detailCard.classList.add('show');
-      detailCard.classList.toggle('warn', dueCount > 0);
-      detailCard.classList.toggle('ok', dueCount === 0);
-      detailTitle.textContent = 'Wartungszeiten';
-      detailList.innerHTML = '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>';
-    }
-    return;
-  }
-
-  title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
-  list.innerHTML = lines
-    .filter(line => line.due)
-    .map(line => `<li class="maintenance-item due">${line.text}</li>`)
-    .join('');
+  updateMaintenanceJumpButton(scaleButton, dueCount);
+  updateMaintenanceJumpButton(statsButton, dueCount);
 
   // Einstellungen: immer alle Details anzeigen.
   if (detailCard && detailTitle && detailList) {
     detailCard.classList.add('show');
     detailCard.classList.toggle('warn', dueCount > 0);
     detailCard.classList.toggle('ok', dueCount === 0);
+
+    if (!lastState?.time?.valid) {
+      detailTitle.textContent = 'Wartungszeiten';
+      detailList.innerHTML = '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>';
+      return;
+    }
+
     detailTitle.textContent = dueCount === 0
       ? 'Wartungszeiten'
       : (dueCount === 1 ? 'Wartungszeiten: 1 Hinweis' : `Wartungszeiten: ${dueCount} Hinweise`);
@@ -1653,6 +1694,8 @@ function bindDashboardHandlers() {
   el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
   el('targetWeight').addEventListener('keydown', handleTargetWeightKeyDown);
   el('autodetectToggle').addEventListener('click', handleAutodetectToggleClick);
+  el('scaleMaintenanceButton').addEventListener('click', openMaintenanceSettings);
+  el('statsMaintenanceButton').addEventListener('click', openMaintenanceSettings);
 }
 
 function bindNavigationHandlers() {
