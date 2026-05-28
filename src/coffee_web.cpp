@@ -245,6 +245,22 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </section>
 
     <section class="card">
+      <div class="stats-title">HMI-Display</div>
+      <div class="small">Backlight automatisch ausschalten.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <label>Timeout
+          <select id="displayTimeoutSelect">
+            <option value="1">1 Minute</option>
+            <option value="5">5 Minuten</option>
+            <option value="10">10 Minuten</option>
+            <option value="30">30 Minuten</option>
+            <option value="0">Aus</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
       <div class="stats-title">Log</div>
       <div class="small">Letzte WebUI-/Systemmeldung.</div>
       <div class="log mono" id="log"></div>
@@ -623,7 +639,8 @@ const CMD = Object.freeze({
   maintenanceResetGrinder: 'maintenance_reset_grinder',
   maintenanceResetFilter: 'maintenance_reset_filter',
   restartDevice: 'restart_device',
-  setStatsTotalsPrefix: 'set_stats_totals_'
+  setStatsTotalsPrefix: 'set_stats_totals_',
+  setDisplayTimeoutPrefix: 'set_display_timeout_'
 });
 const fmtG = v => {
   let n = Number(v || 0);
@@ -1259,6 +1276,15 @@ function renderWifiSignal(s) {
   setText('statsWifiSignalRssi', rssiText);
 }
 
+function renderDisplayTimeout(s) {
+  const select = el('displayTimeoutSelect');
+  if (!select) return;
+  const minutes = String(s.system?.display_timeout_minutes ?? 10);
+  if (document.activeElement !== select && select.value !== minutes) {
+    select.value = minutes;
+  }
+}
+
 function renderStatsAndSystem(s) {
   setText('shotsTotal', s.stats?.shots?.total ?? 0);
   setText('shotsMachine', s.stats?.shots?.since_machine_clean ?? 0);
@@ -1277,6 +1303,7 @@ function renderStatsAndSystem(s) {
   setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
   setText('wifiSsid', s.system?.wifi_ssid || '---');
   renderWifiSignal(s);
+  renderDisplayTimeout(s);
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
   setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
@@ -1582,6 +1609,14 @@ function handleGefaessListClick(e) {
   );
 }
 
+function handleDisplayTimeoutChange() {
+  const select = el('displayTimeoutSelect');
+  const minutes = Number(select.value);
+  if (![0, 1, 5, 10, 30].includes(minutes)) return;
+  const label = minutes === 0 ? 'aus' : `${minutes} Minute${minutes === 1 ? '' : 'n'}`;
+  sendCommand(`${CMD.setDisplayTimeoutPrefix}${minutes}`, `Display-Timeout gesendet: ${label}`);
+}
+
 function handleGlobalKeyDown(e) {
   if (el('confirmOverlay').classList.contains('show')) {
     if (e.key === 'Escape') {
@@ -1656,6 +1691,7 @@ function bindSettingsHandlers() {
   ));
   el('startWifiSetupAp').addEventListener('click', () => setWifiSetupApEnabled(true));
   el('stopWifiSetupAp').addEventListener('click', () => setWifiSetupApEnabled(false));
+  el('displayTimeoutSelect').addEventListener('change', handleDisplayTimeoutChange);
   el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
   el('restartDevice').addEventListener('click', () => openConfirmOverlay(
     'ESP32 wirklich neu starten?',
@@ -2309,6 +2345,7 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi_setup_ap_ip"] = coffeeWifiSetupApIp();
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
+  doc["system"]["display_timeout_minutes"] = s.system.display_timeout_minutes;
 
   String out;
   serializeJson(doc, out);

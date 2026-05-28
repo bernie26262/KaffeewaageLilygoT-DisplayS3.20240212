@@ -128,6 +128,25 @@ void coffeeStorageLoadSiebtraegerNames(
   preferences.end();
 }
 
+void coffeeStorageSaveDisplayTimeoutMinutes(
+  Preferences& preferences,
+  uint16_t minutes)
+{
+  preferences.begin(STORAGE_NAMESPACE, RW_MODE);
+  preferences.putUShort("dispTmoMin", minutes);
+  preferences.end();
+}
+
+uint16_t coffeeStorageLoadDisplayTimeoutMinutes(
+  Preferences& preferences,
+  uint16_t defaultMinutes)
+{
+  preferences.begin(STORAGE_NAMESPACE, RO_MODE);
+  const uint16_t minutes = preferences.getUShort("dispTmoMin", defaultMinutes);
+  preferences.end();
+  return minutes;
+}
+
 void coffeeStorageSaveAutodetect(
   Preferences& preferences,
   bool autoDetect)

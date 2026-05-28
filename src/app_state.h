@@ -78,6 +78,7 @@ struct SystemState {
   uint32_t uptime_ms = 0;
   bool web_wizard_active = false;
   bool autodetect_paused = false;
+  uint16_t display_timeout_minutes = 10;
 };
 
 struct StatusState {

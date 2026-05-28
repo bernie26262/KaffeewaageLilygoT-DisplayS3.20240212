@@ -269,6 +269,23 @@ static void normaliseSiebtraegerNamesForHmi()
   syncSiebtraegerMenuItems();
 }
 
+static constexpr uint16_t DISPLAY_TIMEOUT_OFF_MINUTES = 0;
+static constexpr uint16_t DISPLAY_TIMEOUT_DEFAULT_MINUTES = 10;
+
+static bool isAllowedDisplayTimeoutMinutes(uint16_t minutes)
+{
+  return minutes == DISPLAY_TIMEOUT_OFF_MINUTES ||
+         minutes == 1 ||
+         minutes == 5 ||
+         minutes == 10 ||
+         minutes == 30;
+}
+
+static uint16_t normaliseDisplayTimeoutMinutes(uint16_t minutes)
+{
+  return isAllowedDisplayTimeoutMinutes(minutes) ? minutes : DISPLAY_TIMEOUT_DEFAULT_MINUTES;
+}
+
 static int hexValue(char c)
 {
   if (c >= '0' && c <= '9') return c - '0';
@@ -584,6 +601,7 @@ bool display_BisOderSeit_FilterChange = 0;
 bool oldDisplay_BisOderSeit_FilterChange = 0;
 
 
+uint16_t displayTimeoutMinutes = DISPLAY_TIMEOUT_DEFAULT_MINUTES;
 unsigned long delayTimeDisplayOff = 600000;                      // Display ausschalten nach 10 Minuten
 unsigned long lastActionAgainstDisplayOff = 0;
 bool displayOff = 0;
@@ -793,6 +811,7 @@ static void updateCoffeeAppStateFromGlobals()
   }
   appState.system.web_wizard_active = webWizardActive;
   appState.system.autodetect_paused = webWizardActive && webWizardAutodetectPaused;
+  appState.system.display_timeout_minutes = displayTimeoutMinutes;
   appState.system.uptime_ms = millis();
 }
 
@@ -802,6 +821,7 @@ void RefreshTFTDisplay();
 void RefreshTFTCursor();
 void RefreshTFTTaraWait();
 void RefreshTFTTaraFinished();
+void DisplayOnOff();
 void doTara();
 void stringifySetWeight();
 void CalibrateSetWeight();
@@ -1318,6 +1338,7 @@ static constexpr const char* PREFIX_SCALE_CALIBRATION_APPLY_WEIGHT = "scale_cali
 static constexpr const char* PREFIX_SELECT_GEFAESS = "select_gefaess_";
 static constexpr const char* PREFIX_DELETE_GEFAESS = "delete_gefaess_";
 static constexpr const char* PREFIX_SET_STATS_TOTALS = "set_stats_totals_";
+static constexpr const char* PREFIX_SET_DISPLAY_TIMEOUT = "set_display_timeout_";
 
 static bool handleWebSelectionCommand(const char* cmd, bool& handled)
 {
@@ -1533,6 +1554,28 @@ static bool parseAndSetCoffeeStatsTotalsFromWeb(const char* cmd)
   );
 }
 
+static bool setDisplayTimeoutFromWeb(uint16_t minutes)
+{
+  if (!isAllowedDisplayTimeoutMinutes(minutes)) {
+    return false;
+  }
+
+  displayTimeoutMinutes = normaliseDisplayTimeoutMinutes(minutes);
+  delayTimeDisplayOff = static_cast<unsigned long>(displayTimeoutMinutes) * 60000UL;
+  coffeeStorageSaveDisplayTimeoutMinutes(preferences, displayTimeoutMinutes);
+  lastActionAgainstDisplayOff = millis();
+
+  if (displayOff != 0) {
+    displayOff = 0;
+    DisplayOnOff();
+    RefreshTFTDisplay();
+    RefreshTFTCursor();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
 static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
 {
   handled = true;
@@ -1563,6 +1606,14 @@ static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
 
   if (cmdStartsWith(cmd, PREFIX_SET_STATS_TOTALS)) {
     return parseAndSetCoffeeStatsTotalsFromWeb(cmd);
+  }
+
+  if (cmdStartsWith(cmd, PREFIX_SET_DISPLAY_TIMEOUT)) {
+    const int minutes = atoi(cmd + strlen(PREFIX_SET_DISPLAY_TIMEOUT));
+    if (minutes < 0) {
+      return false;
+    }
+    return setDisplayTimeoutFromWeb(static_cast<uint16_t>(minutes));
   }
 
   if (cmdEquals(cmd, CMD_RESTART_DEVICE)) {
@@ -4137,6 +4188,8 @@ void setup()
     lastTimeFilterWechselNTP);
   coffeeStorageLoadSiebtraegerNames(preferences, siebtraeger, SIEBTRAEGER_COUNT);
   normaliseSiebtraegerNamesForHmi();
+  displayTimeoutMinutes = normaliseDisplayTimeoutMinutes(coffeeStorageLoadDisplayTimeoutMinutes(preferences, DISPLAY_TIMEOUT_DEFAULT_MINUTES));
+  delayTimeDisplayOff = static_cast<unsigned long>(displayTimeoutMinutes) * 60000UL;
   debug("Nonvolatile Storage (NVS) initialized = ");
   debugln(nvsInitialised);
 
@@ -4390,7 +4443,7 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
 
   // Display off and on
 
-  if (millis() - lastActionAgainstDisplayOff >= delayTimeDisplayOff)
+  if (delayTimeDisplayOff > 0 && millis() - lastActionAgainstDisplayOff >= delayTimeDisplayOff)
   {
     displayOff = 1;       
     DisplayOnOff();                                                      // Display wird wieder angestellt bei drücken der tasten oder drehen oder drücken des Encoders oder Auflegen oder Abheben des Siebträgers.

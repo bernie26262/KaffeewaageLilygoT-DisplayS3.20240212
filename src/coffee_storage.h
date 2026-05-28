@@ -56,6 +56,14 @@ void coffeeStorageLoadSiebtraegerNames(
   String* names,
   size_t count);
 
+void coffeeStorageSaveDisplayTimeoutMinutes(
+  Preferences& preferences,
+  uint16_t minutes);
+
+uint16_t coffeeStorageLoadDisplayTimeoutMinutes(
+  Preferences& preferences,
+  uint16_t defaultMinutes);
+
 void coffeeStorageSaveAutodetect(
   Preferences& preferences,
   bool autoDetect);
