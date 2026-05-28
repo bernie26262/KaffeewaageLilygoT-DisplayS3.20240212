@@ -110,6 +110,7 @@ lv_obj_t *wlanSetupApLabel = nullptr;
 lv_obj_t *wlanWebUiLabel = nullptr;
 lv_obj_t *wlanQualityBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *maintenanceWarningButton = nullptr;
+lv_obj_t *saveButton = nullptr;
 
 
 uint32_t lastSimMs = 0;
@@ -126,6 +127,7 @@ uint8_t autodetectDetectedGefaess = kNoDetectedGefaess;
 uint8_t autodetectPendingGefaess = kNoDetectedGefaess;
 uint8_t autodetectAutoTaredGefaess = kNoDetectedGefaess;
 uint32_t autodetectPendingSinceMs = 0;
+bool saveReady = false;
 uint16_t demoTotalShots = 0;
 uint16_t demoMachineShots = 0;
 uint16_t demoGrinderShots = 0;
@@ -197,6 +199,9 @@ void style_panel(lv_obj_t *obj);
 void style_label(lv_obj_t *obj, uint32_t color);
 void update_status(const char *msg);
 void update_autodetect_gefaess_preview();
+void update_save_button_display();
+void set_save_ready(bool ready);
+void update_save_ready_from_weight();
 void format_grams(char *buf, size_t len, int32_t tenths);
 void format_grams_float(char *buf, size_t len, float grams);
 void load_saved_ui_settings();
@@ -243,6 +248,7 @@ void reset_dynamic_labels()
     systemDataSignalLabel = nullptr;
     systemHx711RawLabel = nullptr;
     systemHx711GramsLabel = nullptr;
+    saveButton = nullptr;
     wlanStatusLabel = nullptr;
     wlanSsidLabel = nullptr;
     wlanIpLabel = nullptr;
@@ -405,6 +411,7 @@ void update_hx711_grams_display(float grams, bool valid)
     }
 
     update_autodetect_gefaess_preview();
+    update_save_ready_from_weight();
 }
 
 
@@ -529,6 +536,62 @@ void update_autodetect_display()
     }
 }
 
+void update_save_button_display()
+{
+    if (!saveButton || !lv_obj_is_valid(saveButton)) {
+        saveButton = nullptr;
+        return;
+    }
+
+    const uint32_t bg = saveReady ? COLOR_GREEN : COLOR_DIM;
+    const uint32_t border = saveReady ? COLOR_GREEN : COLOR_DIM;
+    const uint32_t text = saveReady ? COLOR_WHITE : COLOR_MUTED;
+
+    lv_obj_set_style_bg_color(saveButton, lv_color_hex(bg), 0);
+    lv_obj_set_style_border_color(saveButton, lv_color_hex(border), 0);
+    lv_obj_set_style_bg_color(saveButton, lv_color_hex(bg), LV_STATE_DISABLED);
+    lv_obj_set_style_border_color(saveButton, lv_color_hex(border), LV_STATE_DISABLED);
+
+    if (saveReady) {
+        lv_obj_clear_state(saveButton, LV_STATE_DISABLED);
+    } else {
+        lv_obj_add_state(saveButton, LV_STATE_DISABLED);
+    }
+
+    lv_obj_t *label = lv_obj_get_child(saveButton, 0);
+    if (label && lv_obj_is_valid(label)) {
+        lv_obj_set_style_text_color(label, lv_color_hex(text), 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(text), LV_STATE_DISABLED);
+    }
+}
+
+void set_save_ready(bool ready)
+{
+    if (saveReady == ready) {
+        update_save_button_display();
+        return;
+    }
+
+    saveReady = ready;
+    update_save_button_display();
+}
+
+void update_save_ready_from_weight()
+{
+    if (!autodetectEnabled ||
+        autodetectAutoTaredGefaess == kNoDetectedGefaess ||
+        !hx711DisplayValid ||
+        !t4s3_scale_is_ready() ||
+        !t4s3_scale_is_stable()) {
+        return;
+    }
+
+    if (!saveReady && fabsf(hx711DisplayGrams) <= 0.2f) {
+        set_save_ready(true);
+        update_status("Save bereit");
+    }
+}
+
 void update_autodetect_gefaess_preview()
 {
     const bool blocked =
@@ -562,6 +625,7 @@ void update_autodetect_gefaess_preview()
         // Beim Abheben erscheint deshalb ungefähr das negative Gefäßgewicht.
         // Erst bei stabilem Gewicht <= -30 g tarieren wir erneut auf leer.
         if (currentGrams <= -kGefaessRemovedThresholdGrams) {
+            set_save_ready(false);
             if (t4s3_scale_tare()) {
                 hx711DisplayGrams = 0.0f;
                 hx711DisplayValid = true;
@@ -646,6 +710,8 @@ void update_autodetect_gefaess_preview()
         autodetectPendingSinceMs = 0;
         return;
     }
+
+    set_save_ready(false);
 
     autodetectAutoTaredGefaess = bestSlot;
     autodetectPendingGefaess = kNoDetectedGefaess;
@@ -1763,6 +1829,7 @@ static void button_event_cb(lv_event_t *event)
                 set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
                 set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
                 update_status("Tara gesetzt");
+                set_save_ready(false);
             } else {
                 update_status("Tara fehlgeschlagen - HX711 nicht bereit");
             }
@@ -1772,25 +1839,35 @@ static void button_event_cb(lv_event_t *event)
             update_status("Tara gedrückt - Demo-Gewicht auf 0,0 g gesetzt");
         }
     } else if (strcmp(action, "save") == 0) {
-        if (simTenths <= 0) {
-            update_status("Save ignoriert - Demo-Gewicht ist 0,0 g");
+        if (!saveReady) {
+            update_status("Save noch nicht bereit");
             return;
         }
+
+        const int32_t saveTenths = hx711DisplayValid
+                                       ? static_cast<int32_t>(hx711DisplayGrams * 10.0f + (hx711DisplayGrams >= 0.0f ? 0.5f : -0.5f))
+                                       : simTenths;
+        if (saveTenths <= 0) {
+            update_status("Save ignoriert - Gewicht ist 0,0 g");
+            return;
+        }
+
         demoTotalShots++;
         demoMachineShots++;
         demoGrinderShots++;
         demoFilterShots++;
-        demoTotalGramsTenths += simTenths;
-        demoMachineGramsTenths += simTenths;
-        demoGrinderGramsTenths += simTenths;
-        demoFilterGramsTenths += simTenths;
+        demoTotalGramsTenths += saveTenths;
+        demoMachineGramsTenths += saveTenths;
+        demoGrinderGramsTenths += saveTenths;
+        demoFilterGramsTenths += saveTenths;
         update_demo_stats_display();
 
         char msg[96];
         char grams[24];
-        format_grams(grams, sizeof(grams), simTenths);
-        snprintf(msg, sizeof(msg), "Save gedrückt - Demo-Bezug %s gespeichert", grams);
+        format_grams(grams, sizeof(grams), saveTenths);
+        snprintf(msg, sizeof(msg), "Save gedrückt - Bezug %s gespeichert", grams);
         update_status(msg);
+        set_save_ready(false);
         save_current_ui_settings();
     } else if (strcmp(action, "autodetect") == 0) {
         autodetectEnabled = !autodetectEnabled;
@@ -1798,6 +1875,7 @@ static void button_event_cb(lv_event_t *event)
         autodetectPendingGefaess = kNoDetectedGefaess;
         autodetectAutoTaredGefaess = kNoDetectedGefaess;
         autodetectPendingSinceMs = 0;
+        set_save_ready(false);
         update_autodetect_display();
         update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
         save_current_ui_settings();
@@ -2674,8 +2752,9 @@ void create_waage_page(lv_obj_t *screen)
     lv_obj_t *tara = create_button(inputPanel, "Tara", "tara", 175, 78);
     lv_obj_align(tara, LV_ALIGN_TOP_MID, 0, 0);
 
-    lv_obj_t *save = create_button(inputPanel, "Save", "save", 175, 78);
-    lv_obj_align(save, LV_ALIGN_TOP_MID, 0, 90);
+    saveButton = create_button(inputPanel, "Save", "save", 175, 78);
+    lv_obj_align(saveButton, LV_ALIGN_TOP_MID, 0, 90);
+    update_save_button_display();
 
     lv_obj_t *vesselBtn = create_button(inputPanel, vessel_name(currentVesselIndex), "vessel_select", 175, 78);
     lv_obj_align(vesselBtn, LV_ALIGN_TOP_MID, 0, 180);
