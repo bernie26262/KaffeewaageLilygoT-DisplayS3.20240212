@@ -18,6 +18,9 @@ constexpr uint8_t kMaxGefaessSlots = 3;
 constexpr uint8_t kMaxSiebtraegerSlots = 4;
 constexpr uint8_t kScaleCalIncrementCount = 4;
 constexpr int32_t kScaleCalIncrementsTenths[kScaleCalIncrementCount] = {10, 50, 100, 1000};
+constexpr uint8_t kTotalsEditModeCount = 4;
+constexpr uint8_t kTotalsEditStepCount = 4;
+constexpr uint16_t kTotalsEditSteps[kTotalsEditStepCount] = {1, 5, 10, 100};
 constexpr uint8_t kNoDetectedGefaess = 0xFF;
 constexpr float kGefaessAutodetectToleranceGrams = 0.7f;
 constexpr uint32_t kGefaessAutoTareDelayMs = 800;
@@ -45,6 +48,7 @@ enum class Page : uint8_t {
     Settings,
     SettingsWartung,
     SettingsWaage,
+    SettingsTotals,
     SettingsWlan,
     SettingsSystem,
 };
@@ -115,6 +119,11 @@ lv_obj_t *wlanWebUiLabel = nullptr;
 lv_obj_t *wlanQualityBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *maintenanceWarningButton = nullptr;
 lv_obj_t *saveButton = nullptr;
+lv_obj_t *totalsEditOverlay = nullptr;
+lv_obj_t *totalsEditModeLabel = nullptr;
+lv_obj_t *totalsEditShotsLabel = nullptr;
+lv_obj_t *totalsEditGramsLabel = nullptr;
+lv_obj_t *totalsEditStepLabel = nullptr;
 
 
 uint32_t lastSimMs = 0;
@@ -141,6 +150,11 @@ int32_t demoTotalGramsTenths = 0;
 int32_t demoMachineGramsTenths = 0;
 int32_t demoGrinderGramsTenths = 0;
 int32_t demoFilterGramsTenths = 0;
+uint8_t totalsEditMode = 0;
+uint8_t totalsEditStepIndex = 0;
+bool totalsEditGramsMode = false;
+uint16_t totalsEditDraftShots[kTotalsEditModeCount] = {0, 0, 0, 0};
+int32_t totalsEditDraftGramsTenths[kTotalsEditModeCount] = {0, 0, 0, 0};
 int32_t targetTenthsBySiebtraeger[4] = {180, 90, 180, 180};
 int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT] = {-1, -1, -1};
 uint8_t gefaessMeasureStep = 0;
@@ -193,6 +207,13 @@ void render_gefaess_measure_overlay();
 void update_gefaess_measure_weight_display();
 void open_restart_overlay();
 void close_restart_overlay();
+void open_totals_edit_overlay(bool editGrams);
+void close_totals_edit_overlay(bool save);
+void update_totals_edit_display();
+void change_totals_edit_mode(int dir);
+void adjust_totals_edit_shots(int dir);
+void adjust_totals_edit_grams(int dir);
+void change_totals_edit_step(int dir);
 
 
 void open_maintenance_reset_overlay(const char *action);
@@ -259,6 +280,11 @@ void reset_dynamic_labels()
     systemHx711RawLabel = nullptr;
     systemHx711GramsLabel = nullptr;
     saveButton = nullptr;
+    totalsEditOverlay = nullptr;
+    totalsEditModeLabel = nullptr;
+    totalsEditShotsLabel = nullptr;
+    totalsEditGramsLabel = nullptr;
+    totalsEditStepLabel = nullptr;
     wlanStatusLabel = nullptr;
     wlanSsidLabel = nullptr;
     wlanIpLabel = nullptr;
@@ -1925,6 +1951,205 @@ void open_maintenance_reset_overlay(const char *action)
     lv_obj_move_foreground(maintenanceResetOverlay);
     update_status("Wartungs-Reset bestätigen oder abbrechen");
 }
+
+const char *totals_edit_mode_name(uint8_t mode)
+{
+    switch (mode) {
+    case 0: return "Gesamt";
+    case 1: return "Kaffeemaschine";
+    case 2: return "Kaffeemühle";
+    case 3: return "Filter";
+    default: return "Gesamt";
+    }
+}
+
+void load_totals_edit_drafts()
+{
+    totalsEditDraftShots[0] = demoTotalShots;
+    totalsEditDraftShots[1] = demoMachineShots;
+    totalsEditDraftShots[2] = demoGrinderShots;
+    totalsEditDraftShots[3] = demoFilterShots;
+
+    totalsEditDraftGramsTenths[0] = demoTotalGramsTenths;
+    totalsEditDraftGramsTenths[1] = demoMachineGramsTenths;
+    totalsEditDraftGramsTenths[2] = demoGrinderGramsTenths;
+    totalsEditDraftGramsTenths[3] = demoFilterGramsTenths;
+}
+
+void apply_totals_edit_drafts()
+{
+    demoTotalShots = totalsEditDraftShots[0];
+    demoMachineShots = totalsEditDraftShots[1];
+    demoGrinderShots = totalsEditDraftShots[2];
+    demoFilterShots = totalsEditDraftShots[3];
+
+    demoTotalGramsTenths = totalsEditDraftGramsTenths[0];
+    demoMachineGramsTenths = totalsEditDraftGramsTenths[1];
+    demoGrinderGramsTenths = totalsEditDraftGramsTenths[2];
+    demoFilterGramsTenths = totalsEditDraftGramsTenths[3];
+}
+
+void update_totals_edit_display()
+{
+    char buf[40];
+
+    // Es werden bewusst nur die Gesamtwerte korrigiert.
+    // Die Wartungszaehler werden ueber die Wartungs-Reset-Funktionen gepflegt.
+    if (totalsEditGramsMode) {
+        format_grams(buf, sizeof(buf), totalsEditDraftGramsTenths[0]);
+    } else {
+        snprintf(buf, sizeof(buf), "%u", totalsEditDraftShots[0]);
+    }
+    set_text_if_changed(totalsEditShotsLabel, buf);
+
+    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(kTotalsEditSteps[totalsEditStepIndex]));
+    set_text_if_changed(totalsEditStepLabel, buf);
+}
+
+void change_totals_edit_mode(int dir)
+{
+    int next = static_cast<int>(totalsEditMode) + dir;
+    if (next < 0) {
+        next = kTotalsEditModeCount - 1;
+    } else if (next >= kTotalsEditModeCount) {
+        next = 0;
+    }
+    totalsEditMode = static_cast<uint8_t>(next);
+    update_totals_edit_display();
+}
+
+void adjust_totals_edit_shots(int dir)
+{
+    const int delta = static_cast<int>(kTotalsEditSteps[totalsEditStepIndex]) * dir;
+    int value = static_cast<int>(totalsEditDraftShots[0]) + delta;
+    if (value < 0) {
+        value = 0;
+    } else if (value > 9999) {
+        value = 9999;
+    }
+    totalsEditDraftShots[0] = static_cast<uint16_t>(value);
+    update_totals_edit_display();
+}
+
+void adjust_totals_edit_grams(int dir)
+{
+    const int32_t delta = static_cast<int32_t>(kTotalsEditSteps[totalsEditStepIndex]) * 10L * dir;
+    int32_t value = totalsEditDraftGramsTenths[0] + delta;
+    if (value < 0) {
+        value = 0;
+    } else if (value > 999990) {
+        value = 999990;
+    }
+    totalsEditDraftGramsTenths[0] = value;
+    update_totals_edit_display();
+}
+
+void change_totals_edit_step(int dir)
+{
+    int next = static_cast<int>(totalsEditStepIndex) + dir;
+    if (next < 0) {
+        next = kTotalsEditStepCount - 1;
+    } else if (next >= kTotalsEditStepCount) {
+        next = 0;
+    }
+    totalsEditStepIndex = static_cast<uint8_t>(next);
+    update_totals_edit_display();
+}
+
+void close_totals_edit_overlay(bool save)
+{
+    if (save) {
+        apply_totals_edit_drafts();
+        update_demo_stats_display();
+        save_current_ui_settings();
+        update_status("Gesamtwerte gespeichert");
+    } else {
+        update_status("Gesamtwerte nicht geändert");
+    }
+
+    if (totalsEditOverlay && lv_obj_is_valid(totalsEditOverlay)) {
+        lv_obj_del(totalsEditOverlay);
+    }
+    totalsEditOverlay = nullptr;
+    totalsEditModeLabel = nullptr;
+    totalsEditShotsLabel = nullptr;
+    totalsEditGramsLabel = nullptr;
+    totalsEditStepLabel = nullptr;
+    totalsEditGramsMode = false;
+}
+
+void open_totals_edit_overlay(bool editGrams)
+{
+    if (totalsEditOverlay) {
+        return;
+    }
+
+    load_totals_edit_drafts();
+    totalsEditMode = 0;
+    totalsEditStepIndex = 0;
+    totalsEditGramsMode = editGrams;
+
+    lv_obj_t *screen = lv_scr_act();
+    totalsEditOverlay = lv_obj_create(screen);
+    lv_obj_set_size(totalsEditOverlay, screenWidth, screenHeight);
+    lv_obj_align(totalsEditOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(totalsEditOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(totalsEditOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(totalsEditOverlay, 0, 0);
+    lv_obj_set_style_pad_all(totalsEditOverlay, 0, 0);
+    lv_obj_clear_flag(totalsEditOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(totalsEditOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 430, 258);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, editGrams ? "Gesamt-Mahlgut" : "Gesamt-Shots");
+    style_label(title, COLOR_GREEN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 2);
+lv_obj_t *valueMinus = create_button(panel, "-", editGrams ? "totals_grams_dec" : "totals_shots_dec", 56, 42);
+    lv_obj_align(valueMinus, LV_ALIGN_TOP_LEFT, 0, 56);
+
+    totalsEditShotsLabel = lv_label_create(panel);
+    lv_obj_set_width(totalsEditShotsLabel, 150);
+    lv_obj_set_style_text_align(totalsEditShotsLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(totalsEditShotsLabel, LV_LABEL_LONG_DOT);
+    style_label(totalsEditShotsLabel, COLOR_WHITE);
+    lv_obj_align(totalsEditShotsLabel, LV_ALIGN_TOP_MID, 0, 66);
+
+    lv_obj_t *valuePlus = create_button(panel, "+", editGrams ? "totals_grams_inc" : "totals_shots_inc", 56, 42);
+    lv_obj_align(valuePlus, LV_ALIGN_TOP_RIGHT, 0, 56);
+
+    lv_obj_t *stepTitle = lv_label_create(panel);
+    lv_label_set_text(stepTitle, "Schrittweite");
+    style_label(stepTitle, COLOR_MUTED);
+    lv_obj_align(stepTitle, LV_ALIGN_TOP_LEFT, 0, 110);
+
+    lv_obj_t *stepMinus = create_button(panel, "-", "totals_step_dec", 56, 40);
+    lv_obj_align(stepMinus, LV_ALIGN_TOP_LEFT, 0, 134);
+
+    totalsEditStepLabel = lv_label_create(panel);
+    lv_obj_set_width(totalsEditStepLabel, 120);
+    lv_obj_set_style_text_align(totalsEditStepLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(totalsEditStepLabel, COLOR_WHITE);
+    lv_obj_align(totalsEditStepLabel, LV_ALIGN_TOP_MID, 0, 143);
+
+    lv_obj_t *stepPlus = create_button(panel, "+", "totals_step_inc", 56, 40);
+    lv_obj_align(stepPlus, LV_ALIGN_TOP_RIGHT, 0, 134);
+
+    lv_obj_t *cancel = create_button(panel, "Abbr.", "totals_edit_cancel", 150, 46);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    lv_obj_t *save = create_button(panel, "Speichern", "totals_edit_save", 170, 46);
+    lv_obj_align(save, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+
+    update_totals_edit_display();
+    update_status(editGrams ? "Gesamt-Mahlgut korrigieren" : "Gesamt-Shots korrigieren");
+}
+
 static void button_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
@@ -2228,7 +2453,31 @@ static void button_event_cb(lv_event_t *event)
         }
         update_status("Gefäßgewicht gespeichert");
     } else if (strcmp(action, "totals_edit") == 0) {
-        update_status("Gesamtwerte ändern: Eingabe folgt später");
+        navigate_to(Page::SettingsTotals);
+    } else if (strcmp(action, "totals_shots_open") == 0) {
+        open_totals_edit_overlay(false);
+    } else if (strcmp(action, "totals_grams_open") == 0) {
+        open_totals_edit_overlay(true);
+    } else if (strcmp(action, "totals_mode_prev") == 0) {
+        change_totals_edit_mode(-1);
+    } else if (strcmp(action, "totals_mode_next") == 0) {
+        change_totals_edit_mode(1);
+    } else if (strcmp(action, "totals_shots_dec") == 0) {
+        adjust_totals_edit_shots(-1);
+    } else if (strcmp(action, "totals_shots_inc") == 0) {
+        adjust_totals_edit_shots(1);
+    } else if (strcmp(action, "totals_grams_dec") == 0) {
+        adjust_totals_edit_grams(-1);
+    } else if (strcmp(action, "totals_grams_inc") == 0) {
+        adjust_totals_edit_grams(1);
+    } else if (strcmp(action, "totals_step_dec") == 0) {
+        change_totals_edit_step(-1);
+    } else if (strcmp(action, "totals_step_inc") == 0) {
+        change_totals_edit_step(1);
+    } else if (strcmp(action, "totals_edit_cancel") == 0) {
+        close_totals_edit_overlay(false);
+    } else if (strcmp(action, "totals_edit_save") == 0) {
+        close_totals_edit_overlay(true);
     } else if (strcmp(action, "settings_wlan") == 0) {
         navigate_to(Page::SettingsWlan);
     } else if (strcmp(action, "wlan_start_setup") == 0) {
@@ -2428,11 +2677,11 @@ draftTargetStepTenths = targetStepTenths;
 
 void close_vessel_overlay(bool save)
 {
-    if (save) {
+    if (save && draftVesselIndex != currentVesselIndex) {
         currentVesselIndex = draftVesselIndex;
         demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
         draftTargetTenths = demoTargetTenths;
-update_vessel_display();
+        update_vessel_display();
         update_target_display();
         save_current_ui_settings();
 
@@ -2445,10 +2694,10 @@ update_vessel_display();
 
     if (vesselOverlay) {
         lv_obj_del(vesselOverlay);
-        vesselOverlay = nullptr;
+    }
+    vesselOverlay = nullptr;
     for (uint8_t i = 0; i < kMaxSiebtraegerSlots; ++i) {
-            vesselOptionLabels[i] = nullptr;
-        }
+        vesselOptionLabels[i] = nullptr;
     }
 }
 
@@ -2563,7 +2812,7 @@ void open_vessel_overlay()
 
     lv_obj_t *panel = lv_obj_create(vesselOverlay);
     style_panel(panel);
-    lv_obj_set_size(panel, 430, 295);
+    lv_obj_set_size(panel, 430, 340);
     lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *title = lv_label_create(panel);
@@ -2579,8 +2828,8 @@ void open_vessel_overlay()
     };
 
     for (uint8_t i = 0; i < kMaxSiebtraegerSlots; ++i) {
-        lv_obj_t *option = create_button(panel, "", actions[i], 350, 48);
-        lv_obj_align(option, LV_ALIGN_TOP_MID, 0, 48 + i * 55);
+        lv_obj_t *option = create_button(panel, "", actions[i], 350, 44);
+        lv_obj_align(option, LV_ALIGN_TOP_MID, 0, 44 + i * 50);
 
         vesselOptionLabels[i] = lv_label_create(option);
         style_label(vesselOptionLabels[i], COLOR_WHITE);
@@ -2589,6 +2838,9 @@ void open_vessel_overlay()
         lv_obj_align(vesselOptionLabels[i], LV_ALIGN_LEFT_MID, 10, 0);
     }
     update_vessel_overlay_display();
+
+    lv_obj_t *close = create_button(panel, "Schließen", "vessel_cancel", 145, 44);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
 
     update_status("Siebträger direkt per Touch wählen");
 }
@@ -2786,6 +3038,7 @@ void create_nav(lv_obj_t *screen)
     const bool settingsActive = activePage == Page::Settings ||
                                 activePage == Page::SettingsWartung ||
                                 activePage == Page::SettingsWaage ||
+                                activePage == Page::SettingsTotals ||
                                 activePage == Page::SettingsWlan ||
                                 activePage == Page::SettingsSystem;
     lv_obj_t *navSettings = create_nav_button(screen, "Settings", "nav_settings", settingsActive);
@@ -3233,6 +3486,55 @@ void create_settings_wlan_page(lv_obj_t *screen)
                   "");
 }
 
+void create_settings_totals_page(lv_obj_t *screen)
+{
+    lv_obj_t *panel = lv_obj_create(screen);
+    style_panel(panel);
+    lv_obj_set_size(panel, 564, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    create_panel_title(panel, "Gesamtwerte");
+
+    lv_obj_t *back = create_button(panel, "Zurück", "settings_waage", 112, 40);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, 0, -4);
+
+    struct TotalsCard {
+        const char *title;
+        const char *line1;
+        const char *action;
+        int y;
+    };
+
+    const TotalsCard cards[] = {
+        {"Shots korrigieren", "Gesamt / Maschine / Mühle / Filter", "totals_shots_open", 48},
+        {"Mahlgut korrigieren", "Gesamt / Maschine / Mühle / Filter", "totals_grams_open", 142},
+    };
+
+    for (const auto &card : cards) {
+        lv_obj_t *btn = lv_btn_create(panel);
+        style_button(btn);
+        lv_obj_set_size(btn, 526, 78);
+        lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 0, card.y);
+        lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
+
+        lv_obj_t *title = lv_label_create(btn);
+        lv_label_set_text(title, card.title);
+        style_label(title, COLOR_GREEN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+        lv_obj_t *line1 = lv_label_create(btn);
+        lv_label_set_text(line1, card.line1);
+        style_label(line1, COLOR_WHITE);
+        lv_obj_align(line1, LV_ALIGN_TOP_LEFT, 0, 36);
+    }
+
+    create_footer(screen,
+                  "Gesamtwerte bereit",
+                  "");
+}
+
 void create_settings_waage_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
@@ -3501,6 +3803,9 @@ void build_current_page()
     case Page::SettingsWaage:
         create_settings_waage_page(screen);
         break;
+    case Page::SettingsTotals:
+        create_settings_totals_page(screen);
+        break;
     case Page::SettingsWlan:
         create_settings_wlan_page(screen);
         break;
@@ -3612,6 +3917,7 @@ void ui_t4s3_tick()
     }
     update_gefaess_measure_weight_display();
 }
+
 
 
 
