@@ -30,6 +30,8 @@ constexpr uint32_t COLOR_GREEN_DARK = 0x1F5F3D;
 constexpr uint32_t COLOR_WHITE = 0xFFFFFF;
 constexpr uint32_t COLOR_MUTED = 0xA8B8A8;
 constexpr uint32_t COLOR_DIM = 0x5F705F;
+constexpr uint32_t COLOR_AUTODETECT_LED_ON = 0x00FF4A;
+constexpr uint32_t COLOR_AUTODETECT_LED_OFF = 0x232A26;
 
 constexpr uint16_t SCREEN_W = 600;
 constexpr uint16_t SCREEN_H = 450;
@@ -128,6 +130,7 @@ uint8_t autodetectPendingGefaess = kNoDetectedGefaess;
 uint8_t autodetectAutoTaredGefaess = kNoDetectedGefaess;
 uint32_t autodetectPendingSinceMs = 0;
 bool saveReady = false;
+bool manualTareSaveArmed = false;
 uint16_t demoTotalShots = 0;
 uint16_t demoMachineShots = 0;
 uint16_t demoGrinderShots = 0;
@@ -532,7 +535,7 @@ void update_autodetect_display()
 {
     set_text(autodetectStateLabel, "Auto");
     if (autodetectLed) {
-        lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEnabled ? COLOR_GREEN : COLOR_DIM), 0);
+        lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEnabled ? COLOR_AUTODETECT_LED_ON : COLOR_AUTODETECT_LED_OFF), 0);
     }
 }
 
@@ -578,11 +581,43 @@ void set_save_ready(bool ready)
 
 void update_save_ready_from_weight()
 {
-    if (!autodetectEnabled ||
-        autodetectAutoTaredGefaess == kNoDetectedGefaess ||
-        !hx711DisplayValid ||
+    if (!hx711DisplayValid ||
         !t4s3_scale_is_ready() ||
         !t4s3_scale_is_stable()) {
+        return;
+    }
+
+    if (autodetectEnabled) {
+        if (autodetectAutoTaredGefaess == kNoDetectedGefaess) {
+            return;
+        }
+
+        if (!saveReady && fabsf(hx711DisplayGrams) <= 0.2f) {
+            set_save_ready(true);
+            update_status("Save bereit");
+        }
+        return;
+    }
+
+    if (!manualTareSaveArmed) {
+        return;
+    }
+
+    if (saveReady && hx711DisplayGrams <= -kGefaessRemovedThresholdGrams) {
+        if (t4s3_scale_tare()) {
+            hx711DisplayGrams = 0.0f;
+            hx711DisplayValid = true;
+            set_text(weightLabel, "0,0 g");
+            set_text_if_changed(systemHx711GramsLabel, "0,0 g");
+            set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
+            set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+            update_status("Gewicht entfernt - Tara gesetzt");
+        } else {
+            update_status("Tara nach Entfernen fehlgeschlagen");
+        }
+
+        manualTareSaveArmed = false;
+        set_save_ready(false);
         return;
     }
 
@@ -1828,13 +1863,15 @@ static void button_event_cb(lv_event_t *event)
                 set_text_if_changed(systemHx711GramsLabel, "0,0 g");
                 set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
                 set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
-                update_status("Tara gesetzt");
+                manualTareSaveArmed = !autodetectEnabled;
+                update_status(autodetectEnabled ? "Tara gesetzt" : "Tara gesetzt - Save wird vorbereitet");
                 set_save_ready(false);
             } else {
                 update_status("Tara fehlgeschlagen - HX711 nicht bereit");
             }
         } else {
             simTenths = 0;
+            manualTareSaveArmed = false;
             set_text(weightLabel, "0,0 g");
             update_status("Tara gedrückt - Demo-Gewicht auf 0,0 g gesetzt");
         }
@@ -1867,6 +1904,7 @@ static void button_event_cb(lv_event_t *event)
         format_grams(grams, sizeof(grams), saveTenths);
         snprintf(msg, sizeof(msg), "Save gedrückt - Bezug %s gespeichert", grams);
         update_status(msg);
+        manualTareSaveArmed = false;
         set_save_ready(false);
         save_current_ui_settings();
     } else if (strcmp(action, "autodetect") == 0) {
@@ -1875,6 +1913,7 @@ static void button_event_cb(lv_event_t *event)
         autodetectPendingGefaess = kNoDetectedGefaess;
         autodetectAutoTaredGefaess = kNoDetectedGefaess;
         autodetectPendingSinceMs = 0;
+        manualTareSaveArmed = false;
         set_save_ready(false);
         update_autodetect_display();
         update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
@@ -2682,13 +2721,13 @@ void create_waage_page(lv_obj_t *screen)
     create_panel_title(dataPanel, "Gewicht");
 
     lv_obj_t *autoBox = lv_btn_create(dataPanel);
-    lv_obj_set_size(autoBox, 82, 32);
-    lv_obj_align(autoBox, LV_ALIGN_TOP_RIGHT, 0, -4);
+    lv_obj_set_size(autoBox, 82, 66);
+    lv_obj_align(autoBox, LV_ALIGN_TOP_RIGHT, 0, -8);
     lv_obj_set_style_bg_color(autoBox, lv_color_hex(COLOR_BG), 0);
     lv_obj_set_style_bg_opa(autoBox, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(autoBox, 0, 0);
-    lv_obj_set_style_radius(autoBox, 12, 0);
-    lv_obj_set_style_pad_all(autoBox, 4, 0);
+    lv_obj_set_style_radius(autoBox, 16, 0);
+    lv_obj_set_style_pad_all(autoBox, 6, 0);
     lv_obj_add_event_cb(autoBox, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>("autodetect"));
 
     autodetectStateLabel = lv_label_create(autoBox);
@@ -2698,10 +2737,10 @@ void create_waage_page(lv_obj_t *screen)
     lv_obj_align(autodetectStateLabel, LV_ALIGN_LEFT_MID, 0, 0);
 
     autodetectLed = lv_obj_create(autoBox);
-    style_plain_block(autodetectLed, autodetectEnabled ? COLOR_GREEN : COLOR_DIM);
-    lv_obj_set_size(autodetectLed, 12, 12);
+    style_plain_block(autodetectLed, autodetectEnabled ? COLOR_AUTODETECT_LED_ON : COLOR_AUTODETECT_LED_OFF);
+    lv_obj_set_size(autodetectLed, 14, 14);
     lv_obj_set_style_radius(autodetectLed, LV_RADIUS_CIRCLE, 0);
-    lv_obj_align(autodetectLed, LV_ALIGN_RIGHT_MID, -2, 0);
+    lv_obj_align(autodetectLed, LV_ALIGN_RIGHT_MID, -4, 0);
     update_autodetect_display();
 
     weightLabel = lv_label_create(dataPanel);
@@ -3442,6 +3481,7 @@ void ui_t4s3_tick()
     }
     update_gefaess_measure_weight_display();
 }
+
 
 
 
