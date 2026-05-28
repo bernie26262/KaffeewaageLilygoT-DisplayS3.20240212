@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include <lvgl.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,6 +18,10 @@ constexpr uint8_t kMaxGefaessSlots = 3;
 constexpr uint8_t kMaxSiebtraegerSlots = 4;
 constexpr uint8_t kScaleCalIncrementCount = 4;
 constexpr int32_t kScaleCalIncrementsTenths[kScaleCalIncrementCount] = {10, 50, 100, 1000};
+constexpr uint8_t kNoDetectedGefaess = 0xFF;
+constexpr float kGefaessAutodetectToleranceGrams = 0.7f;
+constexpr uint32_t kGefaessAutoTareDelayMs = 800;
+constexpr float kGefaessRemovedThresholdGrams = 30.0f;
 
 constexpr uint32_t COLOR_BG = 0x000000;
 constexpr uint32_t COLOR_PANEL = 0x07120a;
@@ -117,6 +122,10 @@ int8_t simDir = 1;
 float hx711DisplayGrams = 0.0f;
 bool hx711DisplayValid = false;
 bool autodetectEnabled = true;
+uint8_t autodetectDetectedGefaess = kNoDetectedGefaess;
+uint8_t autodetectPendingGefaess = kNoDetectedGefaess;
+uint8_t autodetectAutoTaredGefaess = kNoDetectedGefaess;
+uint32_t autodetectPendingSinceMs = 0;
 uint16_t demoTotalShots = 0;
 uint16_t demoMachineShots = 0;
 uint16_t demoGrinderShots = 0;
@@ -187,6 +196,8 @@ lv_obj_t *create_button(lv_obj_t *parent, const char *text, const char *action, 
 void style_panel(lv_obj_t *obj);
 void style_label(lv_obj_t *obj, uint32_t color);
 void update_status(const char *msg);
+void update_autodetect_gefaess_preview();
+void format_grams(char *buf, size_t len, int32_t tenths);
 void format_grams_float(char *buf, size_t len, float grams);
 void load_saved_ui_settings();
 void save_current_ui_settings();
@@ -388,8 +399,12 @@ void update_hx711_grams_display(float grams, bool valid)
     // main scale page, but leave save/autodetect logic untouched for now.
     if (valid) {
         set_text_if_changed(weightLabel, buf);
-        set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+        if (autodetectDetectedGefaess == kNoDetectedGefaess) {
+            set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+        }
     }
+
+    update_autodetect_gefaess_preview();
 }
 
 
@@ -513,6 +528,142 @@ void update_autodetect_display()
         lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEnabled ? COLOR_GREEN : COLOR_DIM), 0);
     }
 }
+
+void update_autodetect_gefaess_preview()
+{
+    const bool blocked =
+        activePage != Page::Waage ||
+        !autodetectEnabled ||
+        !hx711DisplayValid ||
+        !t4s3_scale_is_ready() ||
+        !t4s3_scale_is_stable() ||
+        vesselOverlay ||
+        gefaessManageOverlay ||
+        gefaessMeasureOverlay ||
+        scaleCalibrationOverlay;
+
+    const uint32_t now = millis();
+
+    if (blocked) {
+        autodetectPendingGefaess = kNoDetectedGefaess;
+        autodetectPendingSinceMs = 0;
+        if (autodetectAutoTaredGefaess == kNoDetectedGefaess &&
+            autodetectDetectedGefaess != kNoDetectedGefaess) {
+            autodetectDetectedGefaess = kNoDetectedGefaess;
+            update_status("Autodetect aktiv - kein Gefäß erkannt");
+        }
+        return;
+    }
+
+    const float currentGrams = hx711DisplayGrams;
+
+    if (autodetectAutoTaredGefaess != kNoDetectedGefaess) {
+        // Nach einer Auto-Tara liegt das aufliegende Gefäß bei netto 0,0 g.
+        // Beim Abheben erscheint deshalb ungefähr das negative Gefäßgewicht.
+        // Erst bei stabilem Gewicht <= -30 g tarieren wir erneut auf leer.
+        if (currentGrams <= -kGefaessRemovedThresholdGrams) {
+            if (t4s3_scale_tare()) {
+                hx711DisplayGrams = 0.0f;
+                hx711DisplayValid = true;
+                set_text(weightLabel, "0,0 g");
+                set_text_if_changed(systemHx711GramsLabel, "0,0 g");
+                set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
+                set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+                update_status("Gefäß entfernt - Tara gesetzt");
+            } else {
+                update_status("Tara nach Entfernen fehlgeschlagen");
+            }
+
+            autodetectAutoTaredGefaess = kNoDetectedGefaess;
+            autodetectDetectedGefaess = kNoDetectedGefaess;
+            autodetectPendingGefaess = kNoDetectedGefaess;
+            autodetectPendingSinceMs = 0;
+        }
+        return;
+    }
+
+    uint8_t bestSlot = kNoDetectedGefaess;
+    float bestDiff = kGefaessAutodetectToleranceGrams;
+
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
+        if (gefaessWeightTenths[i] < 0) {
+            continue;
+        }
+
+        const float expectedGrams = static_cast<float>(gefaessWeightTenths[i]) / 10.0f;
+        const float diff = fabsf(currentGrams - expectedGrams);
+        if (diff <= bestDiff) {
+            bestDiff = diff;
+            bestSlot = i;
+        }
+    }
+
+    if (bestSlot == kNoDetectedGefaess) {
+        autodetectPendingGefaess = kNoDetectedGefaess;
+        autodetectPendingSinceMs = 0;
+
+        if (autodetectDetectedGefaess != kNoDetectedGefaess) {
+            autodetectDetectedGefaess = kNoDetectedGefaess;
+            update_status("Autodetect aktiv - kein Gefäß erkannt");
+        }
+        return;
+    }
+
+    if (bestSlot != autodetectDetectedGefaess) {
+        autodetectDetectedGefaess = bestSlot;
+        autodetectPendingGefaess = bestSlot;
+        autodetectPendingSinceMs = now;
+
+        char grams[24];
+        format_grams(grams, sizeof(grams), gefaessWeightTenths[bestSlot]);
+
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Autodetect: Gefäß %u erkannt (%s)",
+                 static_cast<unsigned>(bestSlot + 1),
+                 grams);
+        update_status(msg);
+        return;
+    }
+
+    if (autodetectPendingGefaess != bestSlot) {
+        autodetectPendingGefaess = bestSlot;
+        autodetectPendingSinceMs = now;
+        return;
+    }
+
+    if (autodetectPendingSinceMs == 0) {
+        autodetectPendingSinceMs = now;
+        return;
+    }
+
+    if (now - autodetectPendingSinceMs < kGefaessAutoTareDelayMs) {
+        return;
+    }
+
+    if (!t4s3_scale_tare()) {
+        update_status("Auto-Tara fehlgeschlagen - HX711 nicht bereit");
+        autodetectPendingGefaess = kNoDetectedGefaess;
+        autodetectPendingSinceMs = 0;
+        return;
+    }
+
+    autodetectAutoTaredGefaess = bestSlot;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+
+    hx711DisplayGrams = 0.0f;
+    hx711DisplayValid = true;
+    set_text(weightLabel, "0,0 g");
+    set_text_if_changed(systemHx711GramsLabel, "0,0 g");
+    set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
+    set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Gefäß %u erkannt - Auto-Tara",
+             static_cast<unsigned>(bestSlot + 1));
+    update_status(msg);
+}
+
 
 void update_vessel_display()
 {
@@ -1643,6 +1794,10 @@ static void button_event_cb(lv_event_t *event)
         save_current_ui_settings();
     } else if (strcmp(action, "autodetect") == 0) {
         autodetectEnabled = !autodetectEnabled;
+        autodetectDetectedGefaess = kNoDetectedGefaess;
+        autodetectPendingGefaess = kNoDetectedGefaess;
+        autodetectAutoTaredGefaess = kNoDetectedGefaess;
+        autodetectPendingSinceMs = 0;
         update_autodetect_display();
         update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
         save_current_ui_settings();
@@ -1802,6 +1957,7 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "gefaess_delete_confirm") == 0) {
         if (gefaessDeleteSlot < T4S3_GEFAESS_SLOT_COUNT) {
             gefaessWeightTenths[gefaessDeleteSlot] = -1;
+            autodetectDetectedGefaess = kNoDetectedGefaess;
             save_current_ui_settings();
             update_gefaess_storage_display();
             close_gefaess_delete_overlay();
@@ -1860,6 +2016,7 @@ static void button_event_cb(lv_event_t *event)
             return;
         }
         gefaessWeightTenths[gefaessMeasureSlot] = gefaessMeasureValueTenths;
+        autodetectDetectedGefaess = kNoDetectedGefaess;
         save_current_ui_settings();
         update_gefaess_storage_display();
         close_gefaess_measure_overlay();
@@ -3206,6 +3363,8 @@ void ui_t4s3_tick()
     }
     update_gefaess_measure_weight_display();
 }
+
+
 
 
 

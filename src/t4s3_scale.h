@@ -5,6 +5,7 @@
 // hardware bring-up can stay small and local.
 
 bool t4s3_scale_is_ready();
+bool t4s3_scale_is_stable();
 
 bool t4s3_scale_tare();
 bool t4s3_scale_calibrate(float knownGrams);

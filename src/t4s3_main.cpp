@@ -234,6 +234,11 @@ bool t4s3_scale_is_ready()
     return g_hx711Ready;
 }
 
+bool t4s3_scale_is_stable()
+{
+    return g_hx711Ready && g_weightStable;
+}
+
 bool t4s3_scale_tare()
 {
     if (!g_hx711Ready) {
