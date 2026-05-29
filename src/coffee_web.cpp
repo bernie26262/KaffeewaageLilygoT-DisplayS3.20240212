@@ -7,6 +7,21 @@
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
 
+static void sendSpiffsAssetOrNoContent(AsyncWebServerRequest* request,
+                                       const char* path,
+                                       const char* contentType)
+{
+  if (SPIFFS.exists(path)) {
+    request->send(SPIFFS, path, contentType);
+    return;
+  }
+
+  // No filesystem image may be uploaded yet on the T4-S3 migration branch.
+  // Returning 204 avoids browser console errors while the embedded WebUI itself
+  // continues to work from PROGMEM.
+  request->send(204, "text/plain", "");
+}
+
 // =============================================================================
 // Eingebettete WebUI
 // =============================================================================
@@ -2123,15 +2138,15 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/kaffeewaage-192.png", "image/png");
+    sendSpiffsAssetOrNoContent(request, "/kaffeewaage-192.png", "image/png");
   });
 
   server.on("/icon-512.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/kaffeewaage-512.png", "image/png");
+    sendSpiffsAssetOrNoContent(request, "/kaffeewaage-512.png", "image/png");
   });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/kaffeewaage.ico", "image/x-icon");
+    sendSpiffsAssetOrNoContent(request, "/kaffeewaage.ico", "image/x-icon");
   });
 
   server.addHandler(&ws);

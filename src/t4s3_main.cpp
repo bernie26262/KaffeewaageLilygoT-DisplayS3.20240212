@@ -2,6 +2,10 @@
 #include <LilyGo_AMOLED.h>
 #include <LV_Helper.h>
 #include <math.h>
+#include <string.h>
+
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 #include <HX711_ADC.h>
@@ -13,6 +17,8 @@
 #include "t4s3_time.h"
 #include "t4s3_settings.h"
 #include "t4s3_scale.h"
+#include "app_state.h"
+#include "coffee_web.h"
 
 LilyGo_Class amoled;
 
@@ -28,6 +34,33 @@ static bool g_sleepWeightReferenceValid = false;
 static float g_sleepWeightReferenceGrams = 0.0f;
 static bool g_weightActivityReferenceValid = false;
 static float g_weightActivityReferenceGrams = 0.0f;
+
+static AsyncWebServer g_server(80);
+static AppState g_webState;
+static T4S3UiSettings g_webSettingsCache;
+static bool g_webSettingsCacheValid = false;
+static uint32_t g_lastWebSettingsRefreshMs = 0;
+static uint32_t g_lastWebMaintenanceRefreshMs = 0;
+static uint32_t g_lastWebBroadcastMs = 0;
+static bool g_webUiStarted = false;
+static constexpr uint32_t kWebStartDelayMs = 5000UL;
+static uint32_t g_webMaintenanceMachineEpoch = 0;
+static uint32_t g_webMaintenanceGrinderEpoch = 0;
+static uint32_t g_webMaintenanceFilterEpoch = 0;
+static constexpr uint32_t kWebSettingsRefreshMs = 5000UL;
+static constexpr uint32_t kWebMaintenanceRefreshMs = 10000UL;
+static constexpr uint32_t kWebBroadcastIntervalMs = 500UL;
+
+#if COFFEE_T4S3_MAINTENANCE_TEST_30S
+static constexpr uint32_t kMaintenanceMachineIntervalSec = 30UL;
+static constexpr uint32_t kMaintenanceGrinderIntervalSec = 30UL;
+static constexpr uint32_t kMaintenanceFilterIntervalSec = 30UL;
+#else
+static constexpr uint32_t kMaintenanceMachineIntervalSec = 864000UL;   // 10 Tage
+static constexpr uint32_t kMaintenanceGrinderIntervalSec = 2419200UL;  // 28 Tage
+static constexpr uint32_t kMaintenanceFilterIntervalSec = 7257600UL;   // 12 Wochen / 84 Tage
+#endif
+
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 static HX711_ADC g_loadCell(coffee_t4s3_pins::HX711_DOUT_PIN,
@@ -396,6 +429,201 @@ static void sleepDisplay()
     g_displaySleeping = true;
 }
 
+
+static void refreshWebSettingsCache(uint32_t now, bool force = false)
+{
+    if (!force && g_webSettingsCacheValid && (now - g_lastWebSettingsRefreshMs) < kWebSettingsRefreshMs) {
+        return;
+    }
+
+    t4s3_settings_load(g_webSettingsCache);
+    g_webSettingsCacheValid = true;
+    g_lastWebSettingsRefreshMs = now;
+}
+
+static void refreshWebMaintenanceCache(uint32_t now, bool force = false)
+{
+    if (!force && (now - g_lastWebMaintenanceRefreshMs) < kWebMaintenanceRefreshMs) {
+        return;
+    }
+
+    t4s3_settings_load_maintenance(g_webMaintenanceMachineEpoch,
+                                   g_webMaintenanceGrinderEpoch,
+                                   g_webMaintenanceFilterEpoch);
+    g_lastWebMaintenanceRefreshMs = now;
+}
+
+static int32_t maintenanceSecondsToDue(uint32_t lastEpoch, uint32_t intervalSec, uint32_t nowEpoch)
+{
+    if (nowEpoch == 0 || lastEpoch == 0) {
+        return 0;
+    }
+
+    const uint32_t dueEpoch = lastEpoch + intervalSec;
+    if (nowEpoch < dueEpoch) {
+        return static_cast<int32_t>(dueEpoch - nowEpoch);
+    }
+    return -static_cast<int32_t>(nowEpoch - dueEpoch);
+}
+
+static bool maintenanceIsDue(uint32_t lastEpoch, uint32_t intervalSec, uint32_t nowEpoch)
+{
+    return nowEpoch != 0 && lastEpoch != 0 && nowEpoch >= (lastEpoch + intervalSec);
+}
+
+static const char *webWifiSignalLabel(uint8_t bars)
+{
+    if (bars >= 4) {
+        return "sehr gut";
+    }
+    if (bars == 3) {
+        return "gut";
+    }
+    if (bars == 2) {
+        return "schwach";
+    }
+    if (bars == 1) {
+        return "sehr schwach";
+    }
+    return "nicht verbunden";
+}
+
+static void updateWebState(uint32_t now)
+{
+    refreshWebSettingsCache(now);
+    refreshWebMaintenanceCache(now);
+
+    g_webState.weight.actual_g = t4s3_scale_current_grams();
+    g_webState.weight.set_g = g_webSettingsCache.targetTenthsBySiebtraeger[g_webSettingsCache.selectedSiebtraeger] / 10.0f;
+    g_webState.weight.stable = t4s3_scale_is_stable();
+
+    g_webState.status.save_ready = false;
+    g_webState.status.mode = g_webState.weight.stable ? APP_STATUS_STABLE : APP_STATUS_MEASURING;
+
+    g_webState.stopwatch.ms = 0;
+    g_webState.stopwatch.running = false;
+
+    g_webState.selection.siebtraeger = g_webSettingsCache.selectedSiebtraeger;
+    g_webState.selection.gefaess = 0;
+    g_webState.selection.autodetect = g_webSettingsCache.autodetectEnabled;
+
+    g_webState.calibration.set_weight_g = 200.0f;
+    g_webState.calibration.factor = t4s3_scale_calibration_factor();
+
+    for (int i = 0; i < 4; ++i) {
+        g_webState.gefaesse.weights_g[i] = 0.0f;
+    }
+    for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT && i < 4; ++i) {
+        g_webState.gefaesse.weights_g[i] = g_webSettingsCache.gefaessWeightTenths[i] >= 0
+                                             ? g_webSettingsCache.gefaessWeightTenths[i] / 10.0f
+                                             : 0.0f;
+    }
+
+    g_webState.stats.ground.total_g = g_webSettingsCache.totalGramsTenths / 10.0f;
+    g_webState.stats.ground.since_grinder_clean_g = g_webSettingsCache.grinderGramsTenths / 10.0f;
+    g_webState.stats.ground.since_machine_clean_g = g_webSettingsCache.machineGramsTenths / 10.0f;
+    g_webState.stats.ground.since_filter_change_g = g_webSettingsCache.filterGramsTenths / 10.0f;
+
+    g_webState.stats.shots.total = g_webSettingsCache.totalShots;
+    g_webState.stats.shots.since_grinder_clean = g_webSettingsCache.grinderShots;
+    g_webState.stats.shots.since_machine_clean = g_webSettingsCache.machineShots;
+    g_webState.stats.shots.since_filter_change = g_webSettingsCache.filterShots;
+
+    const uint32_t nowEpoch = t4s3_time_now_epoch();
+    g_webState.maintenance.machine_clean_due = maintenanceIsDue(g_webMaintenanceMachineEpoch, kMaintenanceMachineIntervalSec, nowEpoch);
+    g_webState.maintenance.grinder_clean_due = maintenanceIsDue(g_webMaintenanceGrinderEpoch, kMaintenanceGrinderIntervalSec, nowEpoch);
+    g_webState.maintenance.filter_change_due = maintenanceIsDue(g_webMaintenanceFilterEpoch, kMaintenanceFilterIntervalSec, nowEpoch);
+    g_webState.maintenance.machine_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceMachineEpoch, kMaintenanceMachineIntervalSec, nowEpoch);
+    g_webState.maintenance.grinder_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceGrinderEpoch, kMaintenanceGrinderIntervalSec, nowEpoch);
+    g_webState.maintenance.filter_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceFilterEpoch, kMaintenanceFilterIntervalSec, nowEpoch);
+    g_webState.maintenance.due_count = 0;
+    if (g_webState.maintenance.machine_clean_due) ++g_webState.maintenance.due_count;
+    if (g_webState.maintenance.grinder_clean_due) ++g_webState.maintenance.due_count;
+    if (g_webState.maintenance.filter_change_due) ++g_webState.maintenance.due_count;
+
+    T4S3WifiStatus wifi;
+    t4s3_wifi_get_status(wifi);
+    g_webState.time.valid = t4s3_time_is_valid();
+    g_webState.time.epoch = nowEpoch;
+    g_webState.system.wifi_connected = wifi.connected;
+    g_webState.system.ip = wifi.ip;
+    g_webState.system.wifi_rssi_dbm = wifi.rssi;
+    g_webState.system.wifi_signal_level = wifi.qualityBars;
+    g_webState.system.wifi_signal_label = webWifiSignalLabel(wifi.qualityBars);
+    g_webState.system.uptime_ms = now;
+    g_webState.system.web_wizard_active = false;
+    g_webState.system.autodetect_paused = false;
+}
+
+static bool handleT4S3WebCommand(const char *cmd)
+{
+    if (!cmd || cmd[0] == '\0') {
+        return false;
+    }
+
+    if (strcmp(cmd, "tare") == 0 || strcmp(cmd, "web_wizard_tare") == 0) {
+        return t4s3_scale_tare();
+    }
+
+    if (strcmp(cmd, "restart_device") == 0) {
+        Serial.println("[T4S3][WebUI] restart requested");
+        delay(100);
+        ESP.restart();
+        return true;
+    }
+
+    // Die WebUI ist in dieser ersten T4-S3-Phase bewusst nur grundlegend
+    // angebunden. Fachkommandos wie Save, Stoppuhr, Kalibrier-Assistent,
+    // Wartungs-Reset und Gefäßverwaltung werden danach gezielt auf die neue
+    // T4-S3-State-Logik gemappt.
+    Serial.printf("[T4S3][WebUI] command not mapped yet: %s\n", cmd);
+    return false;
+}
+
+static void beginWebUi()
+{
+    if (g_webUiStarted) {
+        return;
+    }
+
+    if (!SPIFFS.begin(false)) {
+        Serial.println("[T4S3][WebUI] SPIFFS mount failed or no filesystem uploaded; PWA icons may be unavailable");
+    } else {
+        Serial.println("[T4S3][WebUI] SPIFFS mounted");
+    }
+
+    refreshWebSettingsCache(millis(), true);
+    refreshWebMaintenanceCache(millis(), true);
+
+    g_server.on("/", HTTP_GET, coffeeWebHandleRoot);
+    coffeeWebSetCommandHandler(handleT4S3WebCommand);
+    coffeeWebBegin(g_server);
+    g_server.begin();
+    g_webUiStarted = true;
+    Serial.println("[T4S3][WebUI] HTTP server started on port 80");
+}
+
+static void tickWebUi(uint32_t now)
+{
+    if (!g_webUiStarted) {
+        return;
+    }
+
+    coffeeWebLoop();
+
+    if (!coffeeWebHasClients()) {
+        return;
+    }
+
+    if (now - g_lastWebBroadcastMs < kWebBroadcastIntervalMs) {
+        return;
+    }
+
+    g_lastWebBroadcastMs = now;
+    updateWebState(now);
+    coffeeWebBroadcastState(g_webState);
+}
+
 void setup()
 {
     Serial.begin(115200);
@@ -434,6 +662,9 @@ void setup()
 #endif
 
     ui_t4s3_create(amoled.width(), amoled.height());
+    lv_task_handler();
+    lv_refr_now(nullptr);
+
     t4s3_wifi_begin();
     t4s3_time_begin();
     ui_t4s3_notify_activity();
@@ -452,6 +683,11 @@ void loop()
 #endif
     ui_t4s3_tick();
     lv_task_handler();
+
+    if (!g_webUiStarted && now >= kWebStartDelayMs) {
+        beginWebUi();
+    }
+    tickWebUi(now);
 
     if (!g_displaySleeping) {
         const uint16_t timeoutMinutes = ui_t4s3_get_screen_timeout_minutes();
