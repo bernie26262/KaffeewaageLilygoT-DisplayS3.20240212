@@ -3982,6 +3982,31 @@ static bool ui_t4s3_web_set_selected_weight(float grams)
     return true;
 }
 
+
+static bool ui_t4s3_web_reset_maintenance(const char *cmd)
+{
+    if (!cmd) {
+        return false;
+    }
+
+    const bool isMaintenanceReset =
+        strcmp(cmd, "maintenance_reset_machine") == 0 ||
+        strcmp(cmd, "maintenance_reset_grinder") == 0 ||
+        strcmp(cmd, "maintenance_reset_filter") == 0;
+
+    if (!isMaintenanceReset) {
+        return false;
+    }
+
+    if (t4s3_time_now_epoch() == 0) {
+        update_status("Wartung kann erst nach NTP-Sync zurückgesetzt werden");
+        return false;
+    }
+
+    perform_maintenance_reset(cmd);
+    return true;
+}
+
 static bool ui_t4s3_web_delete_gefaess(uint8_t idx)
 {
     if (idx >= T4S3_GEFAESS_SLOT_COUNT) {
@@ -4051,6 +4076,9 @@ bool ui_t4s3_handle_web_command(const char *cmd)
             return false;
         }
         return ui_t4s3_web_delete_gefaess(static_cast<uint8_t>(indexChar - '0'));
+    }
+    if (ui_t4s3_web_reset_maintenance(cmd)) {
+        return true;
     }
 
     return false;

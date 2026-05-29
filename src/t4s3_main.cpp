@@ -562,8 +562,12 @@ static bool handleT4S3WebCommand(const char *cmd)
     }
 
     if (ui_t4s3_handle_web_command(cmd)) {
+        const uint32_t now = millis();
         g_webSettingsCacheValid = false;
-        refreshWebSettingsCache(millis(), true);
+        refreshWebSettingsCache(now, true);
+        refreshWebMaintenanceCache(now, true);
+        updateWebState(now);
+        coffeeWebBroadcastState(g_webState);
         return true;
     }
 
@@ -574,9 +578,9 @@ static bool handleT4S3WebCommand(const char *cmd)
         return true;
     }
 
-    // Die WebUI ist jetzt mit den einfachen T4-S3-HMI-Aktionen verbunden.
-    // Komplexere Assistenten wie Kalibrierung, Wartungs-Reset und
-    // Gefäß-Einmess-Wizard werden in separaten Schritten gemappt.
+    // Die WebUI ist jetzt mit den einfachen T4-S3-HMI-Aktionen und
+    // Wartungs-Resets verbunden. Komplexere Assistenten wie Kalibrierung
+    // und Gefäß-Einmess-Wizard werden in separaten Schritten gemappt.
     Serial.printf("[T4S3][WebUI] command not mapped yet: %s\n", cmd);
     return false;
 }
