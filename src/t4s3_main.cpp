@@ -497,11 +497,11 @@ static void updateWebState(uint32_t now)
     g_webState.weight.set_g = g_webSettingsCache.targetTenthsBySiebtraeger[g_webSettingsCache.selectedSiebtraeger] / 10.0f;
     g_webState.weight.stable = t4s3_scale_is_stable();
 
-    g_webState.status.save_ready = false;
+    g_webState.status.save_ready = ui_t4s3_web_save_ready();
     g_webState.status.mode = g_webState.weight.stable ? APP_STATUS_STABLE : APP_STATUS_MEASURING;
 
-    g_webState.stopwatch.ms = 0;
-    g_webState.stopwatch.running = false;
+    g_webState.stopwatch.ms = ui_t4s3_web_stopwatch_ms();
+    g_webState.stopwatch.running = ui_t4s3_web_stopwatch_running();
 
     g_webState.selection.siebtraeger = g_webSettingsCache.selectedSiebtraeger;
     g_webState.selection.gefaess = 0;
@@ -561,8 +561,10 @@ static bool handleT4S3WebCommand(const char *cmd)
         return false;
     }
 
-    if (strcmp(cmd, "tare") == 0 || strcmp(cmd, "web_wizard_tare") == 0) {
-        return t4s3_scale_tare();
+    if (ui_t4s3_handle_web_command(cmd)) {
+        g_webSettingsCacheValid = false;
+        refreshWebSettingsCache(millis(), true);
+        return true;
     }
 
     if (strcmp(cmd, "restart_device") == 0) {
@@ -572,10 +574,9 @@ static bool handleT4S3WebCommand(const char *cmd)
         return true;
     }
 
-    // Die WebUI ist in dieser ersten T4-S3-Phase bewusst nur grundlegend
-    // angebunden. Fachkommandos wie Save, Stoppuhr, Kalibrier-Assistent,
-    // Wartungs-Reset und Gefäßverwaltung werden danach gezielt auf die neue
-    // T4-S3-State-Logik gemappt.
+    // Die WebUI ist jetzt mit den einfachen T4-S3-HMI-Aktionen verbunden.
+    // Komplexere Assistenten wie Kalibrierung, Wartungs-Reset und
+    // Gefäß-Einmess-Wizard werden in separaten Schritten gemappt.
     Serial.printf("[T4S3][WebUI] command not mapped yet: %s\n", cmd);
     return false;
 }

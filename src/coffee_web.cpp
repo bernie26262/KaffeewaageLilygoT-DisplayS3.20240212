@@ -81,7 +81,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="scale-controls">
       <div class="scale-target-row small">
         <span class="label">Sollgewicht</span>
-        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
+        <input id="targetWeight" type="number" inputmode="decimal" min="0.1" max="60.0" step="0.1" aria-label="Sollgewicht in Gramm">
         <span>g</span>
         <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem;">Speichern</button>
       </div>
@@ -1325,8 +1325,9 @@ function connect() {
 function sendTargetWeight() {
   if (!isWebSocketReady()) return;
   const value = Number(el('targetWeight').value.replace(',', '.'));
-  if (!Number.isFinite(value) || value <= 0) {
-    addLog('Ungültiges Sollgewicht');
+  if (!Number.isFinite(value) || value <= 0 || value > 60.0) {
+    addLog('Ungültiges Sollgewicht (erlaubt: 0,1 bis 60,0 g)');
+    el('targetWeight').value = fmtG(currentState?.weight?.set_g ?? 0);
     return;
   }
   targetWeightDirty = false;

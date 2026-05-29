@@ -10,6 +10,7 @@
 #include <lvgl.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 namespace {
@@ -3850,6 +3851,209 @@ void ui_t4s3_set_hx711_raw_value(int32_t rawValue)
 void ui_t4s3_set_hx711_grams_value(float grams, bool valid)
 {
     update_hx711_grams_display(grams, valid);
+}
+
+bool ui_t4s3_web_save_ready()
+{
+    return saveReady;
+}
+
+uint32_t ui_t4s3_web_stopwatch_ms()
+{
+    uint32_t elapsed = timerBaseMs;
+    if (timerRunning) {
+        elapsed += millis() - timerStartedMs;
+    }
+    return elapsed;
+}
+
+bool ui_t4s3_web_stopwatch_running()
+{
+    return timerRunning;
+}
+
+static bool ui_t4s3_web_tare()
+{
+    if (!t4s3_scale_is_ready()) {
+        simTenths = 0;
+        manualTareSaveArmed = false;
+        set_text(weightLabel, "0,0 g");
+        update_status("Tara gedrückt - Demo-Gewicht auf 0,0 g gesetzt");
+        return true;
+    }
+
+    if (!t4s3_scale_tare()) {
+        update_status("Tara fehlgeschlagen - HX711 nicht bereit");
+        return false;
+    }
+
+    hx711DisplayGrams = 0.0f;
+    hx711DisplayValid = true;
+    set_text(weightLabel, "0,0 g");
+    set_text_if_changed(systemHx711GramsLabel, "0,0 g");
+    set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
+    set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
+    manualTareSaveArmed = !autodetectEnabled;
+    update_status(autodetectEnabled ? "Tara gesetzt" : "Tara gesetzt - Save wird vorbereitet");
+    set_save_ready(false);
+    return true;
+}
+
+static bool ui_t4s3_web_save_dose()
+{
+    if (!saveReady) {
+        update_status("Save noch nicht bereit");
+        return false;
+    }
+
+    const int32_t saveTenths = current_save_weight_tenths();
+    if (saveTenths <= 0) {
+        update_status("Save ignoriert - Gewicht ist 0,0 g");
+        return false;
+    }
+
+    add_saved_dose(saveTenths);
+
+    char msg[96];
+    char gramsText[24];
+    format_grams(gramsText, sizeof(gramsText), saveTenths);
+    snprintf(msg, sizeof(msg), "Bezug %s gespeichert", gramsText);
+    update_status(msg);
+
+    manualTareSaveArmed = false;
+    set_save_ready(false);
+    save_current_ui_settings();
+    return true;
+}
+
+static bool ui_t4s3_web_set_autodetect(bool enabled)
+{
+    autodetectEnabled = enabled;
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectAutoTaredGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+    manualTareSaveArmed = false;
+    set_save_ready(false);
+    update_autodetect_display();
+    update_status(autodetectEnabled ? "Autodetect eingeschaltet" : "Autodetect ausgeschaltet");
+    save_current_ui_settings();
+    return true;
+}
+
+static bool ui_t4s3_web_select_siebtraeger(uint8_t idx)
+{
+    if (idx >= kMaxSiebtraegerSlots) {
+        return false;
+    }
+
+    currentVesselIndex = idx;
+    draftVesselIndex = idx;
+    demoTargetTenths = targetTenthsBySiebtraeger[currentVesselIndex];
+    draftTargetTenths = demoTargetTenths;
+    update_vessel_display();
+    update_target_display();
+    save_current_ui_settings();
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Siebträger %u ausgewählt", static_cast<unsigned>(idx + 1));
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_set_selected_weight(float grams)
+{
+    if (!isfinite(grams) || grams <= 0.0f || grams > 60.0f) {
+        return false;
+    }
+
+    const int32_t tenths = static_cast<int32_t>(grams * 10.0f + 0.5f);
+    demoTargetTenths = tenths;
+    draftTargetTenths = tenths;
+    targetTenthsBySiebtraeger[currentVesselIndex] = tenths;
+    save_current_ui_settings();
+    update_target_display();
+
+    char gramsText[24];
+    char msg[80];
+    format_grams(gramsText, sizeof(gramsText), tenths);
+    snprintf(msg, sizeof(msg), "Sollgewicht gespeichert: %s", gramsText);
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_delete_gefaess(uint8_t idx)
+{
+    if (idx >= T4S3_GEFAESS_SLOT_COUNT) {
+        return false;
+    }
+
+    gefaessWeightTenths[idx] = -1;
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectAutoTaredGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+    save_current_ui_settings();
+    update_gefaess_storage_display();
+    update_gefaess_manage_display();
+    update_status("Gefäß gelöscht");
+    return true;
+}
+
+bool ui_t4s3_handle_web_command(const char *cmd)
+{
+    if (!cmd || cmd[0] == '\0') {
+        return false;
+    }
+
+    ui_t4s3_notify_activity();
+
+    if (strcmp(cmd, "tare") == 0 || strcmp(cmd, "web_wizard_tare") == 0) {
+        return ui_t4s3_web_tare();
+    }
+    if (strcmp(cmd, "save_dose") == 0) {
+        return ui_t4s3_web_save_dose();
+    }
+    if (strcmp(cmd, "autodetect_on") == 0) {
+        return ui_t4s3_web_set_autodetect(true);
+    }
+    if (strcmp(cmd, "autodetect_off") == 0) {
+        return ui_t4s3_web_set_autodetect(false);
+    }
+    if (strcmp(cmd, "stopwatch_start_stop") == 0) {
+        set_timer_running(!timerRunning);
+        return true;
+    }
+    if (strcmp(cmd, "stopwatch_reset") == 0) {
+        reset_timer();
+        return true;
+    }
+    if (strncmp(cmd, "select_siebtraeger_", 19) == 0) {
+        const char indexChar = cmd[19];
+        if (indexChar < '0' || indexChar > '9') {
+            return false;
+        }
+        return ui_t4s3_web_select_siebtraeger(static_cast<uint8_t>(indexChar - '0'));
+    }
+    constexpr const char *kSetSelectedSiebtraegerWeightPrefix = "set_selected_siebtraeger_weight_";
+    const size_t setSelectedSiebtraegerWeightPrefixLen = strlen(kSetSelectedSiebtraegerWeightPrefix);
+    if (strncmp(cmd, kSetSelectedSiebtraegerWeightPrefix, setSelectedSiebtraegerWeightPrefixLen) == 0) {
+        char *end = nullptr;
+        const float grams = strtof(cmd + setSelectedSiebtraegerWeightPrefixLen, &end);
+        if (!end || *end != '\0') {
+            return false;
+        }
+        return ui_t4s3_web_set_selected_weight(grams);
+    }
+    if (strncmp(cmd, "delete_gefaess_", 15) == 0) {
+        const char indexChar = cmd[15];
+        if (indexChar < '0' || indexChar > '9') {
+            return false;
+        }
+        return ui_t4s3_web_delete_gefaess(static_cast<uint8_t>(indexChar - '0'));
+    }
+
+    return false;
 }
 
 void ui_t4s3_create(uint16_t width, uint16_t height)
