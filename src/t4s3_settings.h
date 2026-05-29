@@ -3,12 +3,15 @@
 #include <Arduino.h>
 
 constexpr uint8_t T4S3_GEFAESS_SLOT_COUNT = 3;
+constexpr uint8_t T4S3_SIEBTRAEGER_SLOT_COUNT = 4;
+constexpr size_t T4S3_SIEBTRAEGER_NAME_LEN = 24;
 
 struct T4S3UiSettings {
     uint16_t screenTimeoutMinutes;
     bool autodetectEnabled;
     uint8_t selectedSiebtraeger;
-    int32_t targetTenthsBySiebtraeger[4];
+    int32_t targetTenthsBySiebtraeger[T4S3_SIEBTRAEGER_SLOT_COUNT];
+    char siebtraegerNames[T4S3_SIEBTRAEGER_SLOT_COUNT][T4S3_SIEBTRAEGER_NAME_LEN];
     int32_t targetStepTenths;
     uint32_t totalShots;
     uint32_t machineShots;

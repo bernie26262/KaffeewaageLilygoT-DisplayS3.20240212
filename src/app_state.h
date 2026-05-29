@@ -23,6 +23,8 @@ struct SelectionState {
   int siebtraeger = 0;
   int gefaess = 0;
   bool autodetect = false;
+  char siebtraeger_names[4][24] = {{0}};
+  float siebtraeger_targets_g[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct CalibrationState {
@@ -95,4 +97,4 @@ struct AppState {
   TimeState time;
   SystemState system;
   StatusState status;
-};
+};

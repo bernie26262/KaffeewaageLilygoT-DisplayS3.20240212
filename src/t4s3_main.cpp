@@ -506,6 +506,10 @@ static void updateWebState(uint32_t now)
     g_webState.selection.siebtraeger = g_webSettingsCache.selectedSiebtraeger;
     g_webState.selection.gefaess = ui_t4s3_web_selected_gefaess();
     g_webState.selection.autodetect = g_webSettingsCache.autodetectEnabled;
+    for (uint8_t i = 0; i < T4S3_SIEBTRAEGER_SLOT_COUNT && i < 4; ++i) {
+        strlcpy(g_webState.selection.siebtraeger_names[i], ui_t4s3_web_siebtraeger_name(i), sizeof(g_webState.selection.siebtraeger_names[i]));
+        g_webState.selection.siebtraeger_targets_g[i] = g_webSettingsCache.targetTenthsBySiebtraeger[i] / 10.0f;
+    }
 
     g_webState.calibration.set_weight_g = ui_t4s3_web_calibration_weight_g();
     g_webState.calibration.factor = t4s3_scale_calibration_factor();

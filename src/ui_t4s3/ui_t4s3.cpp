@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <math.h>
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,6 +158,12 @@ bool totalsEditGramsMode = false;
 uint16_t totalsEditDraftShots[kTotalsEditModeCount] = {0, 0, 0, 0};
 int32_t totalsEditDraftGramsTenths[kTotalsEditModeCount] = {0, 0, 0, 0};
 int32_t targetTenthsBySiebtraeger[4] = {180, 90, 180, 180};
+char siebtraegerNames[T4S3_SIEBTRAEGER_SLOT_COUNT][T4S3_SIEBTRAEGER_NAME_LEN] = {
+    "Bodenloser ST",
+    "1er-Siebträger",
+    "2er-Siebträger",
+    "Custom ST",
+};
 int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT] = {-1, -1, -1};
 uint8_t gefaessMeasureStep = 0;
 uint8_t gefaessMeasureSlot = 0;
@@ -498,6 +505,9 @@ void save_current_ui_settings()
     settings.targetTenthsBySiebtraeger[1] = targetTenthsBySiebtraeger[1];
     settings.targetTenthsBySiebtraeger[2] = targetTenthsBySiebtraeger[2];
     settings.targetTenthsBySiebtraeger[3] = targetTenthsBySiebtraeger[3];
+    for (uint8_t i = 0; i < T4S3_SIEBTRAEGER_SLOT_COUNT; ++i) {
+        strlcpy(settings.siebtraegerNames[i], siebtraegerNames[i], T4S3_SIEBTRAEGER_NAME_LEN);
+    }
     settings.targetStepTenths = targetStepTenths;
 
     for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
@@ -527,6 +537,9 @@ void load_saved_ui_settings()
 
     for (uint8_t i = 0; i < 4; ++i) {
         targetTenthsBySiebtraeger[i] = settings.targetTenthsBySiebtraeger[i];
+    }
+    for (uint8_t i = 0; i < T4S3_SIEBTRAEGER_SLOT_COUNT; ++i) {
+        strlcpy(siebtraegerNames[i], settings.siebtraegerNames[i], T4S3_SIEBTRAEGER_NAME_LEN);
     }
 
     targetStepTenths = settings.targetStepTenths;
@@ -561,13 +574,10 @@ bool consume_suppressed_click()
 
 const char *vessel_name(uint8_t index)
 {
-    switch (index) {
-    case 0: return "Bodenloser ST";
-    case 1: return "1er-Siebträger";
-    case 2: return "2er-Siebträger";
-    case 3: return "Custom ST";
-    default: return "Bodenloser ST";
+    if (index < T4S3_SIEBTRAEGER_SLOT_COUNT && siebtraegerNames[index][0] != '\0') {
+        return siebtraegerNames[index];
     }
+    return "Siebtraeger";
 }
 
 void update_autodetect_display()
@@ -3886,6 +3896,11 @@ float ui_t4s3_web_calibration_weight_g()
     return static_cast<float>(scaleCalibrationTargetTenths) / 10.0f;
 }
 
+const char *ui_t4s3_web_siebtraeger_name(uint8_t idx)
+{
+    return vessel_name(idx);
+}
+
 uint8_t ui_t4s3_web_selected_gefaess()
 {
     return webSelectedGefaessSlot;
@@ -4006,6 +4021,104 @@ static bool ui_t4s3_web_set_selected_weight(float grams)
     return true;
 }
 
+
+static bool hex_to_nibble(char c, uint8_t &value)
+{
+    if (c >= '0' && c <= '9') {
+        value = static_cast<uint8_t>(c - '0');
+        return true;
+    }
+    if (c >= 'a' && c <= 'f') {
+        value = static_cast<uint8_t>(c - 'a' + 10);
+        return true;
+    }
+    if (c >= 'A' && c <= 'F') {
+        value = static_cast<uint8_t>(c - 'A' + 10);
+        return true;
+    }
+    return false;
+}
+
+static void decode_web_component(char *dst, size_t dstLen, const char *src)
+{
+    if (!dst || dstLen == 0) {
+        return;
+    }
+    dst[0] = '\0';
+    if (!src) {
+        return;
+    }
+
+    size_t out = 0;
+    for (size_t i = 0; src[i] != '\0' && out + 1 < dstLen; ++i) {
+        if (src[i] == '%' && src[i + 1] != '\0' && src[i + 2] != '\0') {
+            uint8_t hi = 0;
+            uint8_t lo = 0;
+            if (hex_to_nibble(src[i + 1], hi) && hex_to_nibble(src[i + 2], lo)) {
+                dst[out++] = static_cast<char>((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        dst[out++] = src[i] == '+' ? ' ' : src[i];
+    }
+    dst[out] = '\0';
+}
+
+static void sanitize_web_name(char *name, size_t len, const char *fallback)
+{
+    if (!name || len == 0) {
+        return;
+    }
+
+    size_t read = 0;
+    size_t write = 0;
+    bool lastSpace = true;
+    while (name[read] != '\0' && write + 1 < len) {
+        char c = name[read++];
+        if (c == '\r' || c == '\n' || c == '\t') {
+            c = ' ';
+        }
+        if (c == ' ') {
+            if (lastSpace) {
+                continue;
+            }
+            lastSpace = true;
+        } else {
+            lastSpace = false;
+        }
+        name[write++] = c;
+    }
+    while (write > 0 && name[write - 1] == ' ') {
+        --write;
+    }
+    name[write] = '\0';
+
+    if (write == 0) {
+        strlcpy(name, fallback ? fallback : "Siebtraeger", len);
+    }
+}
+
+static bool ui_t4s3_web_set_siebtraeger_name(uint8_t idx, const char *encodedName)
+{
+    if (idx >= T4S3_SIEBTRAEGER_SLOT_COUNT || !encodedName) {
+        return false;
+    }
+
+    char decoded[T4S3_SIEBTRAEGER_NAME_LEN];
+    decode_web_component(decoded, sizeof(decoded), encodedName);
+    sanitize_web_name(decoded, sizeof(decoded), vessel_name(idx));
+
+    strlcpy(siebtraegerNames[idx], decoded, sizeof(siebtraegerNames[idx]));
+    save_current_ui_settings();
+    update_vessel_display();
+    update_vessel_overlay_display();
+
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Siebträger %u benannt: %s", static_cast<unsigned>(idx + 1), siebtraegerNames[idx]);
+    update_status(msg);
+    return true;
+}
 
 static bool ui_t4s3_web_reset_maintenance(const char *cmd)
 {
@@ -4223,6 +4336,18 @@ bool ui_t4s3_handle_web_command(const char *cmd)
         }
         return ui_t4s3_web_select_gefaess(static_cast<uint8_t>(indexChar - '0'));
     }
+    const char *siebtraegerNamePrefix = "set_siebtraeger_name_";
+    const size_t siebtraegerNamePrefixLen = strlen(siebtraegerNamePrefix);
+    if (strncmp(cmd, siebtraegerNamePrefix, siebtraegerNamePrefixLen) == 0) {
+        const char *cursor = cmd + siebtraegerNamePrefixLen;
+        char *end = nullptr;
+        const long idx = strtol(cursor, &end, 10);
+        if (end == cursor || !end || *end != '_' || idx < 0 || idx >= T4S3_SIEBTRAEGER_SLOT_COUNT) {
+            return false;
+        }
+        return ui_t4s3_web_set_siebtraeger_name(static_cast<uint8_t>(idx), end + 1);
+    }
+
     float parsedGrams = 0.0f;
     if (parse_web_float_suffix(cmd, "set_selected_siebtraeger_weight_", parsedGrams)) {
         return ui_t4s3_web_set_selected_weight(parsedGrams);

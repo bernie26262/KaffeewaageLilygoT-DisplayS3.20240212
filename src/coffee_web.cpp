@@ -54,7 +54,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=3b">
+  <link rel="stylesheet" href="/coffee.css?v=3d">
 </head>
 <body>
 <main>
@@ -154,6 +154,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="ip-row small">
       <div>Datum/Zeit: <b class="mono" id="datetime">---</b></div>
       <div>Uptime: <b class="mono" id="uptime">---</b></div>
+      <div>Kalibrierfaktor: <b class="mono" id="calibrationFactorView">---</b></div>
+      <div>Kalibriergewicht: <b class="mono" id="calibrationWeightView">---</b></div>
       <div>SSID: <b class="mono" id="statsWifiSsid">---</b></div>
       <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
       <div>WLAN-Signal: <span class="wifi-signal-row"><span id="statsWifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="statsWifiSignalLabel">---</b> <span class="muted-inline" id="statsWifiSignalRssi">---</span></span></div>
@@ -196,6 +198,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div class="settings-actions" style="margin-top: 12px;">
         <button id="openCalibrate" class="secondary">Waage kalibrieren</button>
       </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Siebträger / Sollgewichte</div>
+      <div class="small">Bezeichnungen der Siebträger-Profile. Die Sollgewichte werden über die Hauptseite gespeichert.</div>
+      <div id="siebtraegerSettingsList" class="gefaess-list"></div>
     </section>
 
     <section class="card">
@@ -301,9 +309,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3c"></script>
-<script src="/coffee_render.js?v=3c"></script>
-<script src="/coffee_events.js?v=3c"></script>
+<script src="/coffee_core.js?v=3d"></script>
+<script src="/coffee_render.js?v=3d"></script>
+<script src="/coffee_events.js?v=3d"></script>
 </body>
 </html>)rawliteral";
 
@@ -627,6 +635,9 @@ const setText = (id, value) => { el(id).textContent = value; };
 const GEFAESS_COUNT = 3;
 const GEFAESS_INDEXES = Array.from({ length: GEFAESS_COUNT }, (_, index) => index);
 const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3'];
+const SIEBTRAEGER_COUNT = 4;
+const DEFAULT_SIEBTRAEGER_NAMES = ['Bodenloser ST', '1er-Siebträger', '2er-Siebträger', 'Custom ST'];
+const SIEBTRAEGER_INDEXES = Array.from({ length: SIEBTRAEGER_COUNT }, (_, index) => index);
 const CMD = Object.freeze({
   saveDose: 'save_dose',
   tare: 'tare',
@@ -680,6 +691,9 @@ const fmtDateTime = (epoch, valid) => {
   });
 };
 const fmtUptime = ms => fmtDayClockDuration(Math.floor(Number(ms || 0) / 1000));
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const siebtraegerName = index => String(lastState?.selection?.siebtraeger_names?.[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
+const siebtraegerTarget = index => Number(lastState?.selection?.siebtraeger_targets_g?.[index] ?? 0);
 
 // ===== Navigation / Log =====
 function addLog(msg) {
@@ -1188,8 +1202,44 @@ function renderGefaessSettings(s) {
   }).join('');
 }
 
+function renderSiebtraegerSettings(s) {
+  const list = el('siebtraegerSettingsList');
+  if (!list) return;
+  if (document.activeElement?.matches?.('[data-siebtraeger-name-index]')) return;
+
+  const names = s?.selection?.siebtraeger_names || [];
+  const targets = s?.selection?.siebtraeger_targets_g || [];
+  list.innerHTML = SIEBTRAEGER_INDEXES.map(index => {
+    const name = String(names[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
+    const target = Number(targets[index] || 0);
+    return `<div class="gefaess-row">
+      <label style="display:grid; gap:4px; min-width:0; flex:1;">
+        <span><b>Profil ${index + 1}</b> · Sollgewicht ${fmtG(target)} g</span>
+        <input class="siebtraeger-name-input" data-siebtraeger-name-index="${index}" maxlength="23" value="${escapeHtml(name)}" aria-label="Siebträger ${index + 1} Bezeichnung">
+      </label>
+      <button class="compact secondary save-siebtraeger-name" data-siebtraeger-name-index="${index}">speichern</button>
+    </div>`;
+  }).join('');
+}
+
+function updateSiebtraegerSelectOptions(s) {
+  const select = el('siebtraegerSelect');
+  if (!select) return;
+
+  const names = s?.selection?.siebtraeger_names || [];
+  const targets = s?.selection?.siebtraeger_targets_g || [];
+  SIEBTRAEGER_INDEXES.forEach(index => {
+    const option = select.options[index];
+    if (!option) return;
+    const name = String(names[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
+    const target = Number(targets[index] || 0);
+    option.textContent = `${name} · ${fmtG(target)} g`;
+  });
+}
+
 // ===== State-Rendering =====
 function renderWeightAndSelection(s) {
+  updateSiebtraegerSelectOptions(s);
   setText('actual', fmtG(s.weight?.actual_g));
   if (!targetWeightDirty && document.activeElement !== el('targetWeight')) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
@@ -1253,6 +1303,8 @@ function renderStatsAndSystem(s) {
   setText('statsTotalGroundView', `${fmtG(s.stats?.ground?.total_g)} g`);
   setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));
   setText('uptime', fmtUptime(s.system?.uptime_ms));
+  setText('calibrationFactorView', Number(s.calibration?.factor || 0).toFixed(3));
+  setText('calibrationWeightView', `${fmtG(s.calibration?.set_weight_g)} g`);
   setText('ip', s.system?.ip || location.hostname);
   setText('statsWifiSsid', s.system?.wifi_ssid || '---');
   setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
@@ -1300,6 +1352,7 @@ function render(s) {
   renderActionAvailability(s);
   renderMaintenance(s.maintenance);
   renderGefaessSettings(s);
+  renderSiebtraegerSettings(s);
 
   if (el('wizardOverlay').classList.contains('show')) {
     updateWizardLiveFields();
@@ -1514,6 +1567,25 @@ function handleAutodetectToggleClick() {
   sendCommand(autodetectOn ? CMD.autodetectOff : CMD.autodetectOn, autodetectOn ? 'Autodetect aus gesendet …' : 'Autodetect an gesendet …');
 }
 
+function handleSiebtraegerSettingsClick(e) {
+  const button = e.target.closest('.save-siebtraeger-name');
+  if (!button) return;
+
+  const idx = Number(button.dataset.siebtraegerNameIndex);
+  const input = document.querySelector(`input[data-siebtraeger-name-index="${idx}"]`);
+  const name = String(input?.value || '').trim().replace(/\s+/g, ' ');
+  if (!Number.isInteger(idx) || idx < 0 || idx >= SIEBTRAEGER_COUNT) {
+    addLog('Ungültiges Siebträger-Profil');
+    return;
+  }
+  if (!name) {
+    addLog('Bitte eine Siebträger-Bezeichnung eintragen');
+    input?.focus();
+    return;
+  }
+  sendCommand(`set_siebtraeger_name_${idx}_${encodeURIComponent(name)}`, `Siebträger-Bezeichnung gesendet: ${name}`);
+}
+
 function handleGefaessListClick(e) {
   const button = e.target.closest('.delete-gefaess');
   if (!button) return;
@@ -1627,6 +1699,7 @@ function bindSettingsHandlers() {
     'Reset Filter gesendet …'
   ));
   el('gefaessList').addEventListener('click', handleGefaessListClick);
+  el('siebtraegerSettingsList').addEventListener('click', handleSiebtraegerSettingsClick);
 }
 
 function bindOverlayHandlers() {
@@ -2186,7 +2259,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<3072> doc;
+  StaticJsonDocument<4096> doc;
 
   doc["type"] = "state";
 
@@ -2204,6 +2277,12 @@ static String buildStateJson(const AppState& s)
   doc["selection"]["siebtraeger"] = s.selection.siebtraeger;
   doc["selection"]["gefaess"] = s.selection.gefaess;
   doc["selection"]["autodetect"] = s.selection.autodetect;
+  JsonArray siebNames = doc["selection"]["siebtraeger_names"].to<JsonArray>();
+  JsonArray siebTargets = doc["selection"]["siebtraeger_targets_g"].to<JsonArray>();
+  for (int i = 0; i < 4; ++i) {
+    siebNames.add(s.selection.siebtraeger_names[i]);
+    siebTargets.add(s.selection.siebtraeger_targets_g[i]);
+  }
 
   doc["calibration"]["set_weight_g"] = s.calibration.set_weight_g;
   doc["calibration"]["factor"] = s.calibration.factor;

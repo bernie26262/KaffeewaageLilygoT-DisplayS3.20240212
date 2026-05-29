@@ -2,6 +2,8 @@
 
 #include <Preferences.h>
 #include <math.h>
+#include <ctype.h>
+#include <string.h>
 
 namespace {
 
@@ -15,6 +17,12 @@ constexpr int32_t DEFAULT_TARGET_BODENLOS_TENTHS = 180;
 constexpr int32_t DEFAULT_TARGET_1ER_TENTHS = 90;
 constexpr int32_t DEFAULT_TARGET_2ER_TENTHS = 180;
 constexpr int32_t DEFAULT_TARGET_CUSTOM_TENTHS = 180;
+constexpr const char *DEFAULT_SIEBTRAEGER_NAMES[T4S3_SIEBTRAEGER_SLOT_COUNT] = {
+    "Bodenloser ST",
+    "1er-Siebträger",
+    "2er-Siebträger",
+    "Custom ST",
+};
 constexpr int32_t DEFAULT_TARGET_STEP_TENTHS = 5;
 constexpr int32_t GEFAESS_WEIGHT_UNSET_TENTHS = -1;
 
@@ -27,6 +35,9 @@ void fill_defaults(T4S3UiSettings &settings)
     settings.targetTenthsBySiebtraeger[1] = DEFAULT_TARGET_1ER_TENTHS;
     settings.targetTenthsBySiebtraeger[2] = DEFAULT_TARGET_2ER_TENTHS;
     settings.targetTenthsBySiebtraeger[3] = DEFAULT_TARGET_CUSTOM_TENTHS;
+    for (uint8_t i = 0; i < T4S3_SIEBTRAEGER_SLOT_COUNT; ++i) {
+        strlcpy(settings.siebtraegerNames[i], DEFAULT_SIEBTRAEGER_NAMES[i], T4S3_SIEBTRAEGER_NAME_LEN);
+    }
     settings.targetStepTenths = DEFAULT_TARGET_STEP_TENTHS;
     settings.totalShots = 0;
     settings.machineShots = 0;
@@ -87,6 +98,34 @@ int32_t sanitize_gefaess_weight(int32_t tenths)
     return tenths;
 }
 
+void sanitize_siebtraeger_name(char *dst, size_t dstLen, const String &raw, const char *fallback)
+{
+    if (!dst || dstLen == 0) {
+        return;
+    }
+
+    String cleaned = raw;
+    cleaned.trim();
+    cleaned.replace("\r", " ");
+    cleaned.replace("\n", " ");
+    cleaned.replace("\t", " ");
+
+    while (cleaned.indexOf("  ") >= 0) {
+        cleaned.replace("  ", " ");
+    }
+
+    if (cleaned.length() == 0) {
+        cleaned = fallback ? fallback : "Siebtraeger";
+    }
+
+    if (cleaned.length() >= dstLen) {
+        cleaned = cleaned.substring(0, dstLen - 1);
+        cleaned.trim();
+    }
+
+    strlcpy(dst, cleaned.c_str(), dstLen);
+}
+
 }  // namespace
 
 void t4s3_settings_begin()
@@ -136,6 +175,15 @@ void t4s3_settings_load(T4S3UiSettings &settings)
         sanitize_target(prefs.getInt("targetST3", settings.targetTenthsBySiebtraeger[3]),
                         DEFAULT_TARGET_CUSTOM_TENTHS);
 
+    for (uint8_t i = 0; i < T4S3_SIEBTRAEGER_SLOT_COUNT; ++i) {
+        char key[12];
+        snprintf(key, sizeof(key), "stName%u", i);
+        sanitize_siebtraeger_name(settings.siebtraegerNames[i],
+                                  T4S3_SIEBTRAEGER_NAME_LEN,
+                                  prefs.getString(key, DEFAULT_SIEBTRAEGER_NAMES[i]),
+                                  DEFAULT_SIEBTRAEGER_NAMES[i]);
+    }
+
     settings.targetStepTenths =
         sanitize_step(prefs.getInt("targetStep", settings.targetStepTenths));
 
@@ -184,6 +232,16 @@ void t4s3_settings_save(const T4S3UiSettings &settings)
     prefs.putInt("targetST1", sanitize_target(settings.targetTenthsBySiebtraeger[1], DEFAULT_TARGET_1ER_TENTHS));
     prefs.putInt("targetST2", sanitize_target(settings.targetTenthsBySiebtraeger[2], DEFAULT_TARGET_2ER_TENTHS));
     prefs.putInt("targetST3", sanitize_target(settings.targetTenthsBySiebtraeger[3], DEFAULT_TARGET_CUSTOM_TENTHS));
+    for (uint8_t i = 0; i < T4S3_SIEBTRAEGER_SLOT_COUNT; ++i) {
+        char key[12];
+        snprintf(key, sizeof(key), "stName%u", i);
+        char cleanName[T4S3_SIEBTRAEGER_NAME_LEN];
+        sanitize_siebtraeger_name(cleanName,
+                                  sizeof(cleanName),
+                                  String(settings.siebtraegerNames[i]),
+                                  DEFAULT_SIEBTRAEGER_NAMES[i]);
+        prefs.putString(key, cleanName);
+    }
     prefs.putInt("targetStep", sanitize_step(settings.targetStepTenths));
 
     
