@@ -504,10 +504,10 @@ static void updateWebState(uint32_t now)
     g_webState.stopwatch.running = ui_t4s3_web_stopwatch_running();
 
     g_webState.selection.siebtraeger = g_webSettingsCache.selectedSiebtraeger;
-    g_webState.selection.gefaess = 0;
+    g_webState.selection.gefaess = ui_t4s3_web_selected_gefaess();
     g_webState.selection.autodetect = g_webSettingsCache.autodetectEnabled;
 
-    g_webState.calibration.set_weight_g = 200.0f;
+    g_webState.calibration.set_weight_g = ui_t4s3_web_calibration_weight_g();
     g_webState.calibration.factor = t4s3_scale_calibration_factor();
 
     for (int i = 0; i < 4; ++i) {
@@ -551,8 +551,8 @@ static void updateWebState(uint32_t now)
     g_webState.system.wifi_signal_level = wifi.qualityBars;
     g_webState.system.wifi_signal_label = webWifiSignalLabel(wifi.qualityBars);
     g_webState.system.uptime_ms = now;
-    g_webState.system.web_wizard_active = false;
-    g_webState.system.autodetect_paused = false;
+    g_webState.system.web_wizard_active = ui_t4s3_web_wizard_active();
+    g_webState.system.autodetect_paused = ui_t4s3_web_wizard_active();
 }
 
 static bool handleT4S3WebCommand(const char *cmd)

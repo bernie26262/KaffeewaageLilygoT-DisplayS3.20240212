@@ -7,19 +7,31 @@
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
 
-static void sendSpiffsAssetOrNoContent(AsyncWebServerRequest* request,
-                                       const char* path,
-                                       const char* contentType)
+static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
+
+static void sendOptionalPwaAssetEmpty(AsyncWebServerRequest* request, const char* contentType)
 {
-  if (SPIFFS.exists(path)) {
-    request->send(SPIFFS, path, contentType);
+  // During the T4-S3 migration the WebUI itself is served from PROGMEM.
+  // The optional PWA icons may or may not be present in SPIFFS yet.
+  // Do not probe SPIFFS during page load. Avoid zero-length responses here:
+  // with some ESPAsyncWebServer/client combinations the favicon request kept
+  // the connection open. A one-byte PROGMEM response has a known
+  // Content-Length and completes reliably. Browsers simply ignore it as an
+  // unusable placeholder icon.
+  if (!request) {
     return;
   }
+  if (!contentType || contentType[0] == '\0') {
+    contentType = "application/octet-stream";
+  }
 
-  // No filesystem image may be uploaded yet on the T4-S3 migration branch.
-  // Returning 204 avoids browser console errors while the embedded WebUI itself
-  // continues to work from PROGMEM.
-  request->send(204, "text/plain", "");
+  AsyncWebServerResponse* response = request->beginResponse_P(
+    200,
+    contentType,
+    EMPTY_PWA_ASSET,
+    sizeof(EMPTY_PWA_ASSET));
+  response->addHeader("Cache-Control", "no-store");
+  request->send(response);
 }
 
 // =============================================================================
@@ -612,9 +624,9 @@ let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
 const el = id => document.getElementById(id);
 const setText = (id, value) => { el(id).textContent = value; };
-const GEFAESS_COUNT = 4;
+const GEFAESS_COUNT = 3;
 const GEFAESS_INDEXES = Array.from({ length: GEFAESS_COUNT }, (_, index) => index);
-const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3', 'Gefäß 4'];
+const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3'];
 const CMD = Object.freeze({
   saveDose: 'save_dose',
   tare: 'tare',
@@ -822,7 +834,7 @@ function renderCalibrationWizard() {
     setWizardContent(
       'Waage kalibrieren: Tarieren',
       'Bitte die Waage vollständig leeren und dann tarieren.',
-      '<div class="wizard-note">Die aktuelle Anzeige sollte danach nahe 0,0 g stehen.</div>',
+      `<div class="wizard-note">Aktuelles Gewicht: <b class="wizardLiveWeight">${fmtG(lastState?.weight?.actual_g)} g</b><br>Die Anzeige sollte nach dem Tarieren nahe 0,0 g stehen.</div>`,
       [
         wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
         wizardButton('Tarieren', '', () => sendCommandAndThen(CMD.wizardTare, 'Kalibrierung: Tara gesendet …', 1))
@@ -906,7 +918,7 @@ function renderMeasureGefaessWizard() {
     setWizardContent(
       'Gefäße einmessen: Tarieren',
       'Bitte die Waage vollständig leeren und dann tarieren.',
-      '<div class="wizard-note">Danach das ausgewählte Gefäß auflegen.</div>',
+      `<div class="wizard-note">Aktuelles Gewicht: <b class="wizardLiveWeight">${fmtG(lastState?.weight?.actual_g)} g</b><br>Danach das ausgewählte Gefäß auflegen.</div>`,
       [
         wizardButton('Zurück', 'secondary', () => { wizard.step = 0; renderWizard(); }),
         wizardButton('Tarieren', '', () => sendCommandAndThen(CMD.wizardTare, 'Gefäß einmessen: Tara gesendet …', 2))
@@ -983,9 +995,13 @@ function renderWizard() {
 }
 
 function updateWizardLiveFields() {
+  const currentWeight = `${fmtG(lastState?.weight?.actual_g)} g`;
+  document.querySelectorAll('.wizardLiveWeight').forEach(node => {
+    node.textContent = currentWeight;
+  });
   const weightEl = el('gefaessLiveWeight');
   if (weightEl) {
-    weightEl.textContent = `${fmtG(lastState?.weight?.actual_g)} g`;
+    weightEl.textContent = currentWeight;
   }
 }
 
@@ -1642,7 +1658,7 @@ function initWebUi() {
   bindSettingsHandlers();
   bindOverlayHandlers();
   startClientTimers();
-  connect();
+  setTimeout(connect, 750);
 }
 
 window.addEventListener('beforeunload', () => {
@@ -1787,40 +1803,41 @@ static bool isSetupApHost(AsyncWebServerRequest* request)
   return setupIp.length() > 0 && host.startsWith(setupIp);
 }
 
-static void sendProgmemChunked(AsyncWebServerRequest* request,
-                               const char* content,
-                               const char* contentType,
-                               const char* cacheControl)
+static void sendProgmemResponse(AsyncWebServerRequest* request,
+                                const char* content,
+                                const char* contentType,
+                                const char* cacheControl)
 {
   if (!request || !content || !contentType) {
     return;
   }
 
   const size_t totalLen = strlen_P(content);
-  AsyncWebServerResponse* response = request->beginChunkedResponse(
+  AsyncWebServerResponse* response = request->beginResponse_P(
+    200,
     contentType,
-    [content, totalLen](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
-      if (index >= totalLen) {
-        return 0;
-      }
-
-      const size_t remaining = totalLen - index;
-      const size_t chunkLen = remaining < maxLen ? remaining : maxLen;
-      memcpy_P(buffer, content + index, chunkLen);
-      return chunkLen;
-    });
+    reinterpret_cast<const uint8_t*>(content),
+    totalLen);
 
   if (cacheControl && cacheControl[0] != '\0') {
     response->addHeader("Cache-Control", cacheControl);
   }
+
+  // Auf dem T4-S3/LVGL-Zweig zeigte die chunked PROGMEM-Auslieferung lange
+  // Time-to-first-byte-Werte und teils abgebrochene Transfers. Die Dateien sind
+  // statisch und ihre Laenge ist bekannt, daher ist eine normale PROGMEM-
+  // Response mit Content-Length hier robuster als Transfer-Encoding: chunked.
+  // Kein erzwungenes "Connection: close": der Browser darf TCP-Verbindungen
+  // wiederverwenden. Das vermeidet mehrere neue Verbindungsaufbauten fuer die
+  // CSS/JS-Dateien, was bei schwachem WLAN spuerbar schneller ist.
   request->send(response);
 }
 
-static void sendProgmemHtmlChunked(AsyncWebServerRequest* request, const char* html)
+static void sendProgmemHtmlResponse(AsyncWebServerRequest* request, const char* html)
 {
   // Die WebUI wird direkt aus dem Firmware-Image geliefert. Nach OTA- oder
   // WLAN-Setup-Aenderungen soll der Browser das HTML sicher neu laden.
-  sendProgmemChunked(request, html, "text/html", "no-store");
+  sendProgmemResponse(request, html, "text/html", "no-store");
 }
 
 void coffeeWebHandleRoot(AsyncWebServerRequest* request)
@@ -1830,11 +1847,11 @@ void coffeeWebHandleRoot(AsyncWebServerRequest* request)
   }
 
   if (isSetupApHost(request)) {
-    sendProgmemHtmlChunked(request, WIFI_SETUP_HTML);
+    sendProgmemHtmlResponse(request, WIFI_SETUP_HTML);
     return;
   }
 
-  sendProgmemHtmlChunked(request, INDEX_HTML);
+  sendProgmemHtmlResponse(request, INDEX_HTML);
 }
 
 
@@ -1927,27 +1944,27 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/wifi-setup", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendProgmemHtmlChunked(request, WIFI_SETUP_HTML);
+    sendProgmemHtmlResponse(request, WIFI_SETUP_HTML);
   });
 
   server.on("/coffee.css", HTTP_GET, [](AsyncWebServerRequest* request) {
     // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemChunked(request, COFFEE_CSS, "text/css", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_CSS, "text/css", "public, max-age=31536000, immutable");
   });
 
   server.on("/coffee_core.js", HTTP_GET, [](AsyncWebServerRequest* request) {
     // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemChunked(request, COFFEE_CORE_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_CORE_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
   server.on("/coffee_render.js", HTTP_GET, [](AsyncWebServerRequest* request) {
     // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemChunked(request, COFFEE_RENDER_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_RENDER_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
   server.on("/coffee_events.js", HTTP_GET, [](AsyncWebServerRequest* request) {
     // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemChunked(request, COFFEE_EVENTS_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_EVENTS_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
   server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -2139,15 +2156,15 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendSpiffsAssetOrNoContent(request, "/kaffeewaage-192.png", "image/png");
+    sendOptionalPwaAssetEmpty(request, "image/png");
   });
 
   server.on("/icon-512.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendSpiffsAssetOrNoContent(request, "/kaffeewaage-512.png", "image/png");
+    sendOptionalPwaAssetEmpty(request, "image/png");
   });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendSpiffsAssetOrNoContent(request, "/kaffeewaage.ico", "image/x-icon");
+    sendOptionalPwaAssetEmpty(request, "image/x-icon");
   });
 
   server.addHandler(&ws);

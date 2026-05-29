@@ -160,6 +160,8 @@ int32_t targetTenthsBySiebtraeger[4] = {180, 90, 180, 180};
 int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT] = {-1, -1, -1};
 uint8_t gefaessMeasureStep = 0;
 uint8_t gefaessMeasureSlot = 0;
+uint8_t webSelectedGefaessSlot = 0;
+bool webWizardActive = false;
 int32_t gefaessMeasureTareTenths = 0;
 int32_t gefaessMeasureValueTenths = 0;
 int32_t demoTargetTenths = 180;
@@ -570,9 +572,13 @@ const char *vessel_name(uint8_t index)
 
 void update_autodetect_display()
 {
-    set_text(autodetectStateLabel, "Auto");
+    const bool autodetectEffective = autodetectEnabled && !webWizardActive;
+    set_text(autodetectStateLabel, webWizardActive ? "Auto Pause" : "Auto");
     if (autodetectLed) {
-        lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEnabled ? COLOR_AUTODETECT_LED_ON : COLOR_AUTODETECT_LED_OFF), 0);
+        lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEffective ? COLOR_AUTODETECT_LED_ON : COLOR_AUTODETECT_LED_OFF), 0);
+    }
+    if (autodetectButtonLabel && lv_obj_is_valid(autodetectButtonLabel)) {
+        lv_label_set_text(autodetectButtonLabel, webWizardActive ? "Autodetect: PAUSE" : (autodetectEnabled ? "Autodetect: AN" : "Autodetect: AUS"));
     }
 }
 
@@ -628,7 +634,8 @@ bool recover_negative_startup_tare_if_needed()
         gefaessMeasureOverlay ||
         scaleCalibrationOverlay ||
         maintenanceResetOverlay ||
-        restartOverlay;
+        restartOverlay ||
+        webWizardActive;
 
     if (blocked) {
         return false;
@@ -725,7 +732,8 @@ void update_autodetect_gefaess_preview()
         vesselOverlay ||
         gefaessManageOverlay ||
         gefaessMeasureOverlay ||
-        scaleCalibrationOverlay;
+        scaleCalibrationOverlay ||
+        webWizardActive;
 
     const uint32_t now = millis();
 
@@ -3872,6 +3880,22 @@ bool ui_t4s3_web_stopwatch_running()
     return timerRunning;
 }
 
+
+float ui_t4s3_web_calibration_weight_g()
+{
+    return static_cast<float>(scaleCalibrationTargetTenths) / 10.0f;
+}
+
+uint8_t ui_t4s3_web_selected_gefaess()
+{
+    return webSelectedGefaessSlot;
+}
+
+bool ui_t4s3_web_wizard_active()
+{
+    return webWizardActive;
+}
+
 static bool ui_t4s3_web_tare()
 {
     if (!t4s3_scale_is_ready()) {
@@ -4025,6 +4049,129 @@ static bool ui_t4s3_web_delete_gefaess(uint8_t idx)
     return true;
 }
 
+
+static bool parse_web_float_suffix(const char *cmd, const char *prefix, float &value)
+{
+    if (!cmd || !prefix) {
+        return false;
+    }
+    const size_t prefixLen = strlen(prefix);
+    if (strncmp(cmd, prefix, prefixLen) != 0) {
+        return false;
+    }
+
+    char *end = nullptr;
+    value = strtof(cmd + prefixLen, &end);
+    return end && *end == '\0' && isfinite(value);
+}
+
+static bool ui_t4s3_web_wizard_begin()
+{
+    webWizardActive = true;
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectAutoTaredGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+    manualTareSaveArmed = false;
+    set_save_ready(false);
+    update_autodetect_display();
+    update_status("Web-Assistent gestartet - Autodetect pausiert");
+    return true;
+}
+
+static bool ui_t4s3_web_wizard_end()
+{
+    webWizardActive = false;
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+    update_autodetect_display();
+    update_status("Web-Assistent beendet");
+    return true;
+}
+
+static bool ui_t4s3_web_set_calibration_weight(float grams)
+{
+    if (!isfinite(grams) || grams <= 0.0f || grams > 5000.0f) {
+        update_status("Kalibriergewicht ungültig");
+        return false;
+    }
+
+    scaleCalibrationTargetTenths = static_cast<int32_t>(grams * 10.0f + 0.5f);
+    update_scale_calibration_display();
+
+    char gramsText[24];
+    char msg[80];
+    format_grams(gramsText, sizeof(gramsText), scaleCalibrationTargetTenths);
+    snprintf(msg, sizeof(msg), "Kalibriergewicht gesetzt: %s", gramsText);
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_apply_calibration(float grams)
+{
+    if (!ui_t4s3_web_set_calibration_weight(grams)) {
+        return false;
+    }
+
+    const float calibrationWeight = static_cast<float>(scaleCalibrationTargetTenths) / 10.0f;
+    if (!t4s3_scale_calibrate(calibrationWeight)) {
+        update_status("Kalibrierung fehlgeschlagen");
+        return false;
+    }
+
+    char gramsText[24];
+    char msg[96];
+    format_grams(gramsText, sizeof(gramsText), scaleCalibrationTargetTenths);
+    snprintf(msg, sizeof(msg), "Kalibrierung mit %s gespeichert", gramsText);
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_select_gefaess(uint8_t idx)
+{
+    if (idx >= T4S3_GEFAESS_SLOT_COUNT) {
+        return false;
+    }
+
+    webSelectedGefaessSlot = idx;
+    gefaessMeasureSlot = idx;
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Gefäß %u ausgewählt", static_cast<unsigned>(idx + 1));
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_save_measured_gefaess()
+{
+    if (webSelectedGefaessSlot >= T4S3_GEFAESS_SLOT_COUNT) {
+        return false;
+    }
+
+    const int32_t measuredTenths = current_gefaess_measure_tenths();
+    if (measuredTenths <= 0) {
+        update_status("Gefäßgewicht ungültig");
+        return false;
+    }
+
+    gefaessWeightTenths[webSelectedGefaessSlot] = measuredTenths;
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectAutoTaredGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+    save_current_ui_settings();
+    update_gefaess_storage_display();
+    update_gefaess_manage_display();
+
+    char gramsText[24];
+    char msg[80];
+    format_grams(gramsText, sizeof(gramsText), measuredTenths);
+    snprintf(msg, sizeof(msg), "Gefäß %u gespeichert: %s", static_cast<unsigned>(webSelectedGefaessSlot + 1), gramsText);
+    update_status(msg);
+    return true;
+}
+
 bool ui_t4s3_handle_web_command(const char *cmd)
 {
     if (!cmd || cmd[0] == '\0') {
@@ -4033,7 +4180,16 @@ bool ui_t4s3_handle_web_command(const char *cmd)
 
     ui_t4s3_notify_activity();
 
-    if (strcmp(cmd, "tare") == 0 || strcmp(cmd, "web_wizard_tare") == 0) {
+    if (strcmp(cmd, "web_wizard_begin") == 0) {
+        return ui_t4s3_web_wizard_begin();
+    }
+    if (strcmp(cmd, "web_wizard_end") == 0) {
+        return ui_t4s3_web_wizard_end();
+    }
+    if (strcmp(cmd, "web_wizard_tare") == 0) {
+        return ui_t4s3_web_tare();
+    }
+    if (strcmp(cmd, "tare") == 0) {
         return ui_t4s3_web_tare();
     }
     if (strcmp(cmd, "save_dose") == 0) {
@@ -4060,15 +4216,25 @@ bool ui_t4s3_handle_web_command(const char *cmd)
         }
         return ui_t4s3_web_select_siebtraeger(static_cast<uint8_t>(indexChar - '0'));
     }
-    constexpr const char *kSetSelectedSiebtraegerWeightPrefix = "set_selected_siebtraeger_weight_";
-    const size_t setSelectedSiebtraegerWeightPrefixLen = strlen(kSetSelectedSiebtraegerWeightPrefix);
-    if (strncmp(cmd, kSetSelectedSiebtraegerWeightPrefix, setSelectedSiebtraegerWeightPrefixLen) == 0) {
-        char *end = nullptr;
-        const float grams = strtof(cmd + setSelectedSiebtraegerWeightPrefixLen, &end);
-        if (!end || *end != '\0') {
+    if (strncmp(cmd, "select_gefaess_", 15) == 0) {
+        const char indexChar = cmd[15];
+        if (indexChar < '0' || indexChar > '9') {
             return false;
         }
-        return ui_t4s3_web_set_selected_weight(grams);
+        return ui_t4s3_web_select_gefaess(static_cast<uint8_t>(indexChar - '0'));
+    }
+    float parsedGrams = 0.0f;
+    if (parse_web_float_suffix(cmd, "set_selected_siebtraeger_weight_", parsedGrams)) {
+        return ui_t4s3_web_set_selected_weight(parsedGrams);
+    }
+    if (parse_web_float_suffix(cmd, "scale_calibration_set_weight_", parsedGrams)) {
+        return ui_t4s3_web_set_calibration_weight(parsedGrams);
+    }
+    if (parse_web_float_suffix(cmd, "scale_calibration_apply_", parsedGrams)) {
+        return ui_t4s3_web_apply_calibration(parsedGrams);
+    }
+    if (strcmp(cmd, "measure_gefaess_save") == 0) {
+        return ui_t4s3_web_save_measured_gefaess();
     }
     if (strncmp(cmd, "delete_gefaess_", 15) == 0) {
         const char indexChar = cmd[15];
