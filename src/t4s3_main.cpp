@@ -19,6 +19,7 @@
 #include "t4s3_scale.h"
 #include "app_state.h"
 #include "coffee_web.h"
+#include "coffee_ota.h"
 
 LilyGo_Class amoled;
 
@@ -581,8 +582,7 @@ static bool handleT4S3WebCommand(const char *cmd)
 
     if (strcmp(cmd, "restart_device") == 0) {
         Serial.println("[T4S3][WebUI] restart requested");
-        delay(100);
-        ESP.restart();
+        coffeeOtaRequestReboot();
         return true;
     }
 
@@ -611,6 +611,7 @@ static void beginWebUi()
     g_server.on("/", HTTP_GET, coffeeWebHandleRoot);
     coffeeWebSetCommandHandler(handleT4S3WebCommand);
     coffeeWebBegin(g_server);
+    coffeeOtaBegin(g_server);
     g_server.begin();
     g_webUiStarted = true;
     Serial.println("[T4S3][WebUI] HTTP server started on port 80");
@@ -701,6 +702,7 @@ void loop()
         beginWebUi();
     }
     tickWebUi(now);
+    coffeeOtaLoop();
 
     if (!g_displaySleeping) {
         const uint16_t timeoutMinutes = ui_t4s3_get_screen_timeout_minutes();

@@ -549,6 +549,10 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .gefaess-list { display: grid; gap: 8px; margin-top: 10px; }
     .gefaess-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(148,163,184,.14); }
     .gefaess-row:last-child { border-bottom: 0; }
+    .siebtraeger-settings-row { align-items: flex-end; }
+    .siebtraeger-settings-label { display: grid; gap: 6px; min-width: 0; flex: 1 1 auto; }
+    .siebtraeger-settings-label input { width: 100%; box-sizing: border-box; }
+    .siebtraeger-settings-row .save-siebtraeger-name { flex: 0 0 auto; min-width: 132px; }
     .gefaess-weight { font-weight: 700; }
     .gefaess-missing { color: var(--muted); }
     .page { display: grid; gap: 14px; }
@@ -626,6 +630,8 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       .weight-head { align-items: flex-start; }
       .autodetect-row { margin-left: auto; }
       button.compact, .button-row, .nav-button { width: 100%; }
+      .siebtraeger-settings-row { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 8px; }
+      .siebtraeger-settings-row .save-siebtraeger-name { width: 100%; min-width: 0; }
       .modal-actions { grid-template-columns: 1fr; }
     }
 )rawliteral";
@@ -1273,8 +1279,8 @@ function renderSiebtraegerSettings(s) {
   list.innerHTML = SIEBTRAEGER_INDEXES.map(index => {
     const name = String(names[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
     const target = Number(targets[index] || 0);
-    return `<div class="gefaess-row">
-      <label style="display:grid; gap:4px; min-width:0; flex:1;">
+    return `<div class="gefaess-row siebtraeger-settings-row">
+      <label class="siebtraeger-settings-label">
         <span><b>Profil ${index + 1}</b> · Sollgewicht ${fmtG(target)} g</span>
         <input class="siebtraeger-name-input" data-siebtraeger-name-index="${index}" maxlength="23" value="${escapeHtml(name)}" aria-label="Siebträger ${index + 1} Bezeichnung">
       </label>

@@ -15,7 +15,7 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kaffeewaage OTA Update</title>
+  <title>Kaffeewaage T4-S3 OTA Update</title>
   <style>
     body { font-family: Arial, sans-serif; background: #f3f6fb; margin: 0; padding: 24px; color: #1f2933; }
     .panel { max-width: 720px; margin: 0 auto; background: white; border-radius: 12px; padding: 22px; box-shadow: 0 4px 18px rgba(0,0,0,0.12); }
@@ -41,12 +41,12 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
 </head>
 <body>
   <div class="panel">
-    <h1>Kaffeewaage OTA Update</h1>
-    <p class="hint">Hier koennen Firmware und SPIFFS-Dateisystem getrennt aktualisiert werden.</p>
+    <h1>Kaffeewaage T4-S3 OTA Update</h1>
+    <p class="hint">Hier kann die Firmware per OTA aktualisiert werden. Das Dateisystem ist optional und wird erst fuer echte PWA-Icons/Favicons benoetigt.</p>
 
     <div class="card">
       <h2>Firmware aktualisieren</h2>
-      <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/firmware.bin</code></p>
+      <p class="hint">Datei: <code>.pio/build/lilygo-t4-s3-lvgl/firmware.bin</code></p>
       <form class="ota-form" method="POST" action="/update/firmware" enctype="multipart/form-data" data-label="Firmware" data-expected="firmware.bin">
         <input type="file" name="update" accept=".bin" required>
         <div class="file-check"></div>
@@ -57,12 +57,12 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="card">
-      <h2>Dateisystem aktualisieren</h2>
-      <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/spiffs.bin</code></p>
+      <h2>Dateisystem / PWA-Assets aktualisieren</h2>
+      <p class="hint">Optional. Datei: <code>.pio/build/lilygo-t4-s3-lvgl/spiffs.bin</code> oder <code>littlefs.bin</code>. Die WebUI selbst liegt aktuell in der Firmware.</p>
       <form class="ota-form" method="POST" action="/update/filesystem" enctype="multipart/form-data" data-label="SPIFFS" data-expected="spiffs.bin,littlefs.bin">
         <input type="file" name="update" accept=".bin" required>
         <div class="file-check"></div>
-        <button type="submit">SPIFFS hochladen</button>
+        <button type="submit">Dateisystem hochladen</button>
         <progress value="0" max="100" hidden></progress>
         <div class="status"></div>
       </form>
@@ -312,7 +312,7 @@ static void handleFilesystemUpload(AsyncWebServerRequest *request, const String&
       return;
     }
 
-    Serial.print("SPIFFS update started: ");
+    Serial.print("Filesystem update started: ");
     Serial.println(filename);
     SPIFFS.end();
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
@@ -332,7 +332,7 @@ static void handleFilesystemUpload(AsyncWebServerRequest *request, const String&
 
   if (final) {
     if (Update.end(true)) {
-      Serial.print("SPIFFS update complete: ");
+      Serial.print("Filesystem update complete: ");
       Serial.println(index + len);
     } else {
       Update.printError(Serial);
