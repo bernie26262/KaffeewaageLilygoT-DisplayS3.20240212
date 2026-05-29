@@ -177,16 +177,26 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <div id="settingsMaintenancePanel" class="settings-section">
     <div class="settings-section-title">Wartung</div>
     <div class="settings-section-hint">Häufig genutzte Wartungsanzeigen und Reset-Funktionen.</div>
+
     <section id="maintenanceDetailCard" class="card maintenance ok show">
-      <div class="stats-title">Wartung</div>
       <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
       <ul class="maintenance-list" id="maintenanceDetailList"></ul>
-      <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
-      <div class="settings-actions">
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Wartung zurücksetzen</div>
+      <div class="small">Setzt den Zeitpunkt der jeweiligen Wartung auf jetzt. Die Werte seit dieser Wartung werden dabei auf 0 gesetzt.</div>
+      <div class="settings-actions" style="margin-top: 12px;">
         <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
         <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
         <button id="resetFilter" class="secondary">Filter gewechselt</button>
       </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Wartungsintervalle ändern</div>
+      <div class="small">Ändert nur den Zeitraum bis zur nächsten Fälligkeit. Der letzte Wartungszeitpunkt und die Werte seit Wartung bleiben unverändert.</div>
+      <div id="maintenanceIntervalList" class="gefaess-list" style="margin-top: 12px;"></div>
     </section>
   </div>
 
@@ -607,6 +617,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .wizard-field input, .wizard-field select { width: 100%; box-sizing: border-box; padding: 11px 12px; font-size: 1rem; }
     .wizard-note { background: #0b1520; border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin: 12px 0; font-size: .92rem; color: var(--muted-2); }
     .wizard-note.warn { background: rgba(245,158,11,.14); border-color: rgba(245,158,11,.32); color: #fde68a; }
+    .wizard-note.danger-note { background: rgba(239,68,68,.14); border-color: rgba(239,68,68,.35); color: #fecaca; }
     .danger { background: linear-gradient(180deg, #ef4444, #b91c1c); border-color: rgba(248,113,113,.45); }
     @media (max-width: 640px) {
       body { padding: 14px 14px calc(96px + env(safe-area-inset-bottom)); }
@@ -653,7 +664,8 @@ const CMD = Object.freeze({
   maintenanceResetGrinder: 'maintenance_reset_grinder',
   maintenanceResetFilter: 'maintenance_reset_filter',
   restartDevice: 'restart_device',
-  setStatsTotalsPrefix: 'set_stats_totals_'
+  setStatsTotalsPrefix: 'set_stats_totals_',
+  setMaintenanceIntervalPrefix: 'set_maintenance_interval_'
 });
 const fmtG = v => {
   let n = Number(v || 0);
@@ -691,6 +703,14 @@ const fmtDateTime = (epoch, valid) => {
   });
 };
 const fmtUptime = ms => fmtDayClockDuration(Math.floor(Number(ms || 0) / 1000));
+const maintenanceIntervalForm = seconds => {
+  const sec = Math.max(86400, Number(seconds) || 0);
+  if (sec % 604800 === 0) {
+    const weeks = Math.round(sec / 604800);
+    if (weeks >= 1 && weeks <= 52) return { value: weeks, unit: 'weeks' };
+  }
+  return { value: Math.max(1, Math.round(sec / 86400)), unit: 'days' };
+};
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const siebtraegerName = index => String(lastState?.selection?.siebtraeger_names?.[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
 const siebtraegerTarget = index => Number(lastState?.selection?.siebtraeger_targets_g?.[index] ?? 0);
@@ -973,18 +993,19 @@ function renderStatsTotalsWizard() {
   const currentShots = Number(lastState?.stats?.shots?.total ?? 0);
   const currentGround = fmtG(lastState?.stats?.ground?.total_g);
   setWizardContent(
-    'Gesamtwerte wirklich verändern?',
+    'Gesamtwerte ändern',
     'Hier können die Gesamtzahl der Shots und das gesamte Mahlgut korrigiert werden. Wartungszähler seit Reinigung oder Filterwechsel bleiben unverändert.',
-    `<label class="wizard-field"><span>Gesamtzahl Shots</span><input id="editShotsTotal" type="number" min="0" step="1" inputmode="numeric" value="${currentShots}"></label>` +
+    `<div class="wizard-note danger-note"><b>Achtung:</b> Beim Speichern werden die Gesamtwerte überschrieben. Das ist nur für Korrekturen gedacht.</div>` +
+    `<label class="wizard-field"><span>Gesamtzahl Shots</span><input id="editShotsTotal" type="number" min="0" max="65535" step="1" inputmode="numeric" value="${currentShots}"></label>` +
     `<label class="wizard-field"><span>Gesamtgewicht Mahlgut in g</span><input id="editGroundTotal" type="text" inputmode="decimal" value="${currentGround}"></label>`,
     [
       wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
-      wizardButton('Speichern', '', () => {
+      wizardButton('Gesamtwerte prüfen', 'danger', () => {
         const shots = Number(el('editShotsTotal').value);
         const ground = Number(el('editGroundTotal').value.replace(',', '.'));
 
-        if (!Number.isInteger(shots) || shots < 0) {
-          addLog('Ungültige Gesamtzahl Shots');
+        if (!Number.isInteger(shots) || shots < 0 || shots > 65535) {
+          addLog('Ungültige Gesamtzahl Shots (0 bis 65535)');
           return;
         }
         if (!Number.isFinite(ground) || ground < 0) {
@@ -994,8 +1015,13 @@ function renderStatsTotalsWizard() {
 
         const groundTenths = Math.round(ground * 10);
         const groundText = (groundTenths / 10).toFixed(1).replace('.', ',');
-        sendCommand(`${CMD.setStatsTotalsPrefix}${shots}_${groundTenths}`, `Gesamtwerte ändern gesendet: ${shots} Shots, ${groundText} g`);
         closeWizardOverlay();
+        openConfirmOverlay(
+          'Gesamtwerte überschreiben?',
+          `Die Gesamtwerte werden auf ${shots} Shots und ${groundText} g Mahlgut gesetzt. Die Werte seit Wartung bleiben unverändert.`,
+          `${CMD.setStatsTotalsPrefix}${shots}_${groundTenths}`,
+          `Gesamtwerte ändern gesendet: ${shots} Shots, ${groundText} g`
+        );
       })
     ]
   );
@@ -1153,6 +1179,41 @@ function renderMaintenance(m) {
       .map(line => `<li class="maintenance-item ${line.due ? 'due' : 'ok'}">${line.text}</li>`)
       .join('');
   }
+
+  renderMaintenanceIntervals(m);
+}
+
+function renderMaintenanceIntervals(m) {
+  const list = el('maintenanceIntervalList');
+  if (!list) return;
+
+  if (document.activeElement && list.contains(document.activeElement)) {
+    return;
+  }
+
+  const configs = [
+    { key: 'machine', label: 'Kaffeemaschine', seconds: m?.machine_interval_sec || 864000, standard: 'Standard: 10 Tage' },
+    { key: 'grinder', label: 'Mühle', seconds: m?.grinder_interval_sec || 2419200, standard: 'Standard: 4 Wochen' },
+    { key: 'filter', label: 'Filter', seconds: m?.filter_interval_sec || 7257600, standard: 'Standard: 12 Wochen' }
+  ];
+
+  list.innerHTML = configs.map(cfg => {
+    const form = maintenanceIntervalForm(cfg.seconds);
+    return `<div class="gefaess-row">
+      <div>
+        <b>${cfg.label}</b><br>
+        <span class="small">Intervall für nächste Fälligkeit · ${cfg.standard}</span>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+        <input class="maintenance-interval-value" data-maintenance-key="${cfg.key}" type="number" min="1" max="365" step="1" inputmode="numeric" value="${form.value}" style="width:82px;">
+        <select class="maintenance-interval-unit" data-maintenance-key="${cfg.key}">
+          <option value="days"${form.unit === 'days' ? ' selected' : ''}>Tage</option>
+          <option value="weeks"${form.unit === 'weeks' ? ' selected' : ''}>Wochen</option>
+        </select>
+        <button class="secondary save-maintenance-interval" data-maintenance-key="${cfg.key}" type="button">Speichern</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ===== Stoppuhr =====
@@ -1586,6 +1647,47 @@ function handleSiebtraegerSettingsClick(e) {
   sendCommand(`set_siebtraeger_name_${idx}_${encodeURIComponent(name)}`, `Siebträger-Bezeichnung gesendet: ${name}`);
 }
 
+function handleMaintenanceIntervalClick(e) {
+  const button = e.target.closest('.save-maintenance-interval');
+  if (!button) return;
+
+  const key = button.dataset.maintenanceKey;
+  const valueInput = document.querySelector(`.maintenance-interval-value[data-maintenance-key="${key}"]`);
+  const unitSelect = document.querySelector(`.maintenance-interval-unit[data-maintenance-key="${key}"]`);
+  const value = Number(valueInput?.value);
+  const unit = String(unitSelect?.value || 'days');
+
+  if (!['machine', 'grinder', 'filter'].includes(key)) {
+    addLog('Ungültiger Wartungsbereich');
+    return;
+  }
+  if (!Number.isInteger(value) || value < 1) {
+    addLog('Ungültiges Wartungsintervall');
+    valueInput?.focus();
+    return;
+  }
+  if (unit === 'days' && value > 365) {
+    addLog('Maximal 365 Tage erlaubt');
+    valueInput?.focus();
+    return;
+  }
+  if (unit === 'weeks' && value > 52) {
+    addLog('Maximal 52 Wochen erlaubt');
+    valueInput?.focus();
+    return;
+  }
+
+  const seconds = value * (unit === 'weeks' ? 604800 : 86400);
+  const labels = { machine: 'Kaffeemaschine', grinder: 'Mühle', filter: 'Filter' };
+  const unitLabel = unit === 'weeks' ? (value === 1 ? 'Woche' : 'Wochen') : (value === 1 ? 'Tag' : 'Tage');
+  openConfirmOverlay(
+    `${labels[key]}-Intervall ändern?`,
+    `Das Wartungsintervall wird auf ${value} ${unitLabel} gesetzt. Der letzte Wartungszeitpunkt und die Werte seit Wartung bleiben unverändert.`,
+    `${CMD.setMaintenanceIntervalPrefix}${key}_${seconds}`,
+    `Wartungsintervall speichern: ${labels[key]} ${value} ${unitLabel} …`
+  );
+}
+
 function handleGefaessListClick(e) {
   const button = e.target.closest('.delete-gefaess');
   if (!button) return;
@@ -1698,6 +1800,7 @@ function bindSettingsHandlers() {
     CMD.maintenanceResetFilter,
     'Reset Filter gesendet …'
   ));
+  el('maintenanceIntervalList').addEventListener('click', handleMaintenanceIntervalClick);
   el('gefaessList').addEventListener('click', handleGefaessListClick);
   el('siebtraegerSettingsList').addEventListener('click', handleSiebtraegerSettingsClick);
 }
@@ -2309,6 +2412,9 @@ static String buildStateJson(const AppState& s)
   doc["maintenance"]["machine_seconds_to_due"] = s.maintenance.machine_seconds_to_due;
   doc["maintenance"]["filter_seconds_to_due"] = s.maintenance.filter_seconds_to_due;
   doc["maintenance"]["due_count"] = s.maintenance.due_count;
+  doc["maintenance"]["grinder_interval_sec"] = s.maintenance.grinder_interval_sec;
+  doc["maintenance"]["machine_interval_sec"] = s.maintenance.machine_interval_sec;
+  doc["maintenance"]["filter_interval_sec"] = s.maintenance.filter_interval_sec;
 
   doc["time"]["valid"] = s.time.valid;
   doc["time"]["epoch"] = s.time.epoch;

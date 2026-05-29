@@ -534,12 +534,16 @@ static void updateWebState(uint32_t now)
     g_webState.stats.shots.since_filter_change = g_webSettingsCache.filterShots;
 
     const uint32_t nowEpoch = t4s3_time_now_epoch();
-    g_webState.maintenance.machine_clean_due = maintenanceIsDue(g_webMaintenanceMachineEpoch, kMaintenanceMachineIntervalSec, nowEpoch);
-    g_webState.maintenance.grinder_clean_due = maintenanceIsDue(g_webMaintenanceGrinderEpoch, kMaintenanceGrinderIntervalSec, nowEpoch);
-    g_webState.maintenance.filter_change_due = maintenanceIsDue(g_webMaintenanceFilterEpoch, kMaintenanceFilterIntervalSec, nowEpoch);
-    g_webState.maintenance.machine_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceMachineEpoch, kMaintenanceMachineIntervalSec, nowEpoch);
-    g_webState.maintenance.grinder_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceGrinderEpoch, kMaintenanceGrinderIntervalSec, nowEpoch);
-    g_webState.maintenance.filter_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceFilterEpoch, kMaintenanceFilterIntervalSec, nowEpoch);
+    g_webState.maintenance.machine_clean_due = maintenanceIsDue(g_webMaintenanceMachineEpoch, g_webSettingsCache.maintenanceMachineIntervalSec, nowEpoch);
+    g_webState.maintenance.grinder_clean_due = maintenanceIsDue(g_webMaintenanceGrinderEpoch, g_webSettingsCache.maintenanceGrinderIntervalSec, nowEpoch);
+    g_webState.maintenance.filter_change_due = maintenanceIsDue(g_webMaintenanceFilterEpoch, g_webSettingsCache.maintenanceFilterIntervalSec, nowEpoch);
+    g_webState.maintenance.machine_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceMachineEpoch, g_webSettingsCache.maintenanceMachineIntervalSec, nowEpoch);
+    g_webState.maintenance.grinder_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceGrinderEpoch, g_webSettingsCache.maintenanceGrinderIntervalSec, nowEpoch);
+    g_webState.maintenance.filter_seconds_to_due = maintenanceSecondsToDue(g_webMaintenanceFilterEpoch, g_webSettingsCache.maintenanceFilterIntervalSec, nowEpoch);
+    g_webState.maintenance.machine_interval_sec = g_webSettingsCache.maintenanceMachineIntervalSec;
+    g_webState.maintenance.grinder_interval_sec = g_webSettingsCache.maintenanceGrinderIntervalSec;
+    g_webState.maintenance.filter_interval_sec = g_webSettingsCache.maintenanceFilterIntervalSec;
+
     g_webState.maintenance.due_count = 0;
     if (g_webState.maintenance.machine_clean_due) ++g_webState.maintenance.due_count;
     if (g_webState.maintenance.grinder_clean_due) ++g_webState.maintenance.due_count;

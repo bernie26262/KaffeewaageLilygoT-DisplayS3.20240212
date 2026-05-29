@@ -185,6 +185,9 @@ bool maintenanceDue = false;
 uint32_t maintenanceMachineEpoch = 0;
 uint32_t maintenanceGrinderEpoch = 0;
 uint32_t maintenanceFilterEpoch = 0;
+uint32_t maintenanceMachineIntervalSec = 864000UL;
+uint32_t maintenanceGrinderIntervalSec = 2419200UL;
+uint32_t maintenanceFilterIntervalSec = 7257600UL;
 lv_obj_t *maintenanceResetOverlay = nullptr;
 const char *maintenancePendingAction = nullptr;
 const char *maintenanceRequestedAction = nullptr;
@@ -521,7 +524,12 @@ void save_current_ui_settings()
     settings.totalGramsTenths = demoTotalGramsTenths;
     settings.machineGramsTenths = demoMachineGramsTenths;
     settings.grinderGramsTenths = demoGrinderGramsTenths;
-    settings.filterGramsTenths = demoFilterGramsTenths;t4s3_settings_save(settings);
+    settings.filterGramsTenths = demoFilterGramsTenths;
+    settings.maintenanceMachineIntervalSec = maintenanceMachineIntervalSec;
+    settings.maintenanceGrinderIntervalSec = maintenanceGrinderIntervalSec;
+    settings.maintenanceFilterIntervalSec = maintenanceFilterIntervalSec;
+
+    t4s3_settings_save(settings);
 }
 
 void load_saved_ui_settings()
@@ -559,7 +567,11 @@ void load_saved_ui_settings()
     demoTotalGramsTenths = settings.totalGramsTenths;
     demoMachineGramsTenths = settings.machineGramsTenths;
     demoGrinderGramsTenths = settings.grinderGramsTenths;
-    demoFilterGramsTenths = settings.filterGramsTenths;}
+    demoFilterGramsTenths = settings.filterGramsTenths;
+    maintenanceMachineIntervalSec = settings.maintenanceMachineIntervalSec;
+    maintenanceGrinderIntervalSec = settings.maintenanceGrinderIntervalSec;
+    maintenanceFilterIntervalSec = settings.maintenanceFilterIntervalSec;
+}
 bool consume_suppressed_click()
 {
     if (!suppressNextClick) {
@@ -1622,14 +1634,16 @@ void update_maintenance_due_state();
 void update_maintenance_warning_display();
 
 #if COFFEE_T4S3_MAINTENANCE_TEST_30S
-constexpr uint32_t MAINTENANCE_MACHINE_INTERVAL_SEC = 30UL;  // Test: 30 Sekunden
-constexpr uint32_t MAINTENANCE_GRINDER_INTERVAL_SEC = 30UL;  // Test: 30 Sekunden
-constexpr uint32_t MAINTENANCE_FILTER_INTERVAL_SEC  = 30UL;  // Test: 30 Sekunden
+constexpr uint32_t DEFAULT_MAINTENANCE_MACHINE_INTERVAL_SEC = 30UL;  // Test: 30 Sekunden
+constexpr uint32_t DEFAULT_MAINTENANCE_GRINDER_INTERVAL_SEC = 30UL;  // Test: 30 Sekunden
+constexpr uint32_t DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC  = 30UL;  // Test: 30 Sekunden
 #else
-constexpr uint32_t MAINTENANCE_MACHINE_INTERVAL_SEC = 864000UL;     // 10 Tage
-constexpr uint32_t MAINTENANCE_GRINDER_INTERVAL_SEC = 2419200UL;    // 28 Tage
-constexpr uint32_t MAINTENANCE_FILTER_INTERVAL_SEC  = 7257600UL;    // 12 Wochen / 84 Tage
+constexpr uint32_t DEFAULT_MAINTENANCE_MACHINE_INTERVAL_SEC = 864000UL;     // 10 Tage
+constexpr uint32_t DEFAULT_MAINTENANCE_GRINDER_INTERVAL_SEC = 2419200UL;    // 28 Tage
+constexpr uint32_t DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC  = 7257600UL;    // 12 Wochen / 84 Tage
 #endif
+constexpr uint32_t MIN_MAINTENANCE_INTERVAL_SEC = 86400UL;
+constexpr uint32_t MAX_MAINTENANCE_INTERVAL_SEC = 31536000UL;
 
 const char *maintenance_action_title(const char *action)
 {
@@ -1771,19 +1785,19 @@ void update_maintenance_display()
                                    maintenanceMachineTimeLabel,
                                    "Kaffeemaschine",
                                    maintenanceMachineEpoch,
-                                   MAINTENANCE_MACHINE_INTERVAL_SEC);
+                                   maintenanceMachineIntervalSec);
 
     update_maintenance_row_display(maintenanceGrinderLeftLabel,
                                    maintenanceGrinderTimeLabel,
                                    "Kaffeemühle",
                                    maintenanceGrinderEpoch,
-                                   MAINTENANCE_GRINDER_INTERVAL_SEC);
+                                   maintenanceGrinderIntervalSec);
 
     update_maintenance_row_display(maintenanceFilterLeftLabel,
                                    maintenanceFilterTimeLabel,
                                    "Filter",
                                    maintenanceFilterEpoch,
-                                   MAINTENANCE_FILTER_INTERVAL_SEC);
+                                   maintenanceFilterIntervalSec);
 }
 
 bool maintenance_item_due(uint32_t lastEpoch, uint32_t intervalSec, uint32_t now)
@@ -1818,9 +1832,9 @@ void update_maintenance_due_state()
     const uint32_t now = t4s3_time_now_epoch();
 
     const bool due =
-        maintenance_item_due(maintenanceMachineEpoch, MAINTENANCE_MACHINE_INTERVAL_SEC, now) ||
-        maintenance_item_due(maintenanceGrinderEpoch, MAINTENANCE_GRINDER_INTERVAL_SEC, now) ||
-        maintenance_item_due(maintenanceFilterEpoch, MAINTENANCE_FILTER_INTERVAL_SEC, now);
+        maintenance_item_due(maintenanceMachineEpoch, maintenanceMachineIntervalSec, now) ||
+        maintenance_item_due(maintenanceGrinderEpoch, maintenanceGrinderIntervalSec, now) ||
+        maintenance_item_due(maintenanceFilterEpoch, maintenanceFilterIntervalSec, now);
 
     if (maintenanceDue != due) {
         maintenanceDue = due;
@@ -3638,7 +3652,10 @@ void create_settings_wartung_page(lv_obj_t *screen)
     ensure_maintenance_epochs_initialized();
 
     lv_obj_t *hint = lv_label_create(panel);
-    lv_label_set_text(hint, "Intervalle: Kaffeemaschine 10 Tage, Mühle 28 Tage, Filter 12 Wochen");
+    lv_label_set_text_fmt(hint, "Intervalle: Kaffeemaschine %lu Tage, Mühle %lu Tage, Filter %lu Tage",
+                      static_cast<unsigned long>(maintenanceMachineIntervalSec / 86400UL),
+                      static_cast<unsigned long>(maintenanceGrinderIntervalSec / 86400UL),
+                      static_cast<unsigned long>(maintenanceFilterIntervalSec / 86400UL));
     lv_obj_set_width(hint, 410);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
     style_label(hint, COLOR_MUTED);
@@ -3651,11 +3668,11 @@ void create_settings_wartung_page(lv_obj_t *screen)
     char timeGrinder[32];
     char timeFilter[32];
 
-    maintenance_status(maintenanceMachineEpoch, MAINTENANCE_MACHINE_INTERVAL_SEC,
+    maintenance_status(maintenanceMachineEpoch, maintenanceMachineIntervalSec,
                        dirMachine, sizeof(dirMachine), timeMachine, sizeof(timeMachine));
-    maintenance_status(maintenanceGrinderEpoch, MAINTENANCE_GRINDER_INTERVAL_SEC,
+    maintenance_status(maintenanceGrinderEpoch, maintenanceGrinderIntervalSec,
                        dirGrinder, sizeof(dirGrinder), timeGrinder, sizeof(timeGrinder));
-    maintenance_status(maintenanceFilterEpoch, MAINTENANCE_FILTER_INTERVAL_SEC,
+    maintenance_status(maintenanceFilterEpoch, maintenanceFilterIntervalSec,
                        dirFilter, sizeof(dirFilter), timeFilter, sizeof(timeFilter));
 
     create_maintenance_row(panel, "Kaffeemaschine", dirMachine, timeMachine, "maintenance_reset_machine", 72);
@@ -4120,6 +4137,53 @@ static bool ui_t4s3_web_set_siebtraeger_name(uint8_t idx, const char *encodedNam
     return true;
 }
 
+static bool ui_t4s3_web_set_totals(uint32_t shots, int32_t gramsTenths)
+{
+    if (gramsTenths < 0 || shots > 65535UL || gramsTenths > 20000000L) {
+        update_status("Gesamtwerte ungültig");
+        return false;
+    }
+
+    demoTotalShots = static_cast<uint16_t>(shots);
+    demoTotalGramsTenths = gramsTenths;
+    save_current_ui_settings();
+    update_demo_stats_display();
+
+    char gramsText[24];
+    char msg[96];
+    format_grams(gramsText, sizeof(gramsText), demoTotalGramsTenths);
+    snprintf(msg, sizeof(msg), "Gesamtwerte gesetzt: %u Shots, %s", demoTotalShots, gramsText);
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_set_maintenance_interval(const char *item, uint32_t seconds)
+{
+    if (!item || seconds < MIN_MAINTENANCE_INTERVAL_SEC || seconds > MAX_MAINTENANCE_INTERVAL_SEC) {
+        update_status("Wartungsintervall ungültig");
+        return false;
+    }
+
+    if (strcmp(item, "machine") == 0) {
+        maintenanceMachineIntervalSec = seconds;
+    } else if (strcmp(item, "grinder") == 0) {
+        maintenanceGrinderIntervalSec = seconds;
+    } else if (strcmp(item, "filter") == 0) {
+        maintenanceFilterIntervalSec = seconds;
+    } else {
+        return false;
+    }
+
+    save_current_ui_settings();
+    update_maintenance_due_state();
+    update_maintenance_display();
+
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Wartungsintervall gespeichert: %lu Tage", static_cast<unsigned long>(seconds / 86400UL));
+    update_status(msg);
+    return true;
+}
+
 static bool ui_t4s3_web_reset_maintenance(const char *cmd)
 {
     if (!cmd) {
@@ -4368,6 +4432,42 @@ bool ui_t4s3_handle_web_command(const char *cmd)
         }
         return ui_t4s3_web_delete_gefaess(static_cast<uint8_t>(indexChar - '0'));
     }
+    if (strncmp(cmd, "set_stats_totals_", 17) == 0) {
+        const char *cursor = cmd + 17;
+        char *end = nullptr;
+        const unsigned long shots = strtoul(cursor, &end, 10);
+        if (end == cursor || !end || *end != '_') {
+            return false;
+        }
+        cursor = end + 1;
+        const long gramsTenths = strtol(cursor, &end, 10);
+        if (end == cursor || !end || *end != '\0') {
+            return false;
+        }
+        return ui_t4s3_web_set_totals(static_cast<uint32_t>(shots), static_cast<int32_t>(gramsTenths));
+    }
+
+    if (strncmp(cmd, "set_maintenance_interval_", 25) == 0) {
+        const char *cursor = cmd + 25;
+        const char *sep = strchr(cursor, '_');
+        if (!sep || sep == cursor) {
+            return false;
+        }
+        char item[12];
+        const size_t itemLen = static_cast<size_t>(sep - cursor);
+        if (itemLen >= sizeof(item)) {
+            return false;
+        }
+        memcpy(item, cursor, itemLen);
+        item[itemLen] = '\0';
+        char *end = nullptr;
+        const unsigned long seconds = strtoul(sep + 1, &end, 10);
+        if (end == sep + 1 || !end || *end != '\0') {
+            return false;
+        }
+        return ui_t4s3_web_set_maintenance_interval(item, static_cast<uint32_t>(seconds));
+    }
+
     if (ui_t4s3_web_reset_maintenance(cmd)) {
         return true;
     }

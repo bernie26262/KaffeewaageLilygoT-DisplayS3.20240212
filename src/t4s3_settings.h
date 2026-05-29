@@ -21,6 +21,9 @@ struct T4S3UiSettings {
     int32_t machineGramsTenths;
     int32_t grinderGramsTenths;
     int32_t filterGramsTenths;
+    uint32_t maintenanceMachineIntervalSec;
+    uint32_t maintenanceGrinderIntervalSec;
+    uint32_t maintenanceFilterIntervalSec;
     int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT];
 };
 
