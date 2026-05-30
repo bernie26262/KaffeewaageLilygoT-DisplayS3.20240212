@@ -66,6 +66,9 @@ struct MaintenanceState {
   uint32_t grinder_interval_sec = 0;
   uint32_t machine_interval_sec = 0;
   uint32_t filter_interval_sec = 0;
+  bool grinder_enabled = true;
+  bool machine_enabled = true;
+  bool filter_enabled = true;
 };
 
 struct TimeState {
@@ -100,4 +103,4 @@ struct AppState {
   TimeState time;
   SystemState system;
   StatusState status;
-};
+};

@@ -208,6 +208,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </section>
 
     <section class="card">
+      <div class="stats-title">Wartung aktivieren/deaktivieren</div>
+      <div class="small">Deaktivierte Wartungen behalten ihren gespeicherten Zeitpunkt, erzeugen aber keine Warnung.</div>
+      <div id="maintenanceEnabledList" class="gefaess-list" style="margin-top: 12px;"></div>
+    </section>
+
+    <section class="card">
       <div class="stats-title">Wartungsintervalle ändern</div>
       <div class="small">Ändert nur den Zeitraum bis zur nächsten Fälligkeit. Der letzte Wartungszeitpunkt und die Werte seit Wartung bleiben unverändert.</div>
       <div id="maintenanceIntervalList" class="gefaess-list" style="margin-top: 12px;"></div>
@@ -413,6 +419,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .maintenance-item { margin: 4px 0; }
     .maintenance-item.ok { color: #bbf7d0; }
     .maintenance-item.due { color: #fecaca; font-weight: 750; }
+    .maintenance-item.inactive { color: var(--muted); }
     /* ===== Autodetect / Gewichtskarte ===== */
     .scale-card { display: grid; gap: 12px; }
     .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -704,6 +711,7 @@ static const char COFFEE_CORE_JS[] PROGMEM = R"rawliteral(// ===== WebSocket / g
 let ws;
 let lastState = null;
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
+let maintenanceToggleRenderPauseUntil = 0;
 let stopwatchBaseClientMs = 0;
 let stopwatchBaseMs = 0;
 let stopwatchRunning = false;
@@ -735,7 +743,8 @@ const CMD = Object.freeze({
   maintenanceResetFilter: 'maintenance_reset_filter',
   restartDevice: 'restart_device',
   setStatsTotalsPrefix: 'set_stats_totals_',
-  setMaintenanceIntervalPrefix: 'set_maintenance_interval_'
+  setMaintenanceIntervalPrefix: 'set_maintenance_interval_',
+  setMaintenanceEnabledPrefix: 'set_maintenance_enabled_'
 });
 const fmtG = v => {
   let n = Number(v || 0);
@@ -772,14 +781,29 @@ const fmtDateTime = (epoch, valid) => {
     hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
 };
-const fmtUptime = ms => fmtDayClockDuration(Math.floor(Number(ms || 0) / 1000));
-const maintenanceIntervalForm = seconds => {
-  const sec = Math.max(86400, Number(seconds) || 0);
-  if (sec % 604800 === 0) {
-    const weeks = Math.round(sec / 604800);
+const fmtUptime = ms => {
+  const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const days = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  const clock = `${pad2(h)}:${pad2(m)}:${pad2(sec)}`;
+  if (days === 1) return `1 Tag, ${clock}`;
+  if (days > 1) return `${days} Tage, ${clock}`;
+  return clock;
+};
+const maintenanceIntervalForm = (seconds, key = '') => {
+  const minSec = key === 'machine' ? 60 : 86400;
+  const intervalSec = Math.max(minSec, Number(seconds) || 0);
+  if (key === 'machine' && intervalSec < 86400 && intervalSec % 60 === 0) {
+    const minutes = Math.round(intervalSec / 60);
+    if (minutes >= 1 && minutes <= 1440) return { value: minutes, unit: 'minutes' };
+  }
+  if (intervalSec % 604800 === 0) {
+    const weeks = Math.round(intervalSec / 604800);
     if (weeks >= 1 && weeks <= 52) return { value: weeks, unit: 'weeks' };
   }
-  return { value: Math.max(1, Math.round(sec / 86400)), unit: 'days' };
+  return { value: Math.max(1, Math.round(intervalSec / 86400)), unit: 'days' };
 };
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 const siebtraegerName = index => String(lastState?.selection?.siebtraeger_names?.[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
@@ -1143,13 +1167,16 @@ function fmtDuration(seconds) {
   return fmtDayClockDuration(seconds);
 }
 
-function maintenanceLine(label, secondsToDue) {
+function maintenanceLine(label, secondsToDue, enabled = true) {
+  if (!enabled) {
+    return { text: `${label}: inaktiv`, due: false, inactive: true };
+  }
   const seconds = Number(secondsToDue) || 0;
   const due = seconds < 0;
   const text = due
     ? `${label}: seit ${fmtDuration(seconds)} fällig`
     : `${label}: fällig in ${fmtDuration(seconds)}`;
-  return { text, due };
+  return { text, due, inactive: false };
 }
 
 function syncMaintenanceDueAt(key, secondsToDue) {
@@ -1198,9 +1225,9 @@ function renderMaintenance(m) {
   if (!card || !title || !list) return;
 
   const lines = [
-    maintenanceLine('Kaffeemaschine reinigen', adjustedMaintenanceSeconds('machine', m?.machine_seconds_to_due)),
-    maintenanceLine('Mühle reinigen', adjustedMaintenanceSeconds('grinder', m?.grinder_seconds_to_due)),
-    maintenanceLine('Filter wechseln', adjustedMaintenanceSeconds('filter', m?.filter_seconds_to_due))
+    maintenanceLine('Kaffeemaschine reinigen', adjustedMaintenanceSeconds('machine', m?.machine_seconds_to_due), m?.machine_enabled !== false),
+    maintenanceLine('Mühle reinigen', adjustedMaintenanceSeconds('grinder', m?.grinder_seconds_to_due), m?.grinder_enabled !== false),
+    maintenanceLine('Filter wechseln', adjustedMaintenanceSeconds('filter', m?.filter_seconds_to_due), m?.filter_enabled !== false)
   ];
 
   // Clientseitig aus den aktuell laufenden Sekundenwerten ableiten.
@@ -1246,11 +1273,42 @@ function renderMaintenance(m) {
       ? 'Wartungszeiten'
       : (dueCount === 1 ? 'Wartungszeiten: 1 Hinweis' : `Wartungszeiten: ${dueCount} Hinweise`);
     detailList.innerHTML = lines
-      .map(line => `<li class="maintenance-item ${line.due ? 'due' : 'ok'}">${line.text}</li>`)
+      .map(line => `<li class="maintenance-item ${line.inactive ? 'inactive' : (line.due ? 'due' : 'ok')}">${line.text}</li>`)
       .join('');
   }
 
+  renderMaintenanceEnabled(m);
   renderMaintenanceIntervals(m);
+}
+
+
+function renderMaintenanceEnabled(m) {
+  const list = el('maintenanceEnabledList');
+  if (!list) return;
+
+  if (Date.now() < maintenanceToggleRenderPauseUntil) {
+    return;
+  }
+
+  const configs = [
+    { key: 'machine', label: 'Reinigung Kaffeemaschine', enabled: m?.machine_enabled !== false },
+    { key: 'grinder', label: 'Reinigung Mühle', enabled: m?.grinder_enabled !== false },
+    { key: 'filter', label: 'Filterwechsel', enabled: m?.filter_enabled !== false }
+  ];
+
+  list.innerHTML = configs.map(cfg => {
+    const status = cfg.enabled ? 'Aktiv' : 'Inaktiv';
+    const nextValue = cfg.enabled ? 0 : 1;
+    const action = cfg.enabled ? 'Deaktivieren' : 'Aktivieren';
+    const cls = cfg.enabled ? 'secondary' : 'primary';
+    return `<div class="gefaess-row">
+      <div>
+        <b>${cfg.label}</b><br>
+        <span class="small">Status: ${status}</span>
+      </div>
+      <button class="${cls} toggle-maintenance-enabled" data-maintenance-key="${cfg.key}" data-maintenance-enabled="${nextValue}" type="button">${action}</button>
+    </div>`;
+  }).join('');
 }
 
 function renderMaintenanceIntervals(m) {
@@ -1268,7 +1326,7 @@ function renderMaintenanceIntervals(m) {
   ];
 
   list.innerHTML = configs.map(cfg => {
-    const form = maintenanceIntervalForm(cfg.seconds);
+    const form = maintenanceIntervalForm(cfg.seconds, cfg.key);
     return `<div class="gefaess-row">
       <div>
         <b>${cfg.label}</b><br>
@@ -1277,6 +1335,7 @@ function renderMaintenanceIntervals(m) {
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
         <input class="maintenance-interval-value" data-maintenance-key="${cfg.key}" type="number" min="1" max="365" step="1" inputmode="numeric" value="${form.value}" style="width:82px;">
         <select class="maintenance-interval-unit" data-maintenance-key="${cfg.key}">
+          ${cfg.key === 'machine' ? `<option value="minutes"${form.unit === 'minutes' ? ' selected' : ''}>Minuten</option>` : ''}
           <option value="days"${form.unit === 'days' ? ' selected' : ''}>Tage</option>
           <option value="weeks"${form.unit === 'weeks' ? ' selected' : ''}>Wochen</option>
         </select>
@@ -1746,6 +1805,37 @@ function handleSiebtraegerSettingsClick(e) {
   sendCommand(`set_siebtraeger_name_${idx}_${encodeURIComponent(name)}`, `Siebträger-Bezeichnung gesendet: ${name}`);
 }
 
+
+function pauseMaintenanceToggleRender(e) {
+  const button = e.target.closest('.toggle-maintenance-enabled');
+  if (!button) return;
+  maintenanceToggleRenderPauseUntil = Date.now() + 900;
+}
+
+function handleMaintenanceEnabledClick(e) {
+  const button = e.target.closest('.toggle-maintenance-enabled');
+  if (!button) return;
+
+  maintenanceToggleRenderPauseUntil = Date.now() + 900;
+
+  const key = button.dataset.maintenanceKey;
+  const enabled = button.dataset.maintenanceEnabled === '1';
+  if (!['machine', 'grinder', 'filter'].includes(key)) {
+    addLog('Ungültiger Wartungsbereich');
+    return;
+  }
+
+  const labels = { machine: 'Kaffeemaschine', grinder: 'Mühle', filter: 'Filterwechsel' };
+  openConfirmOverlay(
+    `${labels[key]} ${enabled ? 'aktivieren' : 'deaktivieren'}?`,
+    enabled
+      ? 'Diese Wartung erzeugt wieder Warnungen, wenn ihr gespeicherter Zeitraum abgelaufen ist. Der gespeicherte Wartungszeitpunkt bleibt unverändert.'
+      : 'Diese Wartung erzeugt keine Warnung mehr. Der gespeicherte Wartungszeitpunkt bleibt erhalten und wird nicht gelöscht.',
+    `${CMD.setMaintenanceEnabledPrefix}${key}_${enabled ? 1 : 0}`,
+    `Wartung ${labels[key]} ${enabled ? 'aktivieren' : 'deaktivieren'} …`
+  );
+}
+
 function handleMaintenanceIntervalClick(e) {
   const button = e.target.closest('.save-maintenance-interval');
   if (!button) return;
@@ -1765,6 +1855,15 @@ function handleMaintenanceIntervalClick(e) {
     valueInput?.focus();
     return;
   }
+  if (unit === 'minutes' && key !== 'machine') {
+    addLog('Minuten sind nur für Kaffeemaschine verfügbar');
+    return;
+  }
+  if (unit === 'minutes' && value > 1440) {
+    addLog('Maximal 1440 Minuten erlaubt');
+    valueInput?.focus();
+    return;
+  }
   if (unit === 'days' && value > 365) {
     addLog('Maximal 365 Tage erlaubt');
     valueInput?.focus();
@@ -1776,9 +1875,11 @@ function handleMaintenanceIntervalClick(e) {
     return;
   }
 
-  const seconds = value * (unit === 'weeks' ? 604800 : 86400);
+  const seconds = value * (unit === 'minutes' ? 60 : (unit === 'weeks' ? 604800 : 86400));
   const labels = { machine: 'Kaffeemaschine', grinder: 'Mühle', filter: 'Filter' };
-  const unitLabel = unit === 'weeks' ? (value === 1 ? 'Woche' : 'Wochen') : (value === 1 ? 'Tag' : 'Tage');
+  const unitLabel = unit === 'minutes'
+    ? (value === 1 ? 'Minute' : 'Minuten')
+    : (unit === 'weeks' ? (value === 1 ? 'Woche' : 'Wochen') : (value === 1 ? 'Tag' : 'Tage'));
   openConfirmOverlay(
     `${labels[key]}-Intervall ändern?`,
     `Das Wartungsintervall wird auf ${value} ${unitLabel} gesetzt. Der letzte Wartungszeitpunkt und die Werte seit Wartung bleiben unverändert.`,
@@ -1899,6 +2000,8 @@ function bindSettingsHandlers() {
     CMD.maintenanceResetFilter,
     'Reset Filter gesendet …'
   ));
+  el('maintenanceEnabledList').addEventListener('pointerdown', pauseMaintenanceToggleRender);
+  el('maintenanceEnabledList').addEventListener('click', handleMaintenanceEnabledClick);
   el('maintenanceIntervalList').addEventListener('click', handleMaintenanceIntervalClick);
   el('gefaessList').addEventListener('click', handleGefaessListClick);
   el('siebtraegerSettingsList').addEventListener('click', handleSiebtraegerSettingsClick);
@@ -2523,6 +2626,9 @@ static String buildStateJson(const AppState& s)
   doc["maintenance"]["grinder_interval_sec"] = s.maintenance.grinder_interval_sec;
   doc["maintenance"]["machine_interval_sec"] = s.maintenance.machine_interval_sec;
   doc["maintenance"]["filter_interval_sec"] = s.maintenance.filter_interval_sec;
+  doc["maintenance"]["grinder_enabled"] = s.maintenance.grinder_enabled;
+  doc["maintenance"]["machine_enabled"] = s.maintenance.machine_enabled;
+  doc["maintenance"]["filter_enabled"] = s.maintenance.filter_enabled;
 
   doc["time"]["valid"] = s.time.valid;
   doc["time"]["epoch"] = s.time.epoch;

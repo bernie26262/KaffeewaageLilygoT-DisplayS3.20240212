@@ -24,6 +24,9 @@ struct T4S3UiSettings {
     uint32_t maintenanceMachineIntervalSec;
     uint32_t maintenanceGrinderIntervalSec;
     uint32_t maintenanceFilterIntervalSec;
+    bool maintenanceMachineEnabled;
+    bool maintenanceGrinderEnabled;
+    bool maintenanceFilterEnabled;
     int32_t gefaessWeightTenths[T4S3_GEFAESS_SLOT_COUNT];
 };
 

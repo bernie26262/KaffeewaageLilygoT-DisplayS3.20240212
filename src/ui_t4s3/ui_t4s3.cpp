@@ -194,6 +194,9 @@ uint32_t maintenanceFilterEpoch = 0;
 uint32_t maintenanceMachineIntervalSec = 864000UL;
 uint32_t maintenanceGrinderIntervalSec = 2419200UL;
 uint32_t maintenanceFilterIntervalSec = 7257600UL;
+bool maintenanceMachineEnabled = true;
+bool maintenanceGrinderEnabled = true;
+bool maintenanceFilterEnabled = true;
 lv_obj_t *maintenanceResetOverlay = nullptr;
 const char *maintenancePendingAction = nullptr;
 const char *maintenanceRequestedAction = nullptr;
@@ -542,6 +545,9 @@ void save_current_ui_settings()
     settings.maintenanceMachineIntervalSec = maintenanceMachineIntervalSec;
     settings.maintenanceGrinderIntervalSec = maintenanceGrinderIntervalSec;
     settings.maintenanceFilterIntervalSec = maintenanceFilterIntervalSec;
+    settings.maintenanceMachineEnabled = maintenanceMachineEnabled;
+    settings.maintenanceGrinderEnabled = maintenanceGrinderEnabled;
+    settings.maintenanceFilterEnabled = maintenanceFilterEnabled;
 
     t4s3_settings_save(settings);
 }
@@ -585,6 +591,9 @@ void load_saved_ui_settings()
     maintenanceMachineIntervalSec = settings.maintenanceMachineIntervalSec;
     maintenanceGrinderIntervalSec = settings.maintenanceGrinderIntervalSec;
     maintenanceFilterIntervalSec = settings.maintenanceFilterIntervalSec;
+    maintenanceMachineEnabled = settings.maintenanceMachineEnabled;
+    maintenanceGrinderEnabled = settings.maintenanceGrinderEnabled;
+    maintenanceFilterEnabled = settings.maintenanceFilterEnabled;
 }
 bool consume_suppressed_click()
 {
@@ -1657,7 +1666,7 @@ constexpr uint32_t DEFAULT_MAINTENANCE_MACHINE_INTERVAL_SEC = 864000UL;     // 1
 constexpr uint32_t DEFAULT_MAINTENANCE_GRINDER_INTERVAL_SEC = 2419200UL;    // 28 Tage
 constexpr uint32_t DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC  = 7257600UL;    // 12 Wochen / 84 Tage
 #endif
-constexpr uint32_t MIN_MAINTENANCE_INTERVAL_SEC = 86400UL;
+constexpr uint32_t MIN_MAINTENANCE_INTERVAL_SEC = 60UL;
 constexpr uint32_t MAX_MAINTENANCE_INTERVAL_SEC = 31536000UL;
 
 const char *maintenance_action_title(const char *action)
@@ -1763,9 +1772,25 @@ void update_maintenance_row_display(lv_obj_t *leftLabel,
                                     lv_obj_t *timeLabel,
                                     const char *title,
                                     uint32_t lastEpoch,
-                                    uint32_t intervalSec)
+                                    uint32_t intervalSec,
+                                    bool enabled)
 {
     if (!leftLabel || !timeLabel) {
+        return;
+    }
+
+    if (!enabled) {
+        char leftText[80];
+        snprintf(leftText, sizeof(leftText), "%s: inaktiv", title);
+        set_text(leftLabel, leftText);
+        set_text(timeLabel, "keine Warnung");
+
+        if (leftLabel && lv_obj_is_valid(leftLabel)) {
+            lv_obj_set_style_text_color(leftLabel, lv_color_hex(COLOR_MUTED), 0);
+        }
+        if (timeLabel && lv_obj_is_valid(timeLabel)) {
+            lv_obj_set_style_text_color(timeLabel, lv_color_hex(COLOR_DIM), 0);
+        }
         return;
     }
 
@@ -1800,19 +1825,22 @@ void update_maintenance_display()
                                    maintenanceMachineTimeLabel,
                                    "Kaffeemaschine",
                                    maintenanceMachineEpoch,
-                                   maintenanceMachineIntervalSec);
+                                   maintenanceMachineIntervalSec,
+                                   maintenanceMachineEnabled);
 
     update_maintenance_row_display(maintenanceGrinderLeftLabel,
                                    maintenanceGrinderTimeLabel,
                                    "Kaffeemühle",
                                    maintenanceGrinderEpoch,
-                                   maintenanceGrinderIntervalSec);
+                                   maintenanceGrinderIntervalSec,
+                                   maintenanceGrinderEnabled);
 
     update_maintenance_row_display(maintenanceFilterLeftLabel,
                                    maintenanceFilterTimeLabel,
                                    "Filter",
                                    maintenanceFilterEpoch,
-                                   maintenanceFilterIntervalSec);
+                                   maintenanceFilterIntervalSec,
+                                   maintenanceFilterEnabled);
 }
 
 bool maintenance_item_due(uint32_t lastEpoch, uint32_t intervalSec, uint32_t now)
@@ -1847,9 +1875,9 @@ void update_maintenance_due_state()
     const uint32_t now = t4s3_time_now_epoch();
 
     const bool due =
-        maintenance_item_due(maintenanceMachineEpoch, maintenanceMachineIntervalSec, now) ||
-        maintenance_item_due(maintenanceGrinderEpoch, maintenanceGrinderIntervalSec, now) ||
-        maintenance_item_due(maintenanceFilterEpoch, maintenanceFilterIntervalSec, now);
+        (maintenanceMachineEnabled && maintenance_item_due(maintenanceMachineEpoch, maintenanceMachineIntervalSec, now)) ||
+        (maintenanceGrinderEnabled && maintenance_item_due(maintenanceGrinderEpoch, maintenanceGrinderIntervalSec, now)) ||
+        (maintenanceFilterEnabled && maintenance_item_due(maintenanceFilterEpoch, maintenanceFilterIntervalSec, now));
 
     if (maintenanceDue != due) {
         maintenanceDue = due;
@@ -3804,12 +3832,27 @@ void create_settings_wartung_page(lv_obj_t *screen)
     char timeGrinder[32];
     char timeFilter[32];
 
-    maintenance_status(maintenanceMachineEpoch, maintenanceMachineIntervalSec,
-                       dirMachine, sizeof(dirMachine), timeMachine, sizeof(timeMachine));
-    maintenance_status(maintenanceGrinderEpoch, maintenanceGrinderIntervalSec,
-                       dirGrinder, sizeof(dirGrinder), timeGrinder, sizeof(timeGrinder));
-    maintenance_status(maintenanceFilterEpoch, maintenanceFilterIntervalSec,
-                       dirFilter, sizeof(dirFilter), timeFilter, sizeof(timeFilter));
+    if (maintenanceMachineEnabled) {
+        maintenance_status(maintenanceMachineEpoch, maintenanceMachineIntervalSec,
+                           dirMachine, sizeof(dirMachine), timeMachine, sizeof(timeMachine));
+    } else {
+        strlcpy(dirMachine, "inaktiv", sizeof(dirMachine));
+        strlcpy(timeMachine, "keine Warnung", sizeof(timeMachine));
+    }
+    if (maintenanceGrinderEnabled) {
+        maintenance_status(maintenanceGrinderEpoch, maintenanceGrinderIntervalSec,
+                           dirGrinder, sizeof(dirGrinder), timeGrinder, sizeof(timeGrinder));
+    } else {
+        strlcpy(dirGrinder, "inaktiv", sizeof(dirGrinder));
+        strlcpy(timeGrinder, "keine Warnung", sizeof(timeGrinder));
+    }
+    if (maintenanceFilterEnabled) {
+        maintenance_status(maintenanceFilterEpoch, maintenanceFilterIntervalSec,
+                           dirFilter, sizeof(dirFilter), timeFilter, sizeof(timeFilter));
+    } else {
+        strlcpy(dirFilter, "inaktiv", sizeof(dirFilter));
+        strlcpy(timeFilter, "keine Warnung", sizeof(timeFilter));
+    }
 
     create_maintenance_row(panel, "Kaffeemaschine", dirMachine, timeMachine, "maintenance_reset_machine", 72);
     create_maintenance_row(panel, "Kaffeemühle", dirGrinder, timeGrinder, "maintenance_reset_grinder", 128);
@@ -4293,19 +4336,22 @@ static bool ui_t4s3_web_set_totals(uint32_t shots, int32_t gramsTenths)
     return true;
 }
 
-static bool ui_t4s3_web_set_maintenance_interval(const char *item, uint32_t seconds)
+static bool ui_t4s3_web_set_maintenance_enabled(const char *item, bool enabled)
 {
-    if (!item || seconds < MIN_MAINTENANCE_INTERVAL_SEC || seconds > MAX_MAINTENANCE_INTERVAL_SEC) {
-        update_status("Wartungsintervall ungültig");
+    if (!item) {
         return false;
     }
 
+    const char *label = nullptr;
     if (strcmp(item, "machine") == 0) {
-        maintenanceMachineIntervalSec = seconds;
+        maintenanceMachineEnabled = enabled;
+        label = "Kaffeemaschine";
     } else if (strcmp(item, "grinder") == 0) {
-        maintenanceGrinderIntervalSec = seconds;
+        maintenanceGrinderEnabled = enabled;
+        label = "Mühle";
     } else if (strcmp(item, "filter") == 0) {
-        maintenanceFilterIntervalSec = seconds;
+        maintenanceFilterEnabled = enabled;
+        label = "Filter";
     } else {
         return false;
     }
@@ -4315,7 +4361,48 @@ static bool ui_t4s3_web_set_maintenance_interval(const char *item, uint32_t seco
     update_maintenance_display();
 
     char msg[96];
-    snprintf(msg, sizeof(msg), "Wartungsintervall gespeichert: %lu Tage", static_cast<unsigned long>(seconds / 86400UL));
+    snprintf(msg, sizeof(msg), "Wartung %s: %s", label, enabled ? "aktiv" : "inaktiv");
+    update_status(msg);
+    return true;
+}
+
+static bool ui_t4s3_web_set_maintenance_interval(const char *item, uint32_t seconds)
+{
+    if (!item || seconds > MAX_MAINTENANCE_INTERVAL_SEC) {
+        update_status("Wartungsintervall ungültig");
+        return false;
+    }
+
+    const bool isMachine = strcmp(item, "machine") == 0;
+    const bool isGrinder = strcmp(item, "grinder") == 0;
+    const bool isFilter = strcmp(item, "filter") == 0;
+    if (!isMachine && !isGrinder && !isFilter) {
+        return false;
+    }
+
+    const uint32_t minSeconds = isMachine ? 60UL : 86400UL;
+    if (seconds < minSeconds) {
+        update_status("Wartungsintervall ungültig");
+        return false;
+    }
+
+    if (isMachine) {
+        maintenanceMachineIntervalSec = seconds;
+    } else if (isGrinder) {
+        maintenanceGrinderIntervalSec = seconds;
+    } else if (isFilter) {
+        maintenanceFilterIntervalSec = seconds;
+    }
+    save_current_ui_settings();
+    update_maintenance_due_state();
+    update_maintenance_display();
+
+    char msg[96];
+    if (seconds < 86400UL) {
+        snprintf(msg, sizeof(msg), "Wartungsintervall gespeichert: %lu Minuten", static_cast<unsigned long>(seconds / 60UL));
+    } else {
+        snprintf(msg, sizeof(msg), "Wartungsintervall gespeichert: %lu Tage", static_cast<unsigned long>(seconds / 86400UL));
+    }
     update_status(msg);
     return true;
 }
@@ -4581,6 +4668,30 @@ bool ui_t4s3_handle_web_command(const char *cmd)
             return false;
         }
         return ui_t4s3_web_set_totals(static_cast<uint32_t>(shots), static_cast<int32_t>(gramsTenths));
+    }
+
+
+    if (strncmp(cmd, "set_maintenance_enabled_", 24) == 0) {
+        const char *cursor = cmd + 24;
+        const char *sep = strchr(cursor, '_');
+        if (!sep || sep == cursor) {
+            return false;
+        }
+        char item[12];
+        const size_t itemLen = static_cast<size_t>(sep - cursor);
+        if (itemLen >= sizeof(item)) {
+            return false;
+        }
+        memcpy(item, cursor, itemLen);
+        item[itemLen] = '\0';
+        const char *value = sep + 1;
+        if (strcmp(value, "1") == 0 || strcmp(value, "on") == 0) {
+            return ui_t4s3_web_set_maintenance_enabled(item, true);
+        }
+        if (strcmp(value, "0") == 0 || strcmp(value, "off") == 0) {
+            return ui_t4s3_web_set_maintenance_enabled(item, false);
+        }
+        return false;
     }
 
     if (strncmp(cmd, "set_maintenance_interval_", 25) == 0) {

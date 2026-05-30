@@ -28,7 +28,7 @@ constexpr int32_t GEFAESS_WEIGHT_UNSET_TENTHS = -1;
 constexpr uint32_t DEFAULT_MAINTENANCE_MACHINE_INTERVAL_SEC = 864000UL;     // 10 Tage
 constexpr uint32_t DEFAULT_MAINTENANCE_GRINDER_INTERVAL_SEC = 2419200UL;    // 28 Tage
 constexpr uint32_t DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC = 7257600UL;     // 12 Wochen / 84 Tage
-constexpr uint32_t MIN_MAINTENANCE_INTERVAL_SEC = 86400UL;                  // 1 Tag
+constexpr uint32_t MIN_MAINTENANCE_INTERVAL_SEC = 60UL;                     // Debug: 1 Minute für Kaffeemaschine
 constexpr uint32_t MAX_MAINTENANCE_INTERVAL_SEC = 31536000UL;               // 365 Tage
 
 void fill_defaults(T4S3UiSettings &settings)
@@ -55,6 +55,9 @@ void fill_defaults(T4S3UiSettings &settings)
     settings.maintenanceMachineIntervalSec = DEFAULT_MAINTENANCE_MACHINE_INTERVAL_SEC;
     settings.maintenanceGrinderIntervalSec = DEFAULT_MAINTENANCE_GRINDER_INTERVAL_SEC;
     settings.maintenanceFilterIntervalSec = DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC;
+    settings.maintenanceMachineEnabled = true;
+    settings.maintenanceGrinderEnabled = true;
+    settings.maintenanceFilterEnabled = true;
     for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         settings.gefaessWeightTenths[i] = GEFAESS_WEIGHT_UNSET_TENTHS;
     }
@@ -223,6 +226,9 @@ void t4s3_settings_load(T4S3UiSettings &settings)
     settings.maintenanceFilterIntervalSec = sanitize_maintenance_interval(
         prefs.getULong("maintFiltInt", settings.maintenanceFilterIntervalSec),
         DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC);
+    settings.maintenanceMachineEnabled = prefs.getBool("maintMachEn", settings.maintenanceMachineEnabled);
+    settings.maintenanceGrinderEnabled = prefs.getBool("maintGrindEn", settings.maintenanceGrinderEnabled);
+    settings.maintenanceFilterEnabled = prefs.getBool("maintFiltEn", settings.maintenanceFilterEnabled);
 
     for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         char key[12];
@@ -284,6 +290,9 @@ void t4s3_settings_save(const T4S3UiSettings &settings)
     prefs.putULong("maintMachInt", sanitize_maintenance_interval(settings.maintenanceMachineIntervalSec, DEFAULT_MAINTENANCE_MACHINE_INTERVAL_SEC));
     prefs.putULong("maintGrindInt", sanitize_maintenance_interval(settings.maintenanceGrinderIntervalSec, DEFAULT_MAINTENANCE_GRINDER_INTERVAL_SEC));
     prefs.putULong("maintFiltInt", sanitize_maintenance_interval(settings.maintenanceFilterIntervalSec, DEFAULT_MAINTENANCE_FILTER_INTERVAL_SEC));
+    prefs.putBool("maintMachEn", settings.maintenanceMachineEnabled);
+    prefs.putBool("maintGrindEn", settings.maintenanceGrinderEnabled);
+    prefs.putBool("maintFiltEn", settings.maintenanceFilterEnabled);
 
     for (uint8_t i = 0; i < T4S3_GEFAESS_SLOT_COUNT; ++i) {
         char key[12];
