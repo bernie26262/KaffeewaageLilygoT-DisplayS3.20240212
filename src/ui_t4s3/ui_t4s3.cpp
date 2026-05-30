@@ -5,6 +5,7 @@
 #include "../t4s3_time.h"
 #include "../t4s3_settings.h"
 #include "../t4s3_scale.h"
+#include "../coffee_wifi.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -91,6 +92,11 @@ uint8_t gefaessDeleteSlot = 0;
 lv_obj_t *gefaessMeasureOverlay = nullptr;
 lv_obj_t *gefaessMeasureWeightLabel = nullptr;
 lv_obj_t *restartOverlay = nullptr;
+lv_obj_t *wlanSetupOverlay = nullptr;
+lv_obj_t *wlanSetupOverlayTitleLabel = nullptr;
+lv_obj_t *wlanSetupOverlayMessageLabel = nullptr;
+lv_obj_t *wlanSetupOverlayButtonLabel = nullptr;
+bool wlanSetupOverlaySavedMode = false;
 lv_obj_t *scaleCalibrationOverlay = nullptr;
 lv_obj_t *scaleCalibrationWeightLabel = nullptr;
 lv_obj_t *scaleCalibrationFactorLabel = nullptr;
@@ -220,6 +226,10 @@ void render_gefaess_measure_overlay();
 void update_gefaess_measure_weight_display();
 void open_restart_overlay();
 void close_restart_overlay();
+void open_wlan_setup_overlay(bool savedMode);
+void close_wlan_setup_overlay();
+void update_wlan_setup_overlay_mode(bool savedMode);
+void process_wlan_setup_overlay_state();
 void open_totals_edit_overlay(bool editGrams);
 void close_totals_edit_overlay(bool save);
 void update_totals_edit_display();
@@ -294,6 +304,10 @@ void reset_dynamic_labels()
     systemHx711GramsLabel = nullptr;
     saveButton = nullptr;
     totalsEditOverlay = nullptr;
+    wlanSetupOverlay = nullptr;
+    wlanSetupOverlayTitleLabel = nullptr;
+    wlanSetupOverlayMessageLabel = nullptr;
+    wlanSetupOverlayButtonLabel = nullptr;
     totalsEditModeLabel = nullptr;
     totalsEditShotsLabel = nullptr;
     totalsEditGramsLabel = nullptr;
@@ -657,6 +671,7 @@ bool recover_negative_startup_tare_if_needed()
         scaleCalibrationOverlay ||
         maintenanceResetOverlay ||
         restartOverlay ||
+        wlanSetupOverlay ||
         webWizardActive;
 
     if (blocked) {
@@ -2516,9 +2531,21 @@ static void button_event_cb(lv_event_t *event)
     } else if (strcmp(action, "wlan_start_setup") == 0) {
         if (t4s3_wifi_start_setup_ap()) {
             update_wlan_page_display();
-            update_status("Setup-AP aktiv: Waagen-Setup / WebUI 192.168.4.1");
+            open_wlan_setup_overlay(coffeeWifiSetupCredentialsSavedPendingRestart());
         } else {
             update_status("Setup-AP konnte nicht gestartet werden");
+        }
+    } else if (strcmp(action, "wlan_setup_overlay_action") == 0) {
+        if (coffeeWifiSetupCredentialsSavedPendingRestart() || wlanSetupOverlaySavedMode) {
+            update_status("Neustart wird ausgeführt ...");
+            delay(120);
+            ESP.restart();
+        } else {
+            coffeeWifiStopSetupAp();
+            close_wlan_setup_overlay();
+            update_wlan_page_display();
+            navigate_to(Page::SettingsWlan);
+            update_status("Setup-WLAN abgebrochen");
         }
     } else if (strcmp(action, "settings_system") == 0) {
         navigate_to(Page::SettingsSystem);
@@ -2630,6 +2657,115 @@ void open_restart_overlay()
 
     lv_obj_move_foreground(restartOverlay);
     update_status("Neustart bestätigen oder abbrechen");
+}
+
+void close_wlan_setup_overlay()
+{
+    if (wlanSetupOverlay && lv_obj_is_valid(wlanSetupOverlay)) {
+        lv_obj_del(wlanSetupOverlay);
+    }
+    wlanSetupOverlay = nullptr;
+    wlanSetupOverlayTitleLabel = nullptr;
+    wlanSetupOverlayMessageLabel = nullptr;
+    wlanSetupOverlayButtonLabel = nullptr;
+    wlanSetupOverlaySavedMode = false;
+}
+
+void update_wlan_setup_overlay_mode(bool savedMode)
+{
+    wlanSetupOverlaySavedMode = savedMode;
+
+    if (!wlanSetupOverlay || !lv_obj_is_valid(wlanSetupOverlay)) {
+        return;
+    }
+
+    if (savedMode) {
+        set_text(wlanSetupOverlayTitleLabel, "WLAN-Daten gespeichert");
+        set_text(wlanSetupOverlayMessageLabel,
+                 "Die WLAN-Daten wurden gespeichert und aktiviert.\n"
+                 "Bitte starte die Waage neu.");
+        set_text(wlanSetupOverlayButtonLabel, "Neustart");
+        update_status("WLAN-Daten gespeichert - Neustart erforderlich");
+    } else {
+        set_text(wlanSetupOverlayTitleLabel, "Setup-WLAN aktiv");
+        set_text(wlanSetupOverlayMessageLabel,
+                 "Bitte mit WLAN Waagen-Setup verbinden.\n"
+                 "Dann im Browser 192.168.4.1 aufrufen.");
+        set_text(wlanSetupOverlayButtonLabel, "Abbrechen");
+        update_status("Setup-WLAN aktiv: Waagen-Setup / 192.168.4.1");
+    }
+}
+
+void open_wlan_setup_overlay(bool savedMode)
+{
+    if (wlanSetupOverlay && !lv_obj_is_valid(wlanSetupOverlay)) {
+        wlanSetupOverlay = nullptr;
+        wlanSetupOverlayTitleLabel = nullptr;
+        wlanSetupOverlayMessageLabel = nullptr;
+        wlanSetupOverlayButtonLabel = nullptr;
+    }
+
+    if (wlanSetupOverlay) {
+        lv_obj_clear_flag(wlanSetupOverlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(wlanSetupOverlay);
+        update_wlan_setup_overlay_mode(savedMode);
+        return;
+    }
+
+    lv_obj_t *screen = lv_scr_act();
+
+    wlanSetupOverlay = lv_obj_create(screen);
+    lv_obj_set_size(wlanSetupOverlay, screenWidth, screenHeight);
+    lv_obj_align(wlanSetupOverlay, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(wlanSetupOverlay, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_opa(wlanSetupOverlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(wlanSetupOverlay, 0, 0);
+    lv_obj_set_style_pad_all(wlanSetupOverlay, 0, 0);
+    lv_obj_clear_flag(wlanSetupOverlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(wlanSetupOverlay);
+    style_panel(panel);
+    lv_obj_set_size(panel, 460, 250);
+    lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
+
+    wlanSetupOverlayTitleLabel = lv_label_create(panel);
+    lv_obj_set_width(wlanSetupOverlayTitleLabel, 390);
+    lv_obj_set_style_text_align(wlanSetupOverlayTitleLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(wlanSetupOverlayTitleLabel, COLOR_GREEN);
+    lv_obj_align(wlanSetupOverlayTitleLabel, LV_ALIGN_TOP_MID, 0, 8);
+
+    wlanSetupOverlayMessageLabel = lv_label_create(panel);
+    lv_obj_set_width(wlanSetupOverlayMessageLabel, 390);
+    lv_obj_set_style_text_align(wlanSetupOverlayMessageLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(wlanSetupOverlayMessageLabel, LV_LABEL_LONG_WRAP);
+    style_label(wlanSetupOverlayMessageLabel, COLOR_WHITE);
+    lv_obj_align(wlanSetupOverlayMessageLabel, LV_ALIGN_TOP_MID, 0, 62);
+
+    lv_obj_t *action = create_button(panel, "Abbrechen", "wlan_setup_overlay_action", 240, 62);
+    lv_obj_align(action, LV_ALIGN_BOTTOM_MID, 0, -4);
+    wlanSetupOverlayButtonLabel = lv_obj_get_child(action, 0);
+
+    lv_obj_move_foreground(wlanSetupOverlay);
+    update_wlan_setup_overlay_mode(savedMode);
+}
+
+void process_wlan_setup_overlay_state()
+{
+    if (coffeeWifiSetupCredentialsSavedPendingRestart()) {
+        if (!wlanSetupOverlay || !lv_obj_is_valid(wlanSetupOverlay) || !wlanSetupOverlaySavedMode) {
+            open_wlan_setup_overlay(true);
+        }
+        return;
+    }
+
+    if (wlanSetupOverlay && !lv_obj_is_valid(wlanSetupOverlay)) {
+        wlanSetupOverlay = nullptr;
+        wlanSetupOverlayTitleLabel = nullptr;
+        wlanSetupOverlayMessageLabel = nullptr;
+        wlanSetupOverlayButtonLabel = nullptr;
+    }
 }
 void open_target_overlay()
 {
@@ -4506,6 +4642,7 @@ void ui_t4s3_tick()
         update_system_uptime_display();
         update_header_wifi_display();
         update_wlan_page_display();
+        process_wlan_setup_overlay_state();
 
         // Hintergrundstatus immer aktualisieren, nicht nur auf der Wartungsseite.
         // Dadurch kann auf der Waage-Seite sofort eine Warnung erscheinen,

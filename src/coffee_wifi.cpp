@@ -21,6 +21,7 @@ bool storedCredentialsActive = false;
 String storedCredentialsSsid;
 bool storedCredentialsPasswordAvailable = false;
 bool setupApActive = false;
+bool setupCredentialsSavedPendingRestart = false;
 uint32_t storedCredentialsRevision = 0;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
@@ -324,6 +325,7 @@ const char* coffeeWifiSetupApSsid()
 
 bool coffeeWifiStartSetupAp()
 {
+  setupCredentialsSavedPendingRestart = false;
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
   const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
@@ -357,4 +359,19 @@ String coffeeWifiSetupApIp()
     return String();
   }
   return WiFi.softAPIP().toString();
+}
+
+void coffeeWifiMarkSetupCredentialsSaved()
+{
+  setupCredentialsSavedPendingRestart = true;
+}
+
+bool coffeeWifiSetupCredentialsSavedPendingRestart()
+{
+  return setupCredentialsSavedPendingRestart;
+}
+
+void coffeeWifiClearSetupCredentialsSavedPendingRestart()
+{
+  setupCredentialsSavedPendingRestart = false;
 }

@@ -2195,6 +2195,9 @@ void coffeeWebBegin(AsyncWebServer& server)
                               : String();
     const bool saved = coffeeWifiSaveCredentials(ssid, password);
     const bool activated = saved && coffeeWifiSetStoredCredentialsActive(true);
+    if (saved && activated) {
+      coffeeWifiMarkSetupCredentialsSaved();
+    }
 
     StaticJsonDocument<224> doc;
     doc["ok"] = saved && activated;

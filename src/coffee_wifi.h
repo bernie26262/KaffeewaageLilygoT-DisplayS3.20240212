@@ -41,3 +41,6 @@ bool coffeeWifiStartSetupAp();
 bool coffeeWifiStopSetupAp();
 bool coffeeWifiSetupApActive();
 String coffeeWifiSetupApIp();
+void coffeeWifiMarkSetupCredentialsSaved();
+bool coffeeWifiSetupCredentialsSavedPendingRestart();
+void coffeeWifiClearSetupCredentialsSavedPendingRestart();
