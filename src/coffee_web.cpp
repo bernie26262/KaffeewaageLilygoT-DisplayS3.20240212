@@ -124,12 +124,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
       <div class="scale-select-row small">
         <span class="label">Siebträger</span>
-        <select id="siebtraegerSelect" aria-label="Siebträger auswählen">
-          <option value="0">Bodenloser ST</option>
-          <option value="1">1er-Siebträger</option>
-          <option value="2">2er-Siebträger</option>
-          <option value="3">Custom-ST</option>
-        </select>
+        <button id="siebtraegerPicker" class="select-button" type="button" aria-haspopup="dialog" aria-expanded="false">Bodenloser ST · 8.5 g</button>
+        <input id="siebtraegerSelect" type="hidden" value="0">
       </div>
     </div>
   </section>
@@ -335,6 +331,16 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </div>
   </div>
 
+  <div id="siebtraegerOverlay" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="siebtraegerOverlayTitle">
+    <div class="modal select-modal">
+      <div class="modal-title" id="siebtraegerOverlayTitle">Siebträger wählen</div>
+      <div class="select-list" id="siebtraegerOptionList"></div>
+      <div class="modal-actions single">
+        <button id="siebtraegerCancel" class="secondary">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <script src="/coffee_core.js?v=3d"></script>
@@ -486,6 +492,45 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       background: #0b1520;
       color: var(--text);
     }
+    .select-button {
+      width: auto;
+      min-width: 230px;
+      max-width: 100%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      background: #0b1520;
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      box-shadow: none;
+      text-align: left;
+      font-size: .95rem;
+      font-weight: 650;
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .select-button::after { content: "⌄"; color: var(--muted-2); font-size: 1rem; }
+    .select-list { display: grid; gap: 8px; margin: 12px 0 16px; }
+    .select-option {
+      width: 100%;
+      border-radius: 16px;
+      padding: 13px 14px;
+      background: #0b1520;
+      border: 1px solid rgba(148,163,184,.26);
+      color: var(--text);
+      box-shadow: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+      font-size: 1rem;
+      font-weight: 720;
+    }
+    .select-option.active { border-color: rgba(85,195,66,.7); background: rgba(85,195,66,.14); }
+    .select-option .check { color: #7bdc68; font-weight: 900; }
+    .modal-actions.single { grid-template-columns: 1fr; }
     select:focus, input:focus, button:focus-visible {
       outline: 2px solid rgba(85,195,66,.55);
       outline-offset: 2px;
@@ -648,6 +693,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       .weight-head { align-items: flex-start; }
       .autodetect-row { margin-left: auto; }
       button.compact, .button-row, .nav-button { width: 100%; }
+      .select-button { width: 100%; min-width: 0; }
       .siebtraeger-settings-row { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 8px; }
       .siebtraeger-settings-row .save-siebtraeger-name { width: 100%; min-width: 0; }
       .modal-actions { grid-template-columns: 1fr; }
@@ -1307,19 +1353,47 @@ function renderSiebtraegerSettings(s) {
   }).join('');
 }
 
-function updateSiebtraegerSelectOptions(s) {
-  const select = el('siebtraegerSelect');
-  if (!select) return;
+function siebtraegerOptionText(index) {
+  return `${siebtraegerName(index)} · ${fmtG(siebtraegerTarget(index))} g`;
+}
 
-  const names = s?.selection?.siebtraeger_names || [];
-  const targets = s?.selection?.siebtraeger_targets_g || [];
-  SIEBTRAEGER_INDEXES.forEach(index => {
-    const option = select.options[index];
-    if (!option) return;
-    const name = String(names[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
-    const target = Number(targets[index] || 0);
-    option.textContent = `${name} · ${fmtG(target)} g`;
-  });
+function updateSiebtraegerSelectOptions(s) {
+  const picker = el('siebtraegerPicker');
+  const hidden = el('siebtraegerSelect');
+  if (!picker || !hidden) return;
+
+  const current = Number(s?.selection?.siebtraeger ?? hidden.value ?? 0);
+  hidden.value = String(current);
+  picker.textContent = siebtraegerOptionText(current);
+}
+
+function openSiebtraegerOverlay() {
+  const list = el('siebtraegerOptionList');
+  const overlay = el('siebtraegerOverlay');
+  const picker = el('siebtraegerPicker');
+  if (!list || !overlay) return;
+
+  const current = Number(lastState?.selection?.siebtraeger ?? el('siebtraegerSelect')?.value ?? 0);
+  list.innerHTML = SIEBTRAEGER_INDEXES.map(index => {
+    const active = index === current;
+    return `<button type="button" class="select-option${active ? ' active' : ''}" data-siebtraeger-option="${index}">`
+      + `<span>${escapeHtml(siebtraegerOptionText(index))}</span><span class="check">${active ? '✓' : ''}</span></button>`;
+  }).join('');
+  overlay.classList.add('show');
+  picker?.setAttribute('aria-expanded', 'true');
+}
+
+function closeSiebtraegerOverlay() {
+  el('siebtraegerOverlay')?.classList.remove('show');
+  el('siebtraegerPicker')?.setAttribute('aria-expanded', 'false');
+}
+
+function selectSiebtraeger(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= SIEBTRAEGER_COUNT) return;
+  el('siebtraegerSelect').value = String(index);
+  el('siebtraegerPicker').textContent = siebtraegerOptionText(index);
+  closeSiebtraegerOverlay();
+  sendCommand(`select_siebtraeger_${index}`, `Siebträger-Auswahl gesendet: ${index}`);
 }
 
 // ===== State-Rendering =====
@@ -1331,6 +1405,7 @@ function renderWeightAndSelection(s) {
   }
   setText('status', s.status?.label || String(s.status?.mode ?? '---'));
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
+  el('siebtraegerPicker').textContent = siebtraegerOptionText(Number(s.selection?.siebtraeger ?? 0));
 }
 
 function renderAutodetect(s) {
@@ -1644,7 +1719,7 @@ function handleStopwatchToggleClick() {
 
 function handleSiebtraegerChange() {
   const idx = Number(el('siebtraegerSelect').value);
-  sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
+  selectSiebtraeger(idx);
 }
 
 function handleAutodetectToggleClick() {
@@ -1758,7 +1833,7 @@ function bindDashboardHandlers() {
   el('tare').addEventListener('click', () => sendCommand(CMD.tare, 'Tara gesendet …'));
   el('swToggle').addEventListener('click', handleStopwatchToggleClick);
   el('swReset').addEventListener('click', () => sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …'));
-  el('siebtraegerSelect').addEventListener('change', handleSiebtraegerChange);
+  el('siebtraegerPicker').addEventListener('click', openSiebtraegerOverlay);
   el('targetSave').addEventListener('click', sendTargetWeight);
   el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
   el('targetWeight').addEventListener('keydown', handleTargetWeightKeyDown);
@@ -1834,6 +1909,12 @@ function bindOverlayHandlers() {
   el('confirmOk').addEventListener('click', confirmPendingAction);
   el('confirmOverlay').addEventListener('click', e => {
     if (e.target === el('confirmOverlay')) closeConfirmOverlay();
+  });
+  el('siebtraegerCancel').addEventListener('click', closeSiebtraegerOverlay);
+  el('siebtraegerOverlay').addEventListener('click', e => {
+    if (e.target === el('siebtraegerOverlay')) closeSiebtraegerOverlay();
+    const button = e.target.closest('[data-siebtraeger-option]');
+    if (button) selectSiebtraeger(Number(button.dataset.siebtraegerOption));
   });
   el('wizardOverlay').addEventListener('click', e => {
     if (e.target === el('wizardOverlay')) closeWizardOverlay();

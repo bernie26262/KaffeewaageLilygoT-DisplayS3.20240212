@@ -625,7 +625,7 @@ void update_save_button_display()
         return;
     }
 
-    const uint32_t bg = saveReady ? COLOR_GREEN : COLOR_DIM;
+    const uint32_t bg = saveReady ? COLOR_GREEN : COLOR_BG;
     const uint32_t border = saveReady ? COLOR_GREEN : COLOR_DIM;
     const uint32_t text = saveReady ? COLOR_WHITE : COLOR_MUTED;
 
