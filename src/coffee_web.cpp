@@ -6,18 +6,21 @@
 
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
+static bool pwaAssetsAvailable = false;
 
 static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
+void coffeeWebSetPwaAssetsAvailable(bool available)
+{
+  pwaAssetsAvailable = available;
+}
+
 static void sendOptionalPwaAssetEmpty(AsyncWebServerRequest* request, const char* contentType)
 {
-  // During the T4-S3 migration the WebUI itself is served from PROGMEM.
-  // The optional PWA icons may or may not be present in SPIFFS yet.
-  // Do not probe SPIFFS during page load. Avoid zero-length responses here:
+  // Fallback if no SPIFFS image is present yet. Avoid zero-length responses here:
   // with some ESPAsyncWebServer/client combinations the favicon request kept
   // the connection open. A one-byte PROGMEM response has a known
-  // Content-Length and completes reliably. Browsers simply ignore it as an
-  // unusable placeholder icon.
+  // Content-Length and completes reliably.
   if (!request) {
     return;
   }
@@ -31,6 +34,21 @@ static void sendOptionalPwaAssetEmpty(AsyncWebServerRequest* request, const char
     EMPTY_PWA_ASSET,
     sizeof(EMPTY_PWA_ASSET));
   response->addHeader("Cache-Control", "no-store");
+  request->send(response);
+}
+
+static void sendPwaAsset(AsyncWebServerRequest* request, const char* path, const char* contentType)
+{
+  if (!request) {
+    return;
+  }
+  if (!pwaAssetsAvailable || !path || !SPIFFS.exists(path)) {
+    sendOptionalPwaAssetEmpty(request, contentType);
+    return;
+  }
+
+  AsyncWebServerResponse* response = request->beginResponse(SPIFFS, path, contentType);
+  response->addHeader("Cache-Control", "public, max-age=31536000, immutable");
   request->send(response);
 }
 
@@ -2341,15 +2359,15 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendOptionalPwaAssetEmpty(request, "image/png");
+    sendPwaAsset(request, "/kaffeewaage-192.png", "image/png");
   });
 
   server.on("/icon-512.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendOptionalPwaAssetEmpty(request, "image/png");
+    sendPwaAsset(request, "/kaffeewaage-512.png", "image/png");
   });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendOptionalPwaAssetEmpty(request, "image/x-icon");
+    sendPwaAsset(request, "/kaffeewaage.ico", "image/x-icon");
   });
 
   server.addHandler(&ws);

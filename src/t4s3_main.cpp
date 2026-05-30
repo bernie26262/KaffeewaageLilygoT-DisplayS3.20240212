@@ -599,7 +599,9 @@ static void beginWebUi()
         return;
     }
 
-    if (!SPIFFS.begin(false)) {
+    const bool spiffsOk = SPIFFS.begin(false);
+    coffeeWebSetPwaAssetsAvailable(spiffsOk);
+    if (!spiffsOk) {
         Serial.println("[T4S3][WebUI] SPIFFS mount failed or no filesystem uploaded; PWA icons may be unavailable");
     } else {
         Serial.println("[T4S3][WebUI] SPIFFS mounted");
