@@ -105,6 +105,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         </button>
       </div>
     </div>
+    <section id="scaleMaintenanceCard" class="maintenance maintenance-alert maintenance-jump warn" role="button" tabindex="0" aria-label="Zur Wartungsseite wechseln">
+      <div class="maintenance-title" id="scaleMaintenanceTitle">Wartung: ok</div>
+      <ul class="maintenance-list" id="scaleMaintenanceList"></ul>
+    </section>
     <div class="weight"><span id="actual">--.-</span><span class="unit">g</span></div>
     <span style="display:none">Status: <b><span id="status">---</span></b></span>
 
@@ -143,7 +147,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="statsPage" class="page hidden">
-  <section id="maintenanceCard" class="card maintenance maintenance-alert ok">
+  <section id="maintenanceCard" class="card maintenance maintenance-alert maintenance-jump ok" role="button" tabindex="0" aria-label="Zur Wartungsseite wechseln">
     <div class="maintenance-title" id="maintenanceTitle">Wartung: ok</div>
     <ul class="maintenance-list" id="maintenanceList"></ul>
   </section>
@@ -416,6 +420,21 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .maintenance.ok .maintenance-title { color: #bbf7d0; }
     .maintenance.warn .maintenance-title { color: #fecaca; }
     .maintenance-list { margin: 0; padding-left: 18px; }
+    .maintenance-jump { cursor: pointer; }
+    .maintenance-jump:focus-visible {
+      outline: 2px solid rgba(85,195,66,.78);
+      outline-offset: 3px;
+    }
+    .scale-card .maintenance-alert {
+      border-radius: 18px;
+      padding: 12px 14px;
+      border: 1px solid rgba(239,68,68,.48);
+      border-left-width: 1px;
+      box-shadow: none;
+      text-align: center;
+    }
+    .scale-card .maintenance-title { margin-bottom: 0; }
+    .scale-card .maintenance-list { display: none; }
     .maintenance-item { margin: 4px 0; }
     .maintenance-item.ok { color: #bbf7d0; }
     .maintenance-item.due { color: #fecaca; font-weight: 750; }
@@ -841,6 +860,14 @@ function showSettingsTab(targetPanelId) {
   });
 }
 
+function goToMaintenanceSettings() {
+  showTab('settingsPage');
+  showSettingsTab('settingsMaintenancePanel');
+  setTimeout(() => {
+    el('settingsMaintenancePanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 0);
+}
+
 // ===== Bestaetigungs-Overlay =====
 function resetConfirmOverlayButtons() {
   el('confirmCancel').style.display = '';
@@ -1218,6 +1245,9 @@ function renderMaintenance(m) {
   const card = el('maintenanceCard');
   const title = el('maintenanceTitle');
   const list = el('maintenanceList');
+  const scaleCard = el('scaleMaintenanceCard');
+  const scaleTitle = el('scaleMaintenanceTitle');
+  const scaleList = el('scaleMaintenanceList');
   const detailCard = el('maintenanceDetailCard');
   const detailTitle = el('maintenanceDetailTitle');
   const detailList = el('maintenanceDetailList');
@@ -1234,18 +1264,25 @@ function renderMaintenance(m) {
   // Dadurch erscheint der Warnhinweis auch dann sofort, wenn ein Countdown im geöffneten Browser auf 0 kippt.
   const dueCount = lines.filter(line => line.due).length;
 
-  // Dashboard: nur anzeigen, wenn Wartung wirklich fällig ist.
-  card.classList.toggle('show', dueCount > 0);
-  card.classList.toggle('warn', dueCount > 0);
-  card.classList.toggle('ok', false);
+  // Dashboard/Daten: nur anzeigen, wenn Wartung wirklich fällig ist.
+  [card, scaleCard].forEach(alertCard => {
+    if (!alertCard) return;
+    alertCard.classList.toggle('show', dueCount > 0);
+    alertCard.classList.toggle('warn', dueCount > 0);
+    alertCard.classList.toggle('ok', false);
+  });
 
   if (!lastState?.time?.valid) {
     if (dueCount > 0) {
       title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
       list.innerHTML = '<li class="maintenance-item due">Wartung erforderlich. Uhrzeit noch nicht synchronisiert.</li>';
+      if (scaleTitle) scaleTitle.textContent = title.textContent;
+      if (scaleList) scaleList.innerHTML = list.innerHTML;
     } else {
       title.textContent = 'Wartung: ok';
       list.innerHTML = '';
+      if (scaleTitle) scaleTitle.textContent = 'Wartung: ok';
+      if (scaleList) scaleList.innerHTML = '';
     }
 
     if (detailCard && detailTitle && detailList) {
@@ -1263,6 +1300,8 @@ function renderMaintenance(m) {
     .filter(line => line.due)
     .map(line => `<li class="maintenance-item due">${line.text}</li>`)
     .join('');
+  if (scaleTitle) scaleTitle.textContent = title.textContent;
+  if (scaleList) scaleList.innerHTML = list.innerHTML;
 
   // Einstellungen: immer alle Details anzeigen.
   if (detailCard && detailTitle && detailList) {
@@ -1939,6 +1978,20 @@ function bindDashboardHandlers() {
   el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
   el('targetWeight').addEventListener('keydown', handleTargetWeightKeyDown);
   el('autodetectToggle').addEventListener('click', handleAutodetectToggleClick);
+  el('scaleMaintenanceCard')?.addEventListener('click', goToMaintenanceSettings);
+  el('maintenanceCard')?.addEventListener('click', goToMaintenanceSettings);
+  el('scaleMaintenanceCard')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      goToMaintenanceSettings();
+    }
+  });
+  el('maintenanceCard')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      goToMaintenanceSettings();
+    }
+  });
 }
 
 function bindNavigationHandlers() {

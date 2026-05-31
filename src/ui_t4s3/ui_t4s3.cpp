@@ -634,9 +634,9 @@ void update_save_button_display()
         return;
     }
 
-    const uint32_t bg = saveReady ? COLOR_GREEN : COLOR_BG;
-    const uint32_t border = saveReady ? COLOR_GREEN : COLOR_DIM;
-    const uint32_t text = saveReady ? COLOR_WHITE : COLOR_MUTED;
+    const uint32_t bg = saveReady ? COLOR_GREEN : 0x0B111B;
+    const uint32_t border = saveReady ? COLOR_GREEN : 0x1F2937;
+    const uint32_t text = saveReady ? COLOR_WHITE : COLOR_DIM;
 
     lv_obj_set_style_bg_color(saveButton, lv_color_hex(bg), 0);
     lv_obj_set_style_border_color(saveButton, lv_color_hex(border), 0);
