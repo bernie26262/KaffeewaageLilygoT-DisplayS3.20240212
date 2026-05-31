@@ -84,6 +84,45 @@ void coffeeStorageSaveMaintenanceTimestamp(
   preferences.end();
 }
 
+
+void coffeeStorageSaveMaintenanceSettings(
+  Preferences& preferences,
+  uint32_t machineIntervalSeconds,
+  uint32_t grinderIntervalSeconds,
+  uint32_t filterIntervalSeconds,
+  bool machineEnabled,
+  bool grinderEnabled,
+  bool filterEnabled)
+{
+  preferences.begin(STORAGE_NAMESPACE, RW_MODE);
+  preferences.putULong("mntMachSec", machineIntervalSeconds);
+  preferences.putULong("mntGrndSec", grinderIntervalSeconds);
+  preferences.putULong("mntFiltSec", filterIntervalSeconds);
+  preferences.putBool("mntMachEn", machineEnabled);
+  preferences.putBool("mntGrndEn", grinderEnabled);
+  preferences.putBool("mntFiltEn", filterEnabled);
+  preferences.end();
+}
+
+void coffeeStorageLoadMaintenanceSettings(
+  Preferences& preferences,
+  uint32_t& machineIntervalSeconds,
+  uint32_t& grinderIntervalSeconds,
+  uint32_t& filterIntervalSeconds,
+  bool& machineEnabled,
+  bool& grinderEnabled,
+  bool& filterEnabled)
+{
+  preferences.begin(STORAGE_NAMESPACE, RO_MODE);
+  machineIntervalSeconds = preferences.getULong("mntMachSec", machineIntervalSeconds);
+  grinderIntervalSeconds = preferences.getULong("mntGrndSec", grinderIntervalSeconds);
+  filterIntervalSeconds = preferences.getULong("mntFiltSec", filterIntervalSeconds);
+  machineEnabled = preferences.getBool("mntMachEn", machineEnabled);
+  grinderEnabled = preferences.getBool("mntGrndEn", grinderEnabled);
+  filterEnabled = preferences.getBool("mntFiltEn", filterEnabled);
+  preferences.end();
+}
+
 void coffeeStorageSaveSelectedSiebtraeger(
   Preferences& preferences,
   uint16_t selectedST)
@@ -260,6 +299,9 @@ bool coffeeStorageLoadOrInit(
     preferences.putULong("lstMhlRngng", lastTimeMuehlenReinigungNTP);
     preferences.putULong("lstKffmRngng", lastTimeKaffeemReinigungNTP);
     preferences.putULong("lstFltwchsl", lastTimeFilterWechselNTP);
+    preferences.putBool("mntMachEn", true);
+    preferences.putBool("mntGrndEn", true);
+    preferences.putBool("mntFiltEn", true);
     preferences.putBool("nvsInitialised", true);
 
     preferences.end();

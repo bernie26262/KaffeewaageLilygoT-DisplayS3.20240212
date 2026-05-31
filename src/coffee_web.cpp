@@ -122,6 +122,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="ip-row small">
       <div>Datum/Zeit: <b class="mono" id="datetime">---</b></div>
       <div>Uptime: <b class="mono" id="uptime">---</b></div>
+      <div>Kalibrierfaktor: <b class="mono" id="calibrationFactorData">---</b></div>
+      <div>Kalibriergewicht: <b class="mono" id="calibrationWeightData">---</b></div>
       <div>SSID: <b class="mono" id="statsWifiSsid">---</b></div>
       <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
       <div>WLAN-Signal: <span class="wifi-signal-row"><span id="statsWifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="statsWifiSignalLabel">---</b> <span class="muted-inline" id="statsWifiSignalRssi">---</span></span></div>
@@ -142,16 +144,36 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <div id="settingsMaintenancePanel" class="settings-section">
     <div class="settings-section-title">Wartung</div>
-    <div class="settings-section-hint">Häufig genutzte Wartungsanzeigen und Reset-Funktionen.</div>
+    <div class="settings-section-hint">Status, Reset, Aktivierung und Intervalle der Wartungen.</div>
+
     <section id="maintenanceDetailCard" class="card maintenance ok show">
-      <div class="stats-title">Wartung</div>
+      <div class="stats-title">Wartungsstatus</div>
       <div class="maintenance-title" id="maintenanceDetailTitle">Wartungszeiten</div>
       <ul class="maintenance-list" id="maintenanceDetailList"></ul>
-      <div class="label" style="margin-top: 14px;">Wartung zurücksetzen</div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Wartung zurücksetzen</div>
+      <div class="small">Zeitpunkt und Zähler der jeweiligen Wartung zurücksetzen.</div>
       <div class="settings-actions">
         <button id="resetMachine" class="secondary">Kaffeemaschine gereinigt</button>
         <button id="resetGrinder" class="secondary">Mühle gereinigt</button>
         <button id="resetFilter" class="secondary">Filter gewechselt</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Wartung aktivieren/deaktivieren</div>
+      <div class="small">Deaktivierte Wartungen erzeugen keine Warnung. Der gespeicherte letzte Wartungszeitpunkt bleibt erhalten.</div>
+      <div id="maintenanceEnabledList" class="maintenance-settings-list"></div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Wartungsintervalle ändern</div>
+      <div class="small">Ändert nur die Intervalle. Die gespeicherten letzten Wartungszeitpunkte bleiben unverändert.</div>
+      <div id="maintenanceIntervalList" class="maintenance-settings-list"></div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="saveMaintenanceIntervals" class="secondary">Wartungsintervalle speichern</button>
       </div>
     </section>
   </div>
@@ -360,6 +382,15 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .maintenance-item { margin: 4px 0; }
     .maintenance-item.ok { color: #bbf7d0; }
     .maintenance-item.due { color: #fecaca; font-weight: 750; }
+    .maintenance-item.disabled { color: var(--muted); }
+    .maintenance-settings-list { display: grid; gap: 10px; margin-top: 12px; }
+    .maintenance-settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+    .maintenance-settings-row:first-child { border-top: 0; padding-top: 0; }
+    .maintenance-settings-row-title { font-weight: 750; }
+    .maintenance-settings-row-meta { color: var(--muted); font-size: .9rem; margin-top: 2px; }
+    .maintenance-interval-controls { display: grid; grid-template-columns: minmax(80px, .55fr) minmax(110px, .7fr); gap: 8px; align-items: center; }
+    .maintenance-interval-controls input { width: 100%; box-sizing: border-box; }
+    .maintenance-interval-controls select { width: 100%; box-sizing: border-box; }
     .maintenance-jump-button {
       width: auto;
       min-width: 0;
@@ -645,6 +676,8 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       .weight, .stopwatch-value { font-size: 2.55rem; }
       .weight-row { flex-direction: column; align-items: stretch; }
       .maintenance-jump-button { width: 100%; justify-content: center; }
+      .maintenance-settings-row { grid-template-columns: 1fr; }
+      .maintenance-interval-controls { grid-template-columns: 1fr 1fr; }
       .weight-head { align-items: flex-start; }
       .autodetect-row { margin-left: auto; }
       button.compact, .button-row, .nav-button { width: 100%; }
@@ -682,6 +715,8 @@ const CMD = Object.freeze({
   maintenanceResetMachine: 'maintenance_reset_machine',
   maintenanceResetGrinder: 'maintenance_reset_grinder',
   maintenanceResetFilter: 'maintenance_reset_filter',
+  setMaintenanceIntervalsPrefix: 'set_maintenance_intervals_',
+  setMaintenanceEnabledPrefix: 'set_maintenance_enabled_',
   restartDevice: 'restart_device',
   setStatsTotalsPrefix: 'set_stats_totals_',
   setDisplayTimeoutPrefix: 'set_display_timeout_'
@@ -725,7 +760,17 @@ const fmtDateTime = (epoch, valid) => {
     hour: '2-digit', minute: '2-digit', second: '2-digit'
   });
 };
-const fmtUptime = ms => fmtDayClockDuration(Math.floor(Number(ms || 0) / 1000));
+const fmtUptime = ms => {
+  const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const days = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const clock = `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+  if (days === 1) return `1 Tag, ${clock}`;
+  if (days > 1) return `${days} Tage, ${clock}`;
+  return clock;
+};
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;',
   '<': '&lt;',
@@ -1087,13 +1132,17 @@ function fmtDuration(seconds) {
   return fmtDayClockDuration(seconds);
 }
 
-function maintenanceLine(label, secondsToDue) {
+function maintenanceLine(label, secondsToDue, enabled = true) {
+  if (!enabled) {
+    return { text: `${label}: inaktiv`, due: false, disabled: true };
+  }
+
   const seconds = Number(secondsToDue) || 0;
   const due = seconds < 0;
   const text = due
     ? `${label}: seit ${fmtDuration(seconds)} fällig`
     : `${label}: fällig in ${fmtDuration(seconds)}`;
-  return { text, due };
+  return { text, due, disabled: false };
 }
 
 function syncMaintenanceDueAt(key, secondsToDue) {
@@ -1150,14 +1199,14 @@ function renderMaintenance(m) {
   const detailList = el('maintenanceDetailList');
 
   const lines = [
-    maintenanceLine('Kaffeemaschine reinigen', adjustedMaintenanceSeconds('machine', m?.machine_seconds_to_due)),
-    maintenanceLine('Mühle reinigen', adjustedMaintenanceSeconds('grinder', m?.grinder_seconds_to_due)),
-    maintenanceLine('Filter wechseln', adjustedMaintenanceSeconds('filter', m?.filter_seconds_to_due))
+    maintenanceLine('Kaffeemaschine reinigen', adjustedMaintenanceSeconds('machine', m?.machine_seconds_to_due), m?.machine_enabled !== false),
+    maintenanceLine('Mühle reinigen', adjustedMaintenanceSeconds('grinder', m?.grinder_seconds_to_due), m?.grinder_enabled !== false),
+    maintenanceLine('Filter wechseln', adjustedMaintenanceSeconds('filter', m?.filter_seconds_to_due), m?.filter_enabled !== false)
   ];
 
   // Clientseitig aus den aktuell laufenden Sekundenwerten ableiten.
   // Dadurch erscheint der Warnhinweis auch dann sofort, wenn ein Countdown im geöffneten Browser auf 0 kippt.
-  const dueCount = lines.filter(line => line.due).length;
+  const dueCount = lines.filter(line => line.due && !line.disabled).length;
 
   updateMaintenanceJumpButton(scaleButton, dueCount);
   updateMaintenanceJumpButton(statsButton, dueCount);
@@ -1178,9 +1227,92 @@ function renderMaintenance(m) {
       ? 'Wartungszeiten'
       : (dueCount === 1 ? 'Wartungszeiten: 1 Hinweis' : `Wartungszeiten: ${dueCount} Hinweise`);
     detailList.innerHTML = lines
-      .map(line => `<li class="maintenance-item ${line.due ? 'due' : 'ok'}">${line.text}</li>`)
+      .map(line => `<li class="maintenance-item ${line.disabled ? 'disabled' : (line.due ? 'due' : 'ok')}">${line.text}</li>`)
       .join('');
   }
+}
+
+function maintenanceIntervalToValueUnit(seconds, allowMinutes = false) {
+  const sec = Number(seconds || 0);
+  if (allowMinutes && sec > 0 && sec % 60 === 0 && sec < 86400) {
+    return { value: Math.max(1, Math.round(sec / 60)), unit: 'minutes' };
+  }
+  if (sec > 0 && sec % 604800 === 0) {
+    return { value: Math.max(1, Math.round(sec / 604800)), unit: 'weeks' };
+  }
+  return { value: Math.max(1, Math.round(sec / 86400)), unit: 'days' };
+}
+
+function maintenanceIntervalSecondsFromInputs(prefix) {
+  const value = Math.max(1, Math.floor(Number(el(`${prefix}IntervalValue`)?.value || 1)));
+  const unit = el(`${prefix}IntervalUnit`)?.value || 'days';
+  if (unit === 'minutes') return value * 60;
+  if (unit === 'weeks') return value * 604800;
+  return value * 86400;
+}
+
+function renderMaintenanceEnabledSettings(m) {
+  const list = el('maintenanceEnabledList');
+  if (!list) return;
+
+  const rows = [
+    { key: 'machine', label: 'Reinigung Kaffeemaschine', enabled: m?.machine_enabled !== false },
+    { key: 'grinder', label: 'Reinigung Mühle', enabled: m?.grinder_enabled !== false },
+    { key: 'filter', label: 'Filterwechsel', enabled: m?.filter_enabled !== false }
+  ];
+
+  const signature = rows.map(row => `${row.key}:${row.enabled ? 1 : 0}`).join('|');
+  if (list.dataset.signature === signature) return;
+  list.dataset.signature = signature;
+
+  list.innerHTML = rows.map(row => `
+    <div class="maintenance-settings-row">
+      <div>
+        <div class="maintenance-settings-row-title">${row.label}</div>
+        <div class="maintenance-settings-row-meta">Status: ${row.enabled ? 'Aktiv' : 'Inaktiv'}</div>
+      </div>
+      <button class="secondary maintenance-enable-button" type="button" data-maintenance-key="${row.key}" data-maintenance-enabled="${row.enabled ? '0' : '1'}">${row.enabled ? 'Deaktivieren' : 'Aktivieren'}</button>
+    </div>
+  `).join('');
+}
+
+function renderMaintenanceIntervalSettings(m) {
+  const list = el('maintenanceIntervalList');
+  if (!list) return;
+
+  const rows = [
+    { key: 'machine', label: 'Reinigung Kaffeemaschine', standard: 'Standard: 10 Tage', seconds: m?.machine_interval_seconds || 864000, allowMinutes: true },
+    { key: 'grinder', label: 'Reinigung Mühle', standard: 'Standard: 4 Wochen', seconds: m?.grinder_interval_seconds || 2419200, allowMinutes: false },
+    { key: 'filter', label: 'Filterwechsel', standard: 'Standard: 12 Wochen', seconds: m?.filter_interval_seconds || 7257600, allowMinutes: false }
+  ];
+
+  const active = document.activeElement;
+  if (active && list.contains(active)) return;
+
+  const signature = rows.map(row => `${row.key}:${row.seconds}`).join('|');
+  if (list.dataset.signature === signature) return;
+  list.dataset.signature = signature;
+
+  list.innerHTML = rows.map(row => {
+    const interval = maintenanceIntervalToValueUnit(row.seconds, row.allowMinutes);
+    const minuteOption = row.allowMinutes ? `<option value="minutes" ${interval.unit === 'minutes' ? 'selected' : ''}>Minuten</option>` : '';
+    return `
+      <div class="maintenance-settings-row">
+        <div>
+          <div class="maintenance-settings-row-title">${row.label}</div>
+          <div class="maintenance-settings-row-meta">${row.standard}</div>
+        </div>
+        <div class="maintenance-interval-controls">
+          <input id="${row.key}IntervalValue" type="number" min="1" step="1" inputmode="numeric" value="${interval.value}" aria-label="Intervall ${row.label}">
+          <select id="${row.key}IntervalUnit" aria-label="Einheit ${row.label}">
+            ${minuteOption}
+            <option value="days" ${interval.unit === 'days' ? 'selected' : ''}>Tage</option>
+            <option value="weeks" ${interval.unit === 'weeks' ? 'selected' : ''}>Wochen</option>
+          </select>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 // ===== Stoppuhr =====
@@ -1339,6 +1471,8 @@ function renderStatsAndSystem(s) {
   setText('statsTotalGroundView', `${fmtG(s.stats?.ground?.total_g)} g`);
   setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));
   setText('uptime', fmtUptime(s.system?.uptime_ms));
+  setText('calibrationFactorData', Number(s.calibration?.factor || 0).toFixed(3).replace('.', ','));
+  setText('calibrationWeightData', `${Number(s.calibration?.set_weight_g || 0).toFixed(1).replace('.', ',')} g`);
   setText('ip', s.system?.ip || location.hostname);
   setText('statsWifiSsid', s.system?.wifi_ssid || '---');
   setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
@@ -1386,6 +1520,8 @@ function render(s) {
   renderStatsAndSystem(s);
   renderActionAvailability(s);
   renderMaintenance(s.maintenance);
+  renderMaintenanceEnabledSettings(s.maintenance);
+  renderMaintenanceIntervalSettings(s.maintenance);
   renderSiebtraegerNameSettings(s);
   renderGefaessSettings(s);
 
@@ -1658,6 +1794,27 @@ function handleDisplayTimeoutChange() {
   sendCommand(`${CMD.setDisplayTimeoutPrefix}${minutes}`, `Display-Timeout gesendet: ${label}`);
 }
 
+
+function handleMaintenanceEnabledClick(e) {
+  const button = e.target.closest('.maintenance-enable-button');
+  if (!button) return;
+
+  const key = button.dataset.maintenanceKey;
+  const enabled = button.dataset.maintenanceEnabled === '1';
+  if (!['machine', 'grinder', 'filter'].includes(key)) return;
+
+  button.disabled = true;
+  const label = key === 'machine' ? 'Kaffeemaschine' : (key === 'grinder' ? 'Mühle' : 'Filter');
+  sendCommand(`${CMD.setMaintenanceEnabledPrefix}${key}_${enabled ? 1 : 0}`, `Wartung ${label}: ${enabled ? 'aktivieren' : 'deaktivieren'} …`);
+}
+
+function handleSaveMaintenanceIntervals() {
+  const machine = maintenanceIntervalSecondsFromInputs('machine');
+  const grinder = maintenanceIntervalSecondsFromInputs('grinder');
+  const filter = maintenanceIntervalSecondsFromInputs('filter');
+  sendCommand(`${CMD.setMaintenanceIntervalsPrefix}${machine}_${grinder}_${filter}`, 'Wartungsintervalle speichern …');
+}
+
 function handleGlobalKeyDown(e) {
   if (el('confirmOverlay').classList.contains('show')) {
     if (e.key === 'Escape') {
@@ -1760,6 +1917,8 @@ function bindSettingsHandlers() {
     CMD.maintenanceResetFilter,
     'Reset Filter gesendet …'
   ));
+  el('maintenanceEnabledList').addEventListener('click', handleMaintenanceEnabledClick);
+  el('saveMaintenanceIntervals').addEventListener('click', handleSaveMaintenanceIntervals);
   el('gefaessList').addEventListener('click', handleGefaessListClick);
 }
 
@@ -2319,7 +2478,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<3584> doc;
+  StaticJsonDocument<4096> doc;
 
   doc["type"] = "state";
 
@@ -2366,6 +2525,12 @@ static String buildStateJson(const AppState& s)
   doc["maintenance"]["grinder_seconds_to_due"] = s.maintenance.grinder_seconds_to_due;
   doc["maintenance"]["machine_seconds_to_due"] = s.maintenance.machine_seconds_to_due;
   doc["maintenance"]["filter_seconds_to_due"] = s.maintenance.filter_seconds_to_due;
+  doc["maintenance"]["grinder_interval_seconds"] = s.maintenance.grinder_interval_seconds;
+  doc["maintenance"]["machine_interval_seconds"] = s.maintenance.machine_interval_seconds;
+  doc["maintenance"]["filter_interval_seconds"] = s.maintenance.filter_interval_seconds;
+  doc["maintenance"]["grinder_enabled"] = s.maintenance.grinder_enabled;
+  doc["maintenance"]["machine_enabled"] = s.maintenance.machine_enabled;
+  doc["maintenance"]["filter_enabled"] = s.maintenance.filter_enabled;
   doc["maintenance"]["due_count"] = s.maintenance.due_count;
 
   doc["time"]["valid"] = s.time.valid;

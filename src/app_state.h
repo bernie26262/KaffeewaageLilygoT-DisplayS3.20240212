@@ -61,6 +61,12 @@ struct MaintenanceState {
   int32_t grinder_seconds_to_due = 0;
   int32_t machine_seconds_to_due = 0;
   int32_t filter_seconds_to_due = 0;
+  uint32_t grinder_interval_seconds = 0;
+  uint32_t machine_interval_seconds = 0;
+  uint32_t filter_interval_seconds = 0;
+  bool grinder_enabled = true;
+  bool machine_enabled = true;
+  bool filter_enabled = true;
   uint8_t due_count = 0;
 };
 

@@ -37,6 +37,24 @@ void coffeeStorageSaveMaintenanceTimestamp(
   const char* key,
   uint32_t timestamp);
 
+void coffeeStorageSaveMaintenanceSettings(
+  Preferences& preferences,
+  uint32_t machineIntervalSeconds,
+  uint32_t grinderIntervalSeconds,
+  uint32_t filterIntervalSeconds,
+  bool machineEnabled,
+  bool grinderEnabled,
+  bool filterEnabled);
+
+void coffeeStorageLoadMaintenanceSettings(
+  Preferences& preferences,
+  uint32_t& machineIntervalSeconds,
+  uint32_t& grinderIntervalSeconds,
+  uint32_t& filterIntervalSeconds,
+  bool& machineEnabled,
+  bool& grinderEnabled,
+  bool& filterEnabled);
+
 void coffeeStorageSaveSelectedSiebtraeger(
   Preferences& preferences,
   uint16_t selectedST);

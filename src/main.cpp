@@ -550,12 +550,15 @@ uint32_t shotCounterSinceFilterChange = 0;
 uint32_t lastTimeMuehlenReinigungNTP = 0;
 uint32_t lastTimeKaffeemReinigungNTP = 0;
 uint32_t lastTimeFilterWechselNTP    = 0;
-const uint32_t delayTimeMuehlenReinigung = 2419200;    //  4 Wochen in Sekunden
-const uint32_t delayTimeKaffeemReinigung = 864000;    //  10 Tage in Sekunden
-const uint32_t delayTimeFilterWechsel    = 7257600;    // 12 Wochen in Sekunden
-//const uint32_t delayTimeMuehlenReinigung = 30; //2419200;    //  Test
-//const uint32_t delayTimeKaffeemReinigung = 30; //1209600;    //  Test
-//const uint32_t delayTimeFilterWechsel    = 30; //7257600;    //  Test
+static constexpr uint32_t DEFAULT_DELAY_TIME_MUEHLEN_REINIGUNG = 2419200;   // 4 Wochen in Sekunden
+static constexpr uint32_t DEFAULT_DELAY_TIME_KAFFEEM_REINIGUNG = 864000;    // 10 Tage in Sekunden
+static constexpr uint32_t DEFAULT_DELAY_TIME_FILTER_WECHSEL = 7257600;      // 12 Wochen in Sekunden
+uint32_t delayTimeMuehlenReinigung = DEFAULT_DELAY_TIME_MUEHLEN_REINIGUNG;
+uint32_t delayTimeKaffeemReinigung = DEFAULT_DELAY_TIME_KAFFEEM_REINIGUNG;
+uint32_t delayTimeFilterWechsel = DEFAULT_DELAY_TIME_FILTER_WECHSEL;
+bool maintenanceMuehleEnabled = true;
+bool maintenanceKaffeemEnabled = true;
+bool maintenanceFilterEnabled = true;
 bool displayMuehleReinigen = 0;
 bool olddisplayMuehleReinigen = 0;
 bool displayKaffeemReinigen = 0;
@@ -785,12 +788,18 @@ static void updateCoffeeAppStateFromGlobals()
   time_t currentEpoch = time(nullptr);
   bool timeValid = currentEpoch > 1600000000;
 
-  appState.maintenance.grinder_clean_due = displayMuehleReinigen;
-  appState.maintenance.machine_clean_due = displayKaffeemReinigen;
-  appState.maintenance.filter_change_due = displayFilterwechseln;
+  appState.maintenance.grinder_clean_due = maintenanceMuehleEnabled && displayMuehleReinigen;
+  appState.maintenance.machine_clean_due = maintenanceKaffeemEnabled && displayKaffeemReinigen;
+  appState.maintenance.filter_change_due = maintenanceFilterEnabled && displayFilterwechseln;
   appState.maintenance.grinder_seconds_to_due = timeValid ? secondsUntilMaintenanceDue(lastTimeMuehlenReinigungNTP, delayTimeMuehlenReinigung, currentEpoch) : 0;
   appState.maintenance.machine_seconds_to_due = timeValid ? secondsUntilMaintenanceDue(lastTimeKaffeemReinigungNTP, delayTimeKaffeemReinigung, currentEpoch) : 0;
   appState.maintenance.filter_seconds_to_due = timeValid ? secondsUntilMaintenanceDue(lastTimeFilterWechselNTP, delayTimeFilterWechsel, currentEpoch) : 0;
+  appState.maintenance.grinder_interval_seconds = delayTimeMuehlenReinigung;
+  appState.maintenance.machine_interval_seconds = delayTimeKaffeemReinigung;
+  appState.maintenance.filter_interval_seconds = delayTimeFilterWechsel;
+  appState.maintenance.grinder_enabled = maintenanceMuehleEnabled;
+  appState.maintenance.machine_enabled = maintenanceKaffeemEnabled;
+  appState.maintenance.filter_enabled = maintenanceFilterEnabled;
   appState.maintenance.due_count = anzahlWarnungen;
 
   appState.time.valid = timeValid;
@@ -818,6 +827,7 @@ static void updateCoffeeAppStateFromGlobals()
 void RefreshFooter();
 void RefreshTFTSetWeightST();
 void RefreshTFTDisplay();
+void RedrawTFTWarnungen();
 void RefreshTFTCursor();
 void RefreshTFTTaraWait();
 void RefreshTFTTaraFinished();
@@ -1339,6 +1349,8 @@ static constexpr const char* PREFIX_SELECT_GEFAESS = "select_gefaess_";
 static constexpr const char* PREFIX_DELETE_GEFAESS = "delete_gefaess_";
 static constexpr const char* PREFIX_SET_STATS_TOTALS = "set_stats_totals_";
 static constexpr const char* PREFIX_SET_DISPLAY_TIMEOUT = "set_display_timeout_";
+static constexpr const char* PREFIX_SET_MAINTENANCE_INTERVALS = "set_maintenance_intervals_";
+static constexpr const char* PREFIX_SET_MAINTENANCE_ENABLED = "set_maintenance_enabled_";
 
 static bool handleWebSelectionCommand(const char* cmd, bool& handled)
 {
@@ -1554,6 +1566,101 @@ static bool parseAndSetCoffeeStatsTotalsFromWeb(const char* cmd)
   );
 }
 
+
+static uint32_t clampMaintenanceIntervalSeconds(uint32_t seconds)
+{
+  static constexpr uint32_t MIN_INTERVAL_SECONDS = 60;
+  static constexpr uint32_t MAX_INTERVAL_SECONDS = 370UL * 86400UL;
+  if (seconds < MIN_INTERVAL_SECONDS) return MIN_INTERVAL_SECONDS;
+  if (seconds > MAX_INTERVAL_SECONDS) return MAX_INTERVAL_SECONDS;
+  return seconds;
+}
+
+static void persistMaintenanceSettings()
+{
+  coffeeStorageSaveMaintenanceSettings(
+    preferences,
+    delayTimeKaffeemReinigung,
+    delayTimeMuehlenReinigung,
+    delayTimeFilterWechsel,
+    maintenanceKaffeemEnabled,
+    maintenanceMuehleEnabled,
+    maintenanceFilterEnabled);
+}
+
+static void forceMaintenanceRedraw()
+{
+  oldanzahlWarnungenDisplayed = 255;
+  olddisplayMuehleReinigen = 0;
+  olddisplayKaffeemReinigen = 0;
+  olddisplayFilterwechseln = 0;
+  if (displayOff == 0 && warnungenDisplayed[pageID] == 1) {
+    RedrawTFTWarnungen();
+  }
+}
+
+static bool setMaintenanceIntervalsFromWeb(uint32_t machineSeconds, uint32_t grinderSeconds, uint32_t filterSeconds)
+{
+  delayTimeKaffeemReinigung = clampMaintenanceIntervalSeconds(machineSeconds);
+  delayTimeMuehlenReinigung = clampMaintenanceIntervalSeconds(grinderSeconds);
+  delayTimeFilterWechsel = clampMaintenanceIntervalSeconds(filterSeconds);
+  persistMaintenanceSettings();
+  forceMaintenanceRedraw();
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool parseAndSetMaintenanceIntervalsFromWeb(const char* cmd)
+{
+  const char* payload = cmd + strlen(PREFIX_SET_MAINTENANCE_INTERVALS);
+  char* end = nullptr;
+
+  const unsigned long machineSeconds = strtoul(payload, &end, 10);
+  if (end == payload || *end != '_') return false;
+
+  const char* grinderPayload = end + 1;
+  const unsigned long grinderSeconds = strtoul(grinderPayload, &end, 10);
+  if (end == grinderPayload || *end != '_') return false;
+
+  const char* filterPayload = end + 1;
+  const unsigned long filterSeconds = strtoul(filterPayload, &end, 10);
+  if (end == filterPayload || *end != '\0') return false;
+
+  return setMaintenanceIntervalsFromWeb(
+    static_cast<uint32_t>(machineSeconds),
+    static_cast<uint32_t>(grinderSeconds),
+    static_cast<uint32_t>(filterSeconds));
+}
+
+static bool setMaintenanceEnabledFromWeb(const char* key, bool enabled)
+{
+  if (strcmp(key, "machine") == 0) {
+    maintenanceKaffeemEnabled = enabled;
+  } else if (strcmp(key, "grinder") == 0) {
+    maintenanceMuehleEnabled = enabled;
+  } else if (strcmp(key, "filter") == 0) {
+    maintenanceFilterEnabled = enabled;
+  } else {
+    return false;
+  }
+
+  persistMaintenanceSettings();
+  forceMaintenanceRedraw();
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
+static bool parseAndSetMaintenanceEnabledFromWeb(const char* cmd)
+{
+  const char* payload = cmd + strlen(PREFIX_SET_MAINTENANCE_ENABLED);
+  const char* separator = strrchr(payload, '_');
+  if (!separator || separator == payload) return false;
+
+  const String key = String(payload).substring(0, separator - payload);
+  const int enabled = atoi(separator + 1);
+  return setMaintenanceEnabledFromWeb(key.c_str(), enabled != 0);
+}
+
 static bool setDisplayTimeoutFromWeb(uint16_t minutes)
 {
   if (!isAllowedDisplayTimeoutMinutes(minutes)) {
@@ -1614,6 +1721,14 @@ static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
       return false;
     }
     return setDisplayTimeoutFromWeb(static_cast<uint16_t>(minutes));
+  }
+
+  if (cmdStartsWith(cmd, PREFIX_SET_MAINTENANCE_INTERVALS)) {
+    return parseAndSetMaintenanceIntervalsFromWeb(cmd);
+  }
+
+  if (cmdStartsWith(cmd, PREFIX_SET_MAINTENANCE_ENABLED)) {
+    return parseAndSetMaintenanceEnabledFromWeb(cmd);
   }
 
   if (cmdEquals(cmd, CMD_RESTART_DEVICE)) {
@@ -4190,6 +4305,14 @@ void setup()
   normaliseSiebtraegerNamesForHmi();
   displayTimeoutMinutes = normaliseDisplayTimeoutMinutes(coffeeStorageLoadDisplayTimeoutMinutes(preferences, DISPLAY_TIMEOUT_DEFAULT_MINUTES));
   delayTimeDisplayOff = static_cast<unsigned long>(displayTimeoutMinutes) * 60000UL;
+  coffeeStorageLoadMaintenanceSettings(
+    preferences,
+    delayTimeKaffeemReinigung,
+    delayTimeMuehlenReinigung,
+    delayTimeFilterWechsel,
+    maintenanceKaffeemEnabled,
+    maintenanceMuehleEnabled,
+    maintenanceFilterEnabled);
   debug("Nonvolatile Storage (NVS) initialized = ");
   debugln(nvsInitialised);
 
@@ -4374,30 +4497,9 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
  if (timeAvailableForWarnings)
   {
     epocheTimeStamp = time(&now);
-    if (time(&now) - lastTimeMuehlenReinigungNTP > delayTimeMuehlenReinigung)
-    {
-      displayMuehleReinigen = 1;
-    }
-    if (time(&now) - lastTimeMuehlenReinigungNTP <= delayTimeMuehlenReinigung)
-    {
-      displayMuehleReinigen = 0;
-    }
-    if (time(&now) - lastTimeKaffeemReinigungNTP > delayTimeKaffeemReinigung)
-    {
-      displayKaffeemReinigen = 1;
-    }
-    if (time(&now) - lastTimeKaffeemReinigungNTP <= delayTimeKaffeemReinigung)
-    {
-      displayKaffeemReinigen = 0;
-    }
-    if (time(&now) - lastTimeFilterWechselNTP > delayTimeFilterWechsel)
-    {
-      displayFilterwechseln = 1;
-    }
-    if (time(&now) - lastTimeFilterWechselNTP <= delayTimeFilterWechsel)
-    {
-      displayFilterwechseln = 0;
-    }
+    displayMuehleReinigen = maintenanceMuehleEnabled && (time(&now) - lastTimeMuehlenReinigungNTP > delayTimeMuehlenReinigung);
+    displayKaffeemReinigen = maintenanceKaffeemEnabled && (time(&now) - lastTimeKaffeemReinigungNTP > delayTimeKaffeemReinigung);
+    displayFilterwechseln = maintenanceFilterEnabled && (time(&now) - lastTimeFilterWechselNTP > delayTimeFilterWechsel);
   }
   anzahlWarnungen = 0;
   if (displayMuehleReinigen == 1) anzahlWarnungen++;
