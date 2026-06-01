@@ -2931,6 +2931,13 @@ void RefreshFooter()
 
 void RefreshTFTAutodetect()  // nur auf pageID == 0 und nur wenn autodetect == 1
 {
+  // Autodetect/Auto-Tara laeuft inzwischen auch dann weiter, wenn auf dem
+  // TFT gerade eine andere Seite angezeigt wird. Die TFT-Aktualisierung darf
+  // dann aber keine fremden Seiten ueberschreiben.
+  if (pageID != 0) {
+    return;
+  }
+
   tft.setTextDatum(TL_DATUM); // Set datum to Top Left
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(String(menuItemsOfPage[pageID][1]), 24, 52, GFXFF);
@@ -3495,6 +3502,30 @@ static void handleAutoDetectLift()
   {
     finishAutoDetectLiftCandidate();
   }
+}
+
+static bool isHmiScaleAutomationBlocked()
+{
+  // Auf normalen Info-/Daten-/Wartungs-/WLAN-Seiten soll die Waagenlogik
+  // weiterlaufen, damit WebUI und TFT parallel genutzt werden koennen.
+  // Mess- und Kalibrierablaeufe bleiben gesperrt, damit Autodetect/Auto-Tara
+  // nicht in Gefaess-Einmessen oder Kalibrierung hineinfunkt.
+  switch (pageID) {
+    case 6:   // Kalibrieren 1/3: Tarieren
+    case 9:   // Gefaess messen 1/4: Gefaess auswaehlen / Tara
+    case 10:  // Kalibrieren 2/3: Kalibriergewicht auflegen
+    case 15:  // Gefaess messen 3/4: Gefaess auflegen
+    case 16:  // Kalibrieren 3/3: Kalibrierung bestaetigen
+    case 23:  // Gefaess messen 4/4: gemessenes Gefaess bestaetigen
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool shouldRunScaleAutomation()
+{
+  return !webWizardActive && !isHmiScaleAutomationBlocked();
 }
 
 void Autodetect()
@@ -4446,13 +4477,11 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
  
 
   
-  if (pageID == 0)
+  if (shouldRunScaleAutomation())
   {
-    if (!webWizardActive) {
-      Autodetect();
-    }
-    saveGrindResult();
+    Autodetect();
   }
+  saveGrindResult();
   //################################
 // Stoppuhr
 //#########################################
