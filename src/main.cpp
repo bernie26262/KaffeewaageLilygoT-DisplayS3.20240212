@@ -925,14 +925,20 @@ static void addCoffeeStatsDose(float dose_g)
   }
 
   groundWeightForever += dose_g;
-  groundWeightSinceClean += dose_g;
-  groundWeightSinceMachineClean += dose_g;
-  groundWeightSinceFilterChange += dose_g;
-
   shotCounterForever++;
-  shotCounterSinceClean++;
-  shotCounterSinceMachineClean++;
-  shotCounterSinceFilterChange++;
+
+  if (maintenanceMuehleEnabled) {
+    groundWeightSinceClean += dose_g;
+    shotCounterSinceClean++;
+  }
+  if (maintenanceKaffeemEnabled) {
+    groundWeightSinceMachineClean += dose_g;
+    shotCounterSinceMachineClean++;
+  }
+  if (maintenanceFilterEnabled) {
+    groundWeightSinceFilterChange += dose_g;
+    shotCounterSinceFilterChange++;
+  }
 }
 
 static bool resetMuehlenReinigungCore()
@@ -2576,11 +2582,15 @@ void RefreshTFTMahlgewichte()
     groundWeightForeverDisplayed = groundWeightForever/1000;
     tft.drawString(String(groundWeightForeverDisplayed, 1) + " kg",300,32,GFXFF);
   }
-  if (groundWeightSinceClean <= 1000)
+  if (!maintenanceMuehleEnabled)
+  {
+    tft.drawString("-",300,52,GFXFF);
+  }
+  else if (groundWeightSinceClean <= 1000)
   {
     tft.drawString(String(groundWeightSinceClean, 0) + " g",300,52,GFXFF);
   }
-  if (groundWeightSinceClean > 1000)
+  else
   {
     groundWeightSinceCleanDisplayed = groundWeightSinceClean/1000;
     tft.drawString(String(groundWeightSinceCleanDisplayed, 1) + " kg",300,52,GFXFF);
@@ -2594,7 +2604,7 @@ void RefreshTFTShots()
   tft.setFreeFont(FSS9);                 // Select the font MonoSpace 9pt
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(String(shotCounterForever),300,32,GFXFF);
-  tft.drawString(String(shotCounterSinceClean),300,52,GFXFF);
+  tft.drawString(maintenanceMuehleEnabled ? String(shotCounterSinceClean) : String("-"),300,52,GFXFF);
 }
 
 
