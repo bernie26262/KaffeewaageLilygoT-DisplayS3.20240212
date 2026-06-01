@@ -768,8 +768,7 @@ const fmtUptime = ms => {
   const s = total % 60;
   const clock = `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
   if (days === 1) return `1 Tag, ${clock}`;
-  if (days > 1) return `${days} Tage, ${clock}`;
-  return clock;
+  return `${days} Tage, ${clock}`;
 };
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;',
