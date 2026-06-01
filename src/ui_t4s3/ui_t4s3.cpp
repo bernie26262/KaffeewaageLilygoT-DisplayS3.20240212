@@ -38,6 +38,9 @@ constexpr uint32_t COLOR_MUTED = 0xA8B8A8;
 constexpr uint32_t COLOR_DIM = 0x5F705F;
 constexpr uint32_t COLOR_AUTODETECT_LED_ON = 0x00FF4A;
 constexpr uint32_t COLOR_AUTODETECT_LED_OFF = 0x232A26;
+constexpr uint32_t COLOR_SAVE_DISABLED_BG = 0x263241;
+constexpr uint32_t COLOR_SAVE_DISABLED_BORDER = 0x475569;
+constexpr uint32_t COLOR_SAVE_DISABLED_TEXT = 0xB4C0D0;
 
 constexpr uint16_t SCREEN_W = 600;
 constexpr uint16_t SCREEN_H = 450;
@@ -634,25 +637,28 @@ void update_save_button_display()
         return;
     }
 
-    const uint32_t bg = saveReady ? COLOR_GREEN : 0x0B111B;
-    const uint32_t border = saveReady ? COLOR_GREEN : 0x1F2937;
-    const uint32_t text = saveReady ? COLOR_WHITE : COLOR_DIM;
+    const uint32_t bg = saveReady ? COLOR_GREEN : COLOR_SAVE_DISABLED_BG;
+    const uint32_t border = saveReady ? COLOR_GREEN : COLOR_SAVE_DISABLED_BORDER;
+    const uint32_t text = saveReady ? COLOR_WHITE : COLOR_SAVE_DISABLED_TEXT;
+
+    lv_obj_clear_state(saveButton, LV_STATE_DISABLED);
 
     lv_obj_set_style_bg_color(saveButton, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_opa(saveButton, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(saveButton, lv_color_hex(border), 0);
-    lv_obj_set_style_bg_color(saveButton, lv_color_hex(bg), LV_STATE_DISABLED);
-    lv_obj_set_style_border_color(saveButton, lv_color_hex(border), LV_STATE_DISABLED);
+    lv_obj_set_style_border_opa(saveButton, LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(saveButton, LV_OPA_COVER, 0);
 
     if (saveReady) {
-        lv_obj_clear_state(saveButton, LV_STATE_DISABLED);
+        lv_obj_add_flag(saveButton, LV_OBJ_FLAG_CLICKABLE);
     } else {
-        lv_obj_add_state(saveButton, LV_STATE_DISABLED);
+        lv_obj_clear_flag(saveButton, LV_OBJ_FLAG_CLICKABLE);
     }
 
     lv_obj_t *label = lv_obj_get_child(saveButton, 0);
     if (label && lv_obj_is_valid(label)) {
         lv_obj_set_style_text_color(label, lv_color_hex(text), 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(text), LV_STATE_DISABLED);
+        lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0);
     }
 }
 

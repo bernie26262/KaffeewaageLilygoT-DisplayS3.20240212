@@ -782,7 +782,7 @@ const fmtStopwatchTime = ms => {
   const d = Math.floor((ms % 1000) / 100);
   return `${pad2(h)}:${pad2(m)}:${pad2(s)}:${d}`;
 };
-const fmtDayClockDuration = seconds => {
+const fmtMaintenanceDuration = seconds => {
   const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
   const days = Math.floor(total / 86400);
   const h = Math.floor((total % 86400) / 3600);
@@ -790,7 +790,7 @@ const fmtDayClockDuration = seconds => {
   const s = total % 60;
   const clock = `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
   if (days === 1) return `1 Tag, ${clock}`;
-  if (days > 1) return `${days} Tage, ${clock}`;
+  if (days > 1) return `${days} Tagen, ${clock}`;
   return clock;
 };
 const fmtDateTime = (epoch, valid) => {
@@ -807,9 +807,7 @@ const fmtUptime = ms => {
   const m = Math.floor((total % 3600) / 60);
   const sec = total % 60;
   const clock = `${pad2(h)}:${pad2(m)}:${pad2(sec)}`;
-  if (days === 1) return `1 Tag, ${clock}`;
-  if (days > 1) return `${days} Tage, ${clock}`;
-  return clock;
+  return `${days} ${days === 1 ? 'Tag' : 'Tage'}, ${clock}`;
 };
 const maintenanceIntervalForm = (seconds, key = '') => {
   const minSec = key === 'machine' ? 60 : 86400;
@@ -1191,7 +1189,7 @@ function openStatsTotalsWizard() {
 
 static const char COFFEE_RENDER_JS[] PROGMEM = R"rawliteral(// ===== Wartung =====
 function fmtDuration(seconds) {
-  return fmtDayClockDuration(seconds);
+  return fmtMaintenanceDuration(seconds);
 }
 
 function maintenanceLine(label, secondsToDue, enabled = true) {
