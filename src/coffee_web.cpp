@@ -164,9 +164,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div>
         <div class="stats-title">Mahlgut</div>
         <div class="stat-row"><span>gesamt:</span><span><span id="groundTotalKg">0.00</span> kg</span></div>
-        <div class="stat-row"><span>seit Reinigung Kaffeemaschine:</span><span><span id="groundMachineG">0</span> g</span></div>
-        <div class="stat-row"><span>seit Reinigung Mühle:</span><span><span id="groundGrinderG">0</span> g</span></div>
-        <div class="stat-row"><span>seit Filterwechsel:</span><span><span id="groundFilterG">0</span> g</span></div>
+        <div class="stat-row"><span>seit Reinigung Kaffeemaschine:</span><span id="groundMachineG">0 g</span></div>
+        <div class="stat-row"><span>seit Reinigung Mühle:</span><span id="groundGrinderG">0 g</span></div>
+        <div class="stat-row"><span>seit Filterwechsel:</span><span id="groundFilterG">0 g</span></div>
       </div>
     </div>
     <div class="ip-row small">
@@ -1547,14 +1547,20 @@ function renderWifiSignal(s) {
 }
 
 function renderStatsAndSystem(s) {
+  const maintenance = s.maintenance || {};
+  const machineEnabled = maintenance.machine_enabled !== false;
+  const grinderEnabled = maintenance.grinder_enabled !== false;
+  const filterEnabled = maintenance.filter_enabled !== false;
+  const maintenanceValue = (enabled, value) => enabled ? value : 'disabled';
+
   setText('shotsTotal', s.stats?.shots?.total ?? 0);
-  setText('shotsMachine', s.stats?.shots?.since_machine_clean ?? 0);
-  setText('shotsGrinder', s.stats?.shots?.since_grinder_clean ?? 0);
-  setText('shotsFilter', s.stats?.shots?.since_filter_change ?? 0);
+  setText('shotsMachine', maintenanceValue(machineEnabled, s.stats?.shots?.since_machine_clean ?? 0));
+  setText('shotsGrinder', maintenanceValue(grinderEnabled, s.stats?.shots?.since_grinder_clean ?? 0));
+  setText('shotsFilter', maintenanceValue(filterEnabled, s.stats?.shots?.since_filter_change ?? 0));
   setText('groundTotalKg', fmtKg(s.stats?.ground?.total_g));
-  setText('groundMachineG', fmtWholeG(s.stats?.ground?.since_machine_clean_g));
-  setText('groundGrinderG', fmtWholeG(s.stats?.ground?.since_grinder_clean_g));
-  setText('groundFilterG', fmtWholeG(s.stats?.ground?.since_filter_change_g));
+  setText('groundMachineG', maintenanceValue(machineEnabled, `${fmtWholeG(s.stats?.ground?.since_machine_clean_g)} g`));
+  setText('groundGrinderG', maintenanceValue(grinderEnabled, `${fmtWholeG(s.stats?.ground?.since_grinder_clean_g)} g`));
+  setText('groundFilterG', maintenanceValue(filterEnabled, `${fmtWholeG(s.stats?.ground?.since_filter_change_g)} g`));
   setText('statsTotalShotsView', s.stats?.shots?.total ?? 0);
   setText('statsTotalGroundView', `${fmtG(s.stats?.ground?.total_g)} g`);
   setText('datetime', fmtDateTime(s.time?.epoch, s.time?.valid));

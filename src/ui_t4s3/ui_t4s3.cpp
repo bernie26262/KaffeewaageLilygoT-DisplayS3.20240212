@@ -1467,14 +1467,20 @@ void update_demo_stats_display();
 void add_saved_dose(int32_t doseTenths)
 {
     demoTotalShots++;
-    demoMachineShots++;
-    demoGrinderShots++;
-    demoFilterShots++;
-
     demoTotalGramsTenths += doseTenths;
-    demoMachineGramsTenths += doseTenths;
-    demoGrinderGramsTenths += doseTenths;
-    demoFilterGramsTenths += doseTenths;
+
+    if (maintenanceMachineEnabled) {
+        demoMachineShots++;
+        demoMachineGramsTenths += doseTenths;
+    }
+    if (maintenanceGrinderEnabled) {
+        demoGrinderShots++;
+        demoGrinderGramsTenths += doseTenths;
+    }
+    if (maintenanceFilterEnabled) {
+        demoFilterShots++;
+        demoFilterGramsTenths += doseTenths;
+    }
 
     update_demo_stats_display();
 }
@@ -1487,25 +1493,25 @@ void update_demo_stats_display()
     set_text(totalShotsLabel, buf);
 
     snprintf(buf, sizeof(buf), "%u", demoMachineShots);
-    set_text(shotsMachineLabel, buf);
+    set_text(shotsMachineLabel, maintenanceMachineEnabled ? buf : "-");
 
     snprintf(buf, sizeof(buf), "%u", demoGrinderShots);
-    set_text(shotsGrinderLabel, buf);
+    set_text(shotsGrinderLabel, maintenanceGrinderEnabled ? buf : "-");
 
     snprintf(buf, sizeof(buf), "%u", demoFilterShots);
-    set_text(shotsFilterLabel, buf);
+    set_text(shotsFilterLabel, maintenanceFilterEnabled ? buf : "-");
 
     format_grams(buf, sizeof(buf), demoTotalGramsTenths);
     set_text(totalGramsLabel, buf);
 
     format_grams(buf, sizeof(buf), demoMachineGramsTenths);
-    set_text(gramsMachineLabel, buf);
+    set_text(gramsMachineLabel, maintenanceMachineEnabled ? buf : "-");
 
     format_grams(buf, sizeof(buf), demoGrinderGramsTenths);
-    set_text(gramsGrinderLabel, buf);
+    set_text(gramsGrinderLabel, maintenanceGrinderEnabled ? buf : "-");
 
     format_grams(buf, sizeof(buf), demoFilterGramsTenths);
-    set_text(gramsFilterLabel, buf);
+    set_text(gramsFilterLabel, maintenanceFilterEnabled ? buf : "-");
 }
 
 void update_target_display()
@@ -3448,13 +3454,38 @@ void create_daten_mahldaten_page(lv_obj_t *screen)
     char filterGrams[24];
 
     snprintf(totalShots, sizeof(totalShots), "%u", demoTotalShots);
-    snprintf(machineShots, sizeof(machineShots), "%u", demoMachineShots);
-    snprintf(grinderShots, sizeof(grinderShots), "%u", demoGrinderShots);
-    snprintf(filterShots, sizeof(filterShots), "%u", demoFilterShots);
+    if (maintenanceMachineEnabled) {
+        snprintf(machineShots, sizeof(machineShots), "%u", demoMachineShots);
+    } else {
+        snprintf(machineShots, sizeof(machineShots), "-");
+    }
+    if (maintenanceGrinderEnabled) {
+        snprintf(grinderShots, sizeof(grinderShots), "%u", demoGrinderShots);
+    } else {
+        snprintf(grinderShots, sizeof(grinderShots), "-");
+    }
+    if (maintenanceFilterEnabled) {
+        snprintf(filterShots, sizeof(filterShots), "%u", demoFilterShots);
+    } else {
+        snprintf(filterShots, sizeof(filterShots), "-");
+    }
+
     format_grams(totalGrams, sizeof(totalGrams), demoTotalGramsTenths);
-    format_grams(machineGrams, sizeof(machineGrams), demoMachineGramsTenths);
-    format_grams(grinderGrams, sizeof(grinderGrams), demoGrinderGramsTenths);
-    format_grams(filterGrams, sizeof(filterGrams), demoFilterGramsTenths);
+    if (maintenanceMachineEnabled) {
+        format_grams(machineGrams, sizeof(machineGrams), demoMachineGramsTenths);
+    } else {
+        snprintf(machineGrams, sizeof(machineGrams), "-");
+    }
+    if (maintenanceGrinderEnabled) {
+        format_grams(grinderGrams, sizeof(grinderGrams), demoGrinderGramsTenths);
+    } else {
+        snprintf(grinderGrams, sizeof(grinderGrams), "-");
+    }
+    if (maintenanceFilterEnabled) {
+        format_grams(filterGrams, sizeof(filterGrams), demoFilterGramsTenths);
+    } else {
+        snprintf(filterGrams, sizeof(filterGrams), "-");
+    }
 
     auto addRow = [](lv_obj_t *parent, const char *name, const char *value, int y, lv_obj_t **valueOut) {
         lv_obj_t *nameLabel = lv_label_create(parent);
@@ -4365,6 +4396,7 @@ static bool ui_t4s3_web_set_maintenance_enabled(const char *item, bool enabled)
     save_current_ui_settings();
     update_maintenance_due_state();
     update_maintenance_display();
+    update_demo_stats_display();
 
     char msg[96];
     snprintf(msg, sizeof(msg), "Wartung %s: %s", label, enabled ? "aktiv" : "inaktiv");
