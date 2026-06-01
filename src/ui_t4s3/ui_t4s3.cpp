@@ -469,8 +469,9 @@ void update_hx711_grams_display(float grams, bool valid)
     set_text_if_changed(scaleCalibrationWeightLabel, buf);
     update_gefaess_measure_weight_display();
 
-    // First integration step: show the real HX711 DISPLAY value on the
-    // main scale page, but leave save/autodetect logic untouched for now.
+    // HX711-Werte sind fachlicher Zustand, nicht nur HMI-Anzeige:
+    // Autodetect/Auto-Tara/Save-ready muessen auch laufen, wenn die
+    // WebUI genutzt wird und auf dem HMI gerade eine andere Seite offen ist.
     if (valid) {
         set_text_if_changed(weightLabel, buf);
         if (autodetectDetectedGefaess == kNoDetectedGefaess) {
@@ -776,7 +777,6 @@ void update_save_ready_from_weight()
 void update_autodetect_gefaess_preview()
 {
     const bool blocked =
-        activePage != Page::Waage ||
         !autodetectEnabled ||
         !hx711DisplayValid ||
         !t4s3_scale_is_ready() ||
