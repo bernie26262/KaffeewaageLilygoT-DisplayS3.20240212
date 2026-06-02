@@ -1370,8 +1370,8 @@ function renderMaintenanceIntervals(m) {
         <span class="small">Intervall für nächste Fälligkeit · ${cfg.standard}</span>
       </div>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-        <input class="maintenance-interval-value" data-maintenance-key="${cfg.key}" type="number" min="1" max="365" step="1" inputmode="numeric" value="${form.value}" style="width:82px;">
-        <select class="maintenance-interval-unit" data-maintenance-key="${cfg.key}">
+        <input class="maintenance-interval-value" name="maintenance_interval_${cfg.key}" data-maintenance-key="${cfg.key}" type="number" min="1" max="365" step="1" inputmode="numeric" autocomplete="off" value="${form.value}" style="width:82px;">
+        <select class="maintenance-interval-unit" name="maintenance_interval_unit_${cfg.key}" data-maintenance-key="${cfg.key}">
           ${cfg.key === 'machine' ? `<option value="minutes"${form.unit === 'minutes' ? ' selected' : ''}>Minuten</option>` : ''}
           <option value="days"${form.unit === 'days' ? ' selected' : ''}>Tage</option>
           <option value="weeks"${form.unit === 'weeks' ? ' selected' : ''}>Wochen</option>
@@ -1442,7 +1442,7 @@ function renderSiebtraegerSettings(s) {
     return `<div class="gefaess-row siebtraeger-settings-row">
       <label class="siebtraeger-settings-label">
         <span><b>Profil ${index + 1}</b> · Sollgewicht ${fmtG(target)} g</span>
-        <input class="siebtraeger-name-input" data-siebtraeger-name-index="${index}" maxlength="23" value="${escapeHtml(name)}" aria-label="Siebträger ${index + 1} Bezeichnung">
+        <input class="siebtraeger-name-input" name="siebtraeger_name_${index}" data-siebtraeger-name-index="${index}" maxlength="23" autocomplete="off" value="${escapeHtml(name)}" aria-label="Siebträger ${index + 1} Bezeichnung">
       </label>
       <button class="compact secondary save-siebtraeger-name" data-siebtraeger-name-index="${index}">speichern</button>
     </div>`;
