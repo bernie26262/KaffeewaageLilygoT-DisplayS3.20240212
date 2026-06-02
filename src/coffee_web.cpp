@@ -313,9 +313,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3c"></script>
-<script src="/coffee_render.js?v=3c"></script>
-<script src="/coffee_events.js?v=3c"></script>
+<script src="/coffee_core.js?v=3d"></script>
+<script src="/coffee_render.js?v=3d"></script>
+<script src="/coffee_events.js?v=3d"></script>
 </body>
 </html>)rawliteral";
 
@@ -697,7 +697,18 @@ let pendingConfirm = null;
 let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
 const el = id => document.getElementById(id);
-const setText = (id, value) => { el(id).textContent = value; };
+const setText = (id, value) => {
+  const node = el(id);
+  if (!node) return;
+  const text = String(value ?? '');
+  if (node.textContent !== text) node.textContent = text;
+};
+const setHtml = (id, value) => {
+  const node = el(id);
+  if (!node) return;
+  const html = String(value ?? '');
+  if (node.innerHTML !== html) node.innerHTML = html;
+};
 const GEFAESS_COUNT = 4;
 const GEFAESS_INDEXES = Array.from({ length: GEFAESS_COUNT }, (_, index) => index);
 const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3', 'Gefäß 4'];
@@ -1218,16 +1229,16 @@ function renderMaintenance(m) {
 
     if (!lastState?.time?.valid) {
       detailTitle.textContent = 'Wartungszeiten';
-      detailList.innerHTML = '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>';
+      setHtml('maintenanceDetailList', '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>');
       return;
     }
 
     detailTitle.textContent = dueCount === 0
       ? 'Wartungszeiten'
       : (dueCount === 1 ? 'Wartungszeiten: 1 Hinweis' : `Wartungszeiten: ${dueCount} Hinweise`);
-    detailList.innerHTML = lines
+    setHtml('maintenanceDetailList', lines
       .map(line => `<li class="maintenance-item ${line.disabled ? 'disabled' : (line.due ? 'due' : 'ok')}">${line.text}</li>`)
-      .join('');
+      .join(''));
   }
 }
 
@@ -1382,6 +1393,10 @@ function renderGefaessSettings(s) {
   if (!list) return;
 
   const weights = s?.gefaesse?.weights_g || [];
+  const signature = GEFAESS_INDEXES.map(index => Number(weights[index] || 0).toFixed(1)).join('|');
+  if (list.dataset.signature === signature) return;
+  list.dataset.signature = signature;
+
   list.innerHTML = GEFAESS_INDEXES.map(index => {
     const weight = Number(weights[index] || 0);
     const measured = weight > 0.05;
@@ -1425,8 +1440,12 @@ function renderAutodetect(s) {
 function renderWifiBars(id, level, title) {
   const icon = el(id);
   if (!icon) return;
-  icon.innerHTML = [0, 1, 2, 3].map(i => `<span class="bar${i < level ? ' on' : ''}"></span>`).join('');
-  icon.setAttribute('title', title);
+  const html = [0, 1, 2, 3].map(i => `<span class="bar${i < level ? ' on' : ''}"></span>`).join('');
+  if (icon.dataset.level !== String(level)) {
+    icon.innerHTML = html;
+    icon.dataset.level = String(level);
+  }
+  if (icon.getAttribute('title') !== title) icon.setAttribute('title', title);
 }
 
 function renderWifiSignal(s) {
@@ -1558,10 +1577,27 @@ function connect() {
   ws.onerror = () => { addLog('WebSocket-Fehler'); };
   ws.onmessage = e => {
     const data = JSON.parse(e.data);
-    if (data.type === 'state') render(data);
+    if (data.type === 'state') {
+      scheduleRender(data);
+      return;
+    }
     if (data.type === 'ack') addLog(`OK: ${data.cmd}`);
     if (data.type === 'error') addLog(`Fehler: ${data.cmd || ''} ${data.message}`);
   };
+}
+
+let pendingRenderState = null;
+let renderScheduled = false;
+function scheduleRender(state) {
+  pendingRenderState = state;
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    renderScheduled = false;
+    const stateToRender = pendingRenderState;
+    pendingRenderState = null;
+    if (stateToRender) render(stateToRender);
+  });
 }
 
 // ===== Event-Handler =====
