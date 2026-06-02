@@ -170,7 +170,6 @@ Der manuelle Setup-AP ist als sicherer Zwischenschritt vor einem echten Captive 
 AP-SSID: Waagen-Setup
 AP-IP:   192.168.4.1
 Setup-Seite: http://192.168.4.1/
-Alternativ:  http://192.168.4.1/wifi-setup
 ```
 
 Die Setup-Seite speichert SSID und Passwort in Preferences/NVS und aktiviert diese gespeicherten WLAN-Daten fuer den naechsten Neustart. Das echte WLAN-Passwort wird weiterhin nicht im Klartext an die WebUI zurueckgegeben.
@@ -288,10 +287,11 @@ Empfohlene schrittweise Umsetzung:
 8. Manuellen Setup-Access-Point `Waagen-Setup` bereitstellen. ✅
 9. Minimal-Seite zum Speichern von SSID/Passwort bereitstellen. ✅
 10. HMI-Seiten `22`, `24`, `25` und `26` fuer WLAN-Status, Setup-Start, Setup-Hinweis und Neustart-Hinweis vorbereiten. ✅
-11. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Waagen-Setup` automatisch starten.
-12. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
-13. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
-14. Spaeter `wifi_secrets.h` ganz aus dem normalen Build entfernen.
+11. HMI-Rückmeldung nach Speichern der WLAN-Daten anzeigen und Neustart anbieten. ✅
+12. Wenn keine nutzbaren Daten vorhanden sind, SoftAP `Waagen-Setup` automatisch starten.
+13. Neue WLAN-Daten erst nach erfolgreichem Verbindungstest als `active=true` markieren.
+14. Erst wenn das stabil ist, `wifi_secrets.h` nur noch als Fallback/Entwicklungsoption verwenden.
+15. Später `wifi_secrets.h` ganz aus dem normalen Build entfernen.
 
 ## Migrationsstrategie
 

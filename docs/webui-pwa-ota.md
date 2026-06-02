@@ -48,6 +48,23 @@ http://<ip>/coffee_events.js?v=test
 ```
 
 Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
+## WebSocket-Rendering / Langlauf-Performance
+
+Die WebUI verarbeitet Live-State-Nachrichten über WebSocket. Nach langen Laufzeiten traten im Browser zeitweise Chrome-Meldungen wie diese auf:
+
+```text
+[Violation] 'message' handler took 315ms
+```
+
+Der aktuelle Stand reduziert die Last im Browser:
+
+- eingehende State-Nachrichten werden über `requestAnimationFrame` gebündelt
+- wenn mehrere States schnell nacheinander eintreffen, wird nur der letzte State gerendert
+- Text und HTML werden nur ins DOM geschrieben, wenn sich der Inhalt geändert hat
+- teure Listen wie Wartung, Gefäße, Siebträger und WLAN-Balken werden über Signaturen gecacht
+
+Der Fix wurde auf dem T4-S3 nach mehreren Stunden Laufzeit ohne neue `message handler`-Violations getestet.
+
 ## PWA-/Homescreen-Integration
 
 Die WebUI enthaelt im HTML-`head` die relevanten PWA-/Mobile-Meta-Tags:
@@ -150,7 +167,7 @@ docs/ota_filename_validation.md
 ## Firmware bauen
 
 ```powershell
-pio run -e KaffeewaageLilygoT-DisplayS3_20240212
+pio run -e lilygo-t4-s3-lvgl
 ```
 
 Die erzeugte Firmware-Binary liegt unter:
@@ -166,7 +183,7 @@ Bei OTA-Projekten nicht `pio run -t uploadfs` verwenden.
 Stattdessen:
 
 ```powershell
-pio run -e KaffeewaageLilygoT-DisplayS3_20240212 -t buildfs
+pio run -e lilygo-t4-s3-lvgl -t buildfs
 ```
 
-Danach das erzeugte SPIFFS-Image aus dem Build-Ordner ueber `/update` hochladen.
+Danach das erzeugte SPIFFS-/LittleFS-Image aus dem Build-Ordner über `/update` hochladen.

@@ -2,7 +2,7 @@
 
 ## Ziel
 
-Die WebUI der Kaffeewaage soll mittelfristig als Vorlage fuer ein lokales Touch-HMI dienen. Zielhardware fuer eine spaetere HMI-Variante ist ein LilyGO T4 S3 bzw. ein vergleichbares ESP32-S3-Board mit Touch-Display und ca. 450 x 600 px Aufloesung.
+Die WebUI der Kaffeewaage dient inzwischen nicht mehr nur als Vorlage, sondern läuft parallel zum lokalen T4-S3-LVGL-HMI. Zielhardware ist das LilyGO T4-S3 AMOLED Touch mit ca. 450 x 600 px nutzbarer Oberfläche.
 
 Die WebUI soll deshalb nicht wie eine klassische Webseite aufgebaut sein, sondern wie eine eingebettete Bedienoberflaeche:
 
@@ -24,7 +24,7 @@ Waage | Stoppuhr | Daten | Einstellungen
 
 Diese Bereiche sind in der WebUI aktuell Tabs innerhalb der Hauptseite `/`. Sie sind keine eigenen URLs.
 
-Fuer das spaetere HMI sollen diese Bereiche als echte Screens umgesetzt werden:
+Im T4-S3-HMI sind diese Bereiche als echte Screens umgesetzt:
 
 ```text
 ScaleScreen
@@ -100,13 +100,37 @@ System / OTA
 
 In der WebUI sind diese Unterbereiche aktuell als zweite Tab-/Segment-Ebene innerhalb von Einstellungen umgesetzt.
 
-Fuer das spaetere HMI sollen sie moeglichst nicht als lange scrollende Seite erscheinen, sondern als eigene Unterseiten oder Screens:
+Im T4-S3-HMI sollen sie moeglichst nicht als lange scrollende Seite erscheinen, sondern als eigene Unterseiten oder Screens:
 
 ```text
 SettingsMaintenanceScreen
 SettingsScaleVesselsScreen
 SettingsSystemScreen
 ```
+
+## Aktuelle T4-S3-HMI-Regeln
+
+### Save-Button inaktiv
+
+Der inaktive Save-Button verwendet bewusst nicht `LV_STATE_DISABLED`. Der LVGL-Disabled-State wurde auf dem AMOLED deutlich zu hell/lila dargestellt. Stattdessen gilt:
+
+- aktiv: grün und klickbar
+- inaktiv: eigenes dunkles Grau, gedämpfter Text
+- Klickbarkeit über `LV_OBJ_FLAG_CLICKABLE`
+
+Damit bleibt der Button optisch nahe an der WebUI, ohne vom LVGL-Theme aufgehellt zu werden.
+
+### Gewichtsanzeige
+
+Die Gewichtsanzeige unterdrückt negative Null. Wenn ein negativer Rohwert nach Rundung als `-0,0 g` erscheinen würde, wird `0,0 g` angezeigt. Erst ab einer gerundeten Anzeige von mindestens `-0,1 g` erscheint das Minuszeichen.
+
+### Wartung inaktiv
+
+Bei deaktivierter Wartung zeigt das HMI wegen Platzmangel `-` für die jeweiligen Shots- und Mahlgut-Werte. Die WebUI zeigt ausführlicher `disabled`.
+
+### Seitenunabhängige Waagenlogik
+
+Autodetect, Auto-Tara und Save-ready laufen unabhängig von der sichtbaren HMI-Seite. Das ist wichtig, weil die Waage häufig über die WebUI bedient wird, während das lokale HMI auf Daten, Wartung, WLAN oder System stehen kann.
 
 ## Umgang mit Scrollen
 

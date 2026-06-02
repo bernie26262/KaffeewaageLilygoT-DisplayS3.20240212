@@ -1,103 +1,134 @@
-# Architekturueberblick
+# Architekturüberblick
 
 ## Ziel
 
-Die Kaffeewaage soll als eigenstaendiges ESP32-Geraet funktionieren und gleichzeitig eine moderne WebUI bereitstellen. Die lokale TFT-/Encoder-Bedienung bleibt erhalten, die WebUI dient als komfortable Bedien- und Wartungsoberflaeche.
+Die Kaffeewaage soll als eigenständiges ESP32-S3-Gerät funktionieren und gleichzeitig eine moderne WebUI bereitstellen. Der aktuelle Hauptstand ist der **T4-S3-/LVGL-Branch** mit lokalem Touch-HMI und WebUI. Der Legacy-TFT-/Encoder-Stand bleibt als Referenz im selben Repo erhalten.
 
-## Hauptmodule
+## Branches und Build-Environments
 
-### `main.cpp`
+| Bereich | Branch / Environment | Status |
+|---|---|---|
+| T4-S3 / LVGL | `feature/t4s3-lvgl-touch` / `lilygo-t4-s3-lvgl` | aktueller Hauptstand |
+| Legacy-TFT | `stable/legacy-tft-pre-t4s3` bzw. `feature/legacy-webui-maintenance-settings` / `KaffeewaageLilygoT-DisplayS3_20240212` | finaler klassischer Stand / Referenz |
 
-Enthaelt weiterhin die zentrale Hardware- und Ablaufsteuerung:
+Für T4-S3 immer gezielt bauen:
 
-- HX711-/LoadCell-Initialisierung und Messwertverarbeitung
-- TFT-Ausgabe
-- Rotary-Encoder- und Tasterlogik
-- Autodetect-State-Machine
-- Tara-/Save-Ablauf
-- Wartungs-/Warnlogik
-- WLAN-Start und Webserver-Initialisierung
+```powershell
+pio run -e lilygo-t4-s3-lvgl
+```
 
-Neue oder ausgelagerte Funktionen sollen moeglichst nicht mehr direkt in `main.cpp` wachsen, sondern in eigene Module wandern.
+Ein nacktes `pio run` kann zusätzlich das Legacy-Environment bauen und dadurch Fehler zeigen, die für den T4-S3-Stand nicht relevant sind.
 
-### `app_state.h`
+## Hauptmodule T4-S3
 
-Definiert den zentralen Zustand, der fuer die WebUI serialisiert wird. Ziel ist, dass `main.cpp` die Hardware- und Fachwerte aktualisiert und `coffee_web.cpp` daraus JSON fuer WebSocket-Clients erzeugt.
+### `src/t4s3_main.cpp`
 
-### `coffee_web.cpp/.h`
+Zentrale T4-S3-Hardware- und Ablaufsteuerung:
 
-Enthaelt:
+- LilyGO-AMOLED-Initialisierung
+- LVGL-Tick, Display-Flush, Touch-Eingabe
+- HX711-Initialisierung und Messwertverarbeitung
+- adaptive Gewichtsanzeige
+- Display-Sleep/Wakeup
+- AppState-Befüllung für WebUI
+- Start von WLAN, WebUI und OTA
+
+### `src/ui_t4s3/`
+
+LVGL-HMI für den T4-S3:
+
+- Waage
+- Stoppuhr
+- Daten
+- Wartung
+- WLAN / Netzwerk
+- System / OTA
+- Kalibrier- und Gefäß-Wizard
+
+Wichtig: Der Save-Button wird im inaktiven Zustand bewusst **nicht** über `LV_STATE_DISABLED` dargestellt. Der LVGL-Disabled-State hellt auf dem AMOLED stark auf. Stattdessen setzt die UI eigene dunkle Farben und schaltet nur `LV_OBJ_FLAG_CLICKABLE`.
+
+### `src/t4s3_settings.cpp/.h`
+
+Persistente T4-S3-HMI- und Waagenwerte im Namespace `t4s3ui`:
+
+- Bildschirmtimeout
+- Autodetect
+- ausgewählter Siebträger
+- Sollgewichte und Namen
+- Gefäßgewichte
+- Statistik-/Wartungswerte
+- Wartungszeiten und Wartung aktiv/inaktiv
+- HX711-Kalibrierfaktor
+
+### `src/t4s3_wifi.cpp/.h`
+
+T4-S3-nahe WLAN-Status- und Hilfslogik.
+
+### `src/app_state.h`
+
+Gemeinsamer Zustand für WebUI/JSON-Ausgabe. `t4s3_main.cpp` aktualisiert den AppState; `coffee_web.cpp` serialisiert ihn für WebSocket-Clients.
+
+### `src/coffee_web.cpp/.h`
+
+Gemeinsame WebUI- und WebSocket-Schicht für Legacy und T4-S3:
 
 - eingebettete WebUI
+- getrennte Asset-Routen `/coffee.css`, `/coffee_core.js`, `/coffee_render.js`, `/coffee_events.js`
 - WebSocket-Route `/ws`
 - WebSocket-Kommandos
 - JSON-State-Erzeugung
 - PWA-Manifest-Handler
 - Icon-/Favicon-Routen
 
-Die Hauptseite ist aktuell bewusst noch nicht nach SPIFFS ausgelagert, damit keine groessere WebUI-Umstrukturierung entsteht.
+Das WebUI-Rendering ist browserseitig optimiert: WebSocket-State-Nachrichten werden per `requestAnimationFrame` gebündelt, und DOM-Werte werden nur bei Änderung geschrieben. Das verhindert nach Langlauf die Chrome-Meldungen `message handler took ... ms`.
 
-### `coffee_ota.cpp/.h`
+### `src/coffee_ota.cpp/.h`
 
-Enthaelt die Update-Seite `/update` mit getrenntem Upload fuer:
+Update-Seite `/update` mit getrenntem Upload für:
 
-- Firmware (`U_FLASH`)
-- SPIFFS-Dateisystem (`U_SPIFFS`)
+- Firmware (`firmware.bin`)
+- Dateisystem (`spiffs.bin` oder `littlefs.bin`)
 
-Der ESP rebootet nach Upload nicht automatisch. Der Neustart erfolgt per Button.
+Der ESP rebootet nach Upload nicht automatisch. Der Neustart erfolgt per Button. Falsche Dateinamen werden client- und serverseitig abgelehnt.
 
+### `src/coffee_wifi.cpp/.h`
 
-### Zukuenftiges Modul: `coffee_wifi.cpp/.h`
+WLAN-Provisioning und gespeicherte WLAN-Daten:
 
-Die WLAN-Konfiguration soll langfristig nicht mehr ueber fest einkompilierte `wifi_secrets.h` erfolgen, sondern ueber WLAN-Provisioning mit temporaerem Setup-Access-Point.
+- Laden/Speichern/Löschen von SSID und Passwort in NVS
+- Auswahl zwischen gespeicherten WLAN-Daten und Standard-WLAN aus Firmware
+- Setup-Access-Point `Waagen-Setup`
+- Setup-Seite unter `http://192.168.4.1/`
 
-Geplantes Ziel:
+### `src/coffee_storage.cpp/.h`
 
-- WLAN-Daten in NVS/Preferences speichern
-- bei fehlenden oder ungueltigen WLAN-Daten einen Setup-Access-Point starten
-- einfache Einrichtungsseite zum Speichern von SSID und Passwort bereitstellen
-- `wifi_secrets.h` zunaechst als Entwicklungs-/Fallback-Option behalten und spaeter aus dem normalen Build entfernen
+Legacy-kompatible Storage-Schicht für klassische Werte und WebUI-Funktionen. Für T4-S3-spezifische HMI-Werte wird zusätzlich `t4s3_settings` verwendet.
 
-Details stehen in `docs/wifi-provisioning.md`.
+## Waagenlogik und Autodetect
 
-### `coffee_storage.cpp/.h`
+Autodetect, Auto-Tara und Save-ready sind nicht mehr an die aktuell sichtbare HMI-Seite gekoppelt. Dadurch funktioniert die Waagenlogik auch dann, wenn die WebUI auf der Waage-Seite benutzt wird und das lokale HMI gerade Daten, Wartung, WLAN oder System zeigt.
 
-Buendelt die persistenten NVS-/Preferences-Zugriffe.
+Bewusst blockiert bleibt Autodetect während Sonderabläufen:
 
-`main.cpp` soll keine direkten `preferences.begin`, `preferences.put...`, `preferences.get...` oder `preferences.end`-Zugriffe mehr enthalten. Stattdessen werden Speicheroperationen ueber Funktionen wie `coffeeStorageSaveStats(...)` oder `coffeeStorageLoadOrInit(...)` ausgefuehrt.
+- Gefäß-Wizard
+- Kalibrier-Wizard
+- Web-Wizard / Web-Messdialoge
+- sonstige Mess- und Verwaltungsabläufe, bei denen Auto-Tara stören würde
 
-## Webserver-Initialisierung
+## Wartung
 
-Wichtig ist die Handler-Reihenfolge:
+Wartung aktiv/inaktiv ist fachlich von den gespeicherten Wartungszeitpunkten getrennt:
 
-1. Route `/`
-2. WebUI-/PWA-Handler aus `coffeeWebBegin(server)`
-3. OTA-Handler aus `coffeeOtaBegin(server)`
-4. statische SPIFFS-Auslieferung `server.serveStatic("/", SPIFFS, "/")`
-5. `server.begin()`
+- Deaktiviert: keine Warnung, Zeitpunkt bleibt gespeichert, zugehörige Shots-/Mahlgut-Zähler frieren ein.
+- Aktiviert: Warnung erscheint sofort wieder, falls die Wartung nach gespeichertem Zeitpunkt eigentlich fällig ist; Zähler laufen ab altem Stand weiter.
 
-Der breite Static-Handler darf PWA-/Favicon-Spezialrouten nicht vorzeitig abfangen.
+WebUI zeigt bei deaktivierter Wartung `disabled`, das HMI wegen Platz `-`.
 
-## WebUI-Kommunikation
-
-Die WebUI verwendet WebSocket-Kommunikation. Der ESP sendet regelmaessig bzw. bei Zustandsaenderungen einen JSON-State. Kommandos der WebUI werden als kurze Befehle an den ESP gesendet und dort in `main.cpp` verarbeitet.
-
-Beispiele fuer Kommandobereiche:
-
-- Save Dose
-- Zielgewicht setzen
-- Autodetect ein/aus
-- Kalibriergewicht setzen
-- Kalibrierfaktor speichern
-- Gefaess messen/speichern/loeschen
-- Wartungszeitpunkte zuruecksetzen
-- Gesamtwerte bearbeiten
-
-## Grundsaetze fuer weitere Refaktorierung
+## Grundsätze für weitere Refaktorierung
 
 - Kleine Diffs bevorzugen
 - Build nach jedem Schritt
-- WebUI nur vorsichtig anfassen
-- keine grossen JS-Umsortierungen ohne konkreten Anlass
-- keine direkte neue Preferences-Logik in `main.cpp`
-- neue Webserver-/OTA-/Storage-Themen in eigene Module auslagern
+- T4-S3 mit `pio run -e lilygo-t4-s3-lvgl` bauen
+- WebUI nur vorsichtig anfassen und Langlauf im Browser testen
+- keine direkte neue Preferences-Logik in großen UI-Dateien, sondern Storage-/Settings-Funktionen nutzen
+- Legacy und T4-S3 nicht blind gegenseitig überschreiben; Änderungen gezielt portieren

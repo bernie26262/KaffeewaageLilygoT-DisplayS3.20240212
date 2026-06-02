@@ -178,16 +178,23 @@ Ziel:
 
 # Bewegungs- und Stabilitätserkennung
 
-Derzeit:
+Aktueller T4-S3-Stand:
 
-- Vergleich von FAST gegen DISPLAY
-- Schwellwert-basierte Erkennung
-- zusätzlicher Zeitfilter
+- 80-Hz-HX711-Betrieb
+- Median-Vorfilter
+- FAST-Pfad für schnelle Reaktion
+- STABLE-Pfad für ruhige Entscheidungen
+- DISPLAY-Pfad für die Anzeige
+- Bewegungserkennung über Differenzen im Rohwertbereich
+- Stable-Delay aktuell `700 ms`
+- Stable-Deadband der Anzeige aktuell `0.08 g`
 
-Status:
+Das zuletzt getestete Zielverhalten:
 
-- funktioniert bereits gut
-- Übergänge können später noch weicher gemacht werden
+- größere Änderungen laufen schnell hinterher
+- im stabilen Zustand bleibt die Anzeige ruhig bei `0,0 g`
+- einzelne Bohnen mit etwas über `0,1 g` führen sichtbar zu einer Anzeigeänderung
+- Autodetect/Auto-Tara verwenden weiterhin den ruhigen Stable-Pfad
 
 
 ---
@@ -288,3 +295,21 @@ Die Waage zeigt jetzt:
 - adaptive Anzeige
 
 Damit ist eine gute Basis geschaffen, um die echte Gewichtsmessung jetzt in die eigentliche Waagen-UI zu integrieren.
+
+---
+
+# Negative Null
+
+Die Anzeige formatiert das Vorzeichen anhand des gerundeten Zehntelgramm-Werts. Dadurch wird ein Rohwert knapp unter Null nicht mehr als `-0,0 g`, sondern als `0,0 g` angezeigt. Erst wenn die gerundete Anzeige mindestens `-0,1 g` ergibt, wird das Minuszeichen dargestellt.
+
+---
+
+# Aktuelle Abstimmung
+
+Der Stand nach dem letzten Test verwendet `kDisplayStableDeadbandGrams = 0.08f`. Dieser Wert ist ein guter Kompromiss:
+
+- bei leerer Waage ruhige Anzeige
+- keine dauernden Wechsel zwischen `-0,1 g`, `0,0 g` und `0,1 g`
+- einzelne Bohnen über ca. `0,1 g` werden sichtbar erfasst
+
+Wenn später ein anderer mechanischer Aufbau oder eine andere Wägezelle verwendet wird, ist dieser Wert ein wichtiger erster Abstimmparameter.

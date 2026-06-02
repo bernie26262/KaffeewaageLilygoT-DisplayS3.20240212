@@ -1,9 +1,8 @@
 # T4-S3 Hardware / Pinbelegung
 
 Diese Datei dokumentiert die geplante Verdrahtung der Kaffeewaage mit dem
-LILYGO T4-S3 AMOLED Touch. Der aktuelle T4-S3/LVGL-Prototyp läuft weiterhin im
-Simulator-Modus ohne angeschlossene Wägezelle; die Pins sind aber bereits im
-Code reserviert.
+LILYGO T4-S3 AMOLED Touch. Der aktuelle T4-S3/LVGL-Prototyp nutzt die echte
+HX711-Anbindung; die Pins sind in `src/t4s3_pins.h` fest vorgesehen.
 
 ## Grundsatz
 
@@ -86,17 +85,16 @@ Paares einzukoppeln und damit im Differenzsignal besser zu unterdrücken.
 
 ## Hinweise zur späteren Integration
 
-Der aktuelle T4-S3-Build verwendet weiterhin:
+Der aktuelle T4-S3-Build verwendet:
 
 ```text
--DCOFFEE_WEIGHT_SIMULATOR=1
+-DCOFFEE_USE_HX711=1
 ```
 
-Die reale HX711-Anbindung soll erst aktiviert werden, wenn Wägezelle und Mechanik
-eingebaut sind. Dann sind die nächsten Schritte:
+Die reale HX711-Anbindung ist damit aktiv. Wichtige Prüfpunkte bei Hardwareänderungen:
 
-1. HX711-Library in das T4-S3-Environment aufnehmen.
-2. Initialisierung mit `HX711_DOUT_PIN` und `HX711_SCK_PIN`.
-3. Rohwerte im Serial Monitor prüfen.
-4. Tara und Kalibrierung an die bestehende LVGL-Oberfläche anbinden.
-5. Display-Wakeup per Gewichtsänderung `±30 g` aktivieren.
+1. Initialisierung mit `HX711_DOUT_PIN` und `HX711_SCK_PIN` prüfen.
+2. Rohwerte im Serial Monitor prüfen.
+3. Tara und Kalibrierung über HMI/WebUI testen.
+4. Adaptive Anzeige testen: schnelle Reaktion beim Auflegen, ruhige Stable-Anzeige.
+5. Display-Wakeup per Gewichtsänderung `±30 g` prüfen.

@@ -1,6 +1,6 @@
 # T4-S3 Persistente Einstellungen
 
-Dieser Stand speichert zunächst nur UI-nahe Einstellungen des T4-S3-LVGL-HMI in NVS/Preferences.
+Dieser Stand speichert UI-, Waagen-, Wartungs- und Kalibrierwerte des T4-S3-LVGL-HMI in NVS/Preferences.
 
 Namespace:
 
@@ -26,7 +26,7 @@ Wichtig:
 - Siebträger-Gewichte werden nicht gespeichert.
 - Siebträger dienen auf der Single-Dose-Waage nur als Profil für das Sollgewicht.
 - Auto-Tara / Autodetect basiert später auf Gefäßen, nicht auf Siebträger-Gewichten.
-- Gefäßgewichte, Kalibrierwerte, Wartungszeiten und Statistikwerte werden in späteren Schritten ergänzt.
+- Gefäßgewichte, Kalibrierwerte, Wartungszeiten und Statistikwerte sind inzwischen ergänzt.
 
 Standardwerte:
 
@@ -40,9 +40,9 @@ Timeout           5 min
 Autodetect        AN
 ```
 
-## Demo-Statistikwerte
+## Statistik- und Wartungszähler
 
-Zusätzlich werden jetzt die im T4-S3-Prototyp angezeigten Statistikwerte gespeichert:
+Die im T4-S3-Prototyp angezeigten Statistikwerte werden gespeichert:
 
 ```text
 shotsTotal    Shots gesamt
@@ -56,7 +56,7 @@ gramsGrind    Mahlgut seit Reinigung Kaffeemuehle in Zehntelgramm
 gramsFilter   Mahlgut seit Filterwechsel in Zehntelgramm
 ```
 
-Diese Werte sind weiterhin Prototyp-/Demo-Werte, bis die echte Waagenlogik und HX711-Anbindung aktiv sind.
+Diese Werte werden durch Save Dose erhöht. Deaktivierte Wartungen behalten ihre gespeicherten Werte, die zugehörigen Shots-/Mahlgut-Zähler werden aber nicht weiter hochgezählt. Nach Reaktivierung laufen die Zähler ab dem alten Stand weiter.
 
 ## Wartungszeiten
 
@@ -83,3 +83,20 @@ Das Format ist zum Beispiel:
 Kaffeemaschine: in      9 Tagen, 12:35:24
 Filter: seit            2 Tagen, 22:34:13
 ```
+
+
+## Wartung aktiv/inaktiv
+
+Für Kaffeemaschine, Mühle und Filter wird separat gespeichert, ob die Wartung aktiv ist. Deaktivieren bedeutet:
+
+- gespeicherter Wartungszeitpunkt bleibt erhalten
+- Warnung wird unterdrückt
+- zugehörige Shots-/Mahlgut-Zähler frieren ein
+- WebUI zeigt `disabled`
+- HMI zeigt `-`
+
+Beim erneuten Aktivieren wird nichts zurückgesetzt. Wenn die Wartung nach dem gespeicherten Zeitpunkt bereits fällig ist, erscheint die Warnung sofort wieder.
+
+## HX711-Kalibrierung
+
+Der HX711-Kalibrierfaktor wird gespeichert und beim Start geladen. Er ist Teil des T4-S3-Stands mit echter Gewichtsmessung.
