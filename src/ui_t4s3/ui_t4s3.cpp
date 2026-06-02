@@ -945,9 +945,9 @@ void format_grams(char *buf, size_t len, int32_t tenths)
 
 void format_grams_float(char *buf, size_t len, float grams)
 {
-    const char *sign = grams < 0.0f ? "-" : "";
     float absGrams = fabsf(grams);
     const int32_t tenths = static_cast<int32_t>(absGrams * 10.0f + 0.5f);
+    const char *sign = (grams < 0.0f && tenths > 0) ? "-" : "";
     snprintf(buf, len, "%s%ld,%ld g",
              sign,
              static_cast<long>(tenths / 10),
