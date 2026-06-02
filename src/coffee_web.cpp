@@ -353,9 +353,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3d"></script>
-<script src="/coffee_render.js?v=3d"></script>
-<script src="/coffee_events.js?v=3d"></script>
+<script src="/coffee_core.js?v=3e"></script>
+<script src="/coffee_render.js?v=3e"></script>
+<script src="/coffee_events.js?v=3e"></script>
 </body>
 </html>)rawliteral";
 
@@ -729,6 +729,9 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
 static const char COFFEE_CORE_JS[] PROGMEM = R"rawliteral(// ===== WebSocket / globaler UI-State =====
 let ws;
 let lastState = null;
+let pendingState = null;
+let renderFrameScheduled = false;
+let renderCache = {};
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
 let maintenanceToggleRenderPauseUntil = 0;
 let stopwatchBaseClientMs = 0;
@@ -739,7 +742,18 @@ let pendingConfirm = null;
 let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
 const el = id => document.getElementById(id);
-const setText = (id, value) => { el(id).textContent = value; };
+const setText = (id, value) => {
+  const node = el(id);
+  if (!node) return;
+  const text = String(value ?? '');
+  if (node.textContent !== text) node.textContent = text;
+};
+const setHtmlIfChanged = (id, html) => {
+  const node = el(id);
+  if (!node) return;
+  const next = String(html ?? '');
+  if (node.innerHTML !== next) node.innerHTML = next;
+};
 const GEFAESS_COUNT = 3;
 const GEFAESS_INDEXES = Array.from({ length: GEFAESS_COUNT }, (_, index) => index);
 const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3'];
@@ -1273,14 +1287,14 @@ function renderMaintenance(m) {
   if (!lastState?.time?.valid) {
     if (dueCount > 0) {
       title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
-      list.innerHTML = '<li class="maintenance-item due">Wartung erforderlich. Uhrzeit noch nicht synchronisiert.</li>';
+      setHtmlIfChanged('maintenanceList', '<li class="maintenance-item due">Wartung erforderlich. Uhrzeit noch nicht synchronisiert.</li>');
       if (scaleTitle) scaleTitle.textContent = title.textContent;
-      if (scaleList) scaleList.innerHTML = list.innerHTML;
+      if (scaleList) setHtmlIfChanged('scaleMaintenanceList', list.innerHTML);
     } else {
       title.textContent = 'Wartung: ok';
-      list.innerHTML = '';
+      setHtmlIfChanged('maintenanceList', '');
       if (scaleTitle) scaleTitle.textContent = 'Wartung: ok';
-      if (scaleList) scaleList.innerHTML = '';
+      if (scaleList) setHtmlIfChanged('scaleMaintenanceList', '');
     }
 
     if (detailCard && detailTitle && detailList) {
@@ -1288,18 +1302,19 @@ function renderMaintenance(m) {
       detailCard.classList.toggle('warn', dueCount > 0);
       detailCard.classList.toggle('ok', dueCount === 0);
       detailTitle.textContent = 'Wartungszeiten';
-      detailList.innerHTML = '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>';
+      setHtmlIfChanged('maintenanceDetailList', '<li>Wartungszeiten werden angezeigt, sobald die Uhrzeit gültig ist.</li>');
     }
     return;
   }
 
   title.textContent = dueCount === 1 ? 'Wartung: 1 Hinweis' : `Wartung: ${dueCount} Hinweise`;
-  list.innerHTML = lines
+  const maintenanceHtml = lines
     .filter(line => line.due)
     .map(line => `<li class="maintenance-item due">${line.text}</li>`)
     .join('');
+  setHtmlIfChanged('maintenanceList', maintenanceHtml);
   if (scaleTitle) scaleTitle.textContent = title.textContent;
-  if (scaleList) scaleList.innerHTML = list.innerHTML;
+  if (scaleList) setHtmlIfChanged('scaleMaintenanceList', maintenanceHtml);
 
   // Einstellungen: immer alle Details anzeigen.
   if (detailCard && detailTitle && detailList) {
@@ -1309,9 +1324,10 @@ function renderMaintenance(m) {
     detailTitle.textContent = dueCount === 0
       ? 'Wartungszeiten'
       : (dueCount === 1 ? 'Wartungszeiten: 1 Hinweis' : `Wartungszeiten: ${dueCount} Hinweise`);
-    detailList.innerHTML = lines
+    const detailHtml = lines
       .map(line => `<li class="maintenance-item ${line.inactive ? 'inactive' : (line.due ? 'due' : 'ok')}">${line.text}</li>`)
       .join('');
+    setHtmlIfChanged('maintenanceDetailList', detailHtml);
   }
 
   renderMaintenanceEnabled(m);
@@ -1333,7 +1349,11 @@ function renderMaintenanceEnabled(m) {
     { key: 'filter', label: 'Filterwechsel', enabled: m?.filter_enabled !== false }
   ];
 
-  list.innerHTML = configs.map(cfg => {
+  const sig = configs.map(cfg => `${cfg.key}:${cfg.enabled ? 1 : 0}`).join('|');
+  if (renderCache.maintenanceEnabled === sig) return;
+  renderCache.maintenanceEnabled = sig;
+
+  setHtmlIfChanged('maintenanceEnabledList', configs.map(cfg => {
     const status = cfg.enabled ? 'Aktiv' : 'Inaktiv';
     const nextValue = cfg.enabled ? 0 : 1;
     const action = cfg.enabled ? 'Deaktivieren' : 'Aktivieren';
@@ -1345,7 +1365,7 @@ function renderMaintenanceEnabled(m) {
       </div>
       <button class="${cls} toggle-maintenance-enabled" data-maintenance-key="${cfg.key}" data-maintenance-enabled="${nextValue}" type="button">${action}</button>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 function renderMaintenanceIntervals(m) {
@@ -1362,7 +1382,11 @@ function renderMaintenanceIntervals(m) {
     { key: 'filter', label: 'Filter', seconds: m?.filter_interval_sec || 7257600, standard: 'Standard: 12 Wochen' }
   ];
 
-  list.innerHTML = configs.map(cfg => {
+  const sig = configs.map(cfg => `${cfg.key}:${cfg.seconds}`).join('|');
+  if (renderCache.maintenanceIntervals === sig) return;
+  renderCache.maintenanceIntervals = sig;
+
+  setHtmlIfChanged('maintenanceIntervalList', configs.map(cfg => {
     const form = maintenanceIntervalForm(cfg.seconds, cfg.key);
     return `<div class="gefaess-row">
       <div>
@@ -1379,7 +1403,7 @@ function renderMaintenanceIntervals(m) {
         <button class="secondary save-maintenance-interval" data-maintenance-key="${cfg.key}" type="button">Speichern</button>
       </div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 // ===== Stoppuhr =====
@@ -1415,7 +1439,11 @@ function renderGefaessSettings(s) {
   if (!list) return;
 
   const weights = s?.gefaesse?.weights_g || [];
-  list.innerHTML = GEFAESS_INDEXES.map(index => {
+  const sig = GEFAESS_INDEXES.map(index => Number(weights[index] || 0).toFixed(2)).join('|');
+  if (renderCache.gefaessSettings === sig) return;
+  renderCache.gefaessSettings = sig;
+
+  setHtmlIfChanged('gefaessList', GEFAESS_INDEXES.map(index => {
     const weight = Number(weights[index] || 0);
     const measured = weight > 0.05;
     const label = `Gefäß ${index + 1}`;
@@ -1426,7 +1454,7 @@ function renderGefaessSettings(s) {
       ? `<button class="compact danger delete-gefaess" data-gefaess-index="${index}">löschen</button>`
       : '<button class="compact secondary" disabled>löschen</button>';
     return `<div class="gefaess-row"><div><b>${label}:</b> ${value}</div>${button}</div>`;
-  }).join('');
+  }).join(''));
 }
 
 function renderSiebtraegerSettings(s) {
@@ -1436,7 +1464,11 @@ function renderSiebtraegerSettings(s) {
 
   const names = s?.selection?.siebtraeger_names || [];
   const targets = s?.selection?.siebtraeger_targets_g || [];
-  list.innerHTML = SIEBTRAEGER_INDEXES.map(index => {
+  const sig = SIEBTRAEGER_INDEXES.map(index => `${names[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || ''}:${Number(targets[index] || 0).toFixed(1)}`).join('|');
+  if (renderCache.siebtraegerSettings === sig) return;
+  renderCache.siebtraegerSettings = sig;
+
+  setHtmlIfChanged('siebtraegerSettingsList', SIEBTRAEGER_INDEXES.map(index => {
     const name = String(names[index] || DEFAULT_SIEBTRAEGER_NAMES[index] || `Siebträger ${index + 1}`);
     const target = Number(targets[index] || 0);
     return `<div class="gefaess-row siebtraeger-settings-row">
@@ -1446,7 +1478,7 @@ function renderSiebtraegerSettings(s) {
       </label>
       <button class="compact secondary save-siebtraeger-name" data-siebtraeger-name-index="${index}">speichern</button>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 function siebtraegerOptionText(index) {
@@ -1523,6 +1555,9 @@ function renderAutodetect(s) {
 function renderWifiBars(id, level, title) {
   const icon = el(id);
   if (!icon) return;
+  const sig = `${level}|${title}`;
+  if (icon.dataset.sig === sig) return;
+  icon.dataset.sig = sig;
   icon.innerHTML = [0, 1, 2, 3].map(i => `<span class="bar${i < level ? ' on' : ''}"></span>`).join('');
   icon.setAttribute('title', title);
 }
@@ -1602,6 +1637,18 @@ function renderActionAvailability(s) {
   el('swReset').disabled = false;
 }
 
+function scheduleRenderState(s) {
+  pendingState = s;
+  if (renderFrameScheduled) return;
+  renderFrameScheduled = true;
+  requestAnimationFrame(() => {
+    renderFrameScheduled = false;
+    const nextState = pendingState;
+    pendingState = null;
+    if (nextState) render(nextState);
+  });
+}
+
 function render(s) {
   lastState = s;
   syncMaintenanceTimers(s.maintenance);
@@ -1646,7 +1693,7 @@ function connect() {
   ws.onerror = () => { addLog('WebSocket-Fehler'); };
   ws.onmessage = e => {
     const data = JSON.parse(e.data);
-    if (data.type === 'state') render(data);
+    if (data.type === 'state') scheduleRenderState(data);
     if (data.type === 'ack') addLog(`OK: ${data.cmd}`);
     if (data.type === 'error') addLog(`Fehler: ${data.cmd || ''} ${data.message}`);
   };
