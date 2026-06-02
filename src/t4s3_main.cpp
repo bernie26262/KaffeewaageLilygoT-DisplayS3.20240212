@@ -83,10 +83,23 @@ static bool g_weightMoving = false;
 static bool g_weightStable = false;
 static uint32_t g_lastMovementMs = 0;
 
+static float g_hx711CalFactorRawPerGram = 1000.0f;
+
 static constexpr float kMovementThresholdRaw = 120.0f;
 static constexpr uint32_t kStableDelayMs = 700UL;
+static constexpr float kFastFilterLargeDeltaGrams = 5.0f;
+static constexpr float kFastFilterMediumDeltaGrams = 1.0f;
+static constexpr float kStableFilterLargeDeltaGrams = 10.0f;
+static constexpr float kStableFilterMediumDeltaGrams = 2.0f;
+static constexpr float kDisplaySettleFastDeltaGrams = 1.5f;
+static constexpr float kDisplayStableDeadbandGrams = 0.12f;
 
-static float g_hx711CalFactorRawPerGram = 1000.0f;
+static float gramsToRawDelta(float grams)
+{
+    const float factor = (g_hx711CalFactorRawPerGram > 0.0f) ? g_hx711CalFactorRawPerGram : 1000.0f;
+    return grams * factor;
+}
+
 static float g_hxHistory[5] = {0};
 static uint8_t g_hxHistoryIndex = 0;
 static bool g_hxHistoryFilled = false;
@@ -224,11 +237,28 @@ static void tickHx711Test(uint32_t now)
     } else {
         const float previousFast = g_fastWeightRaw;
 
-        // Fast path: follows changes quickly, but still suppresses sample noise.
-        g_fastWeightRaw = g_fastWeightRaw * 0.65f + median * 0.35f;
+        const float fastDeltaRaw = fabsf(median - g_fastWeightRaw);
+        const float stableDeltaRaw = fabsf(median - g_stableWeightRaw);
 
-        // Stable path: calm, slow reference for future stability decisions.
-        g_stableWeightRaw = g_stableWeightRaw * 0.92f + median * 0.08f;
+        // Fast path: adaptive EMA. Big weight changes are followed quickly;
+        // small changes keep the previous calm behavior to suppress sample noise.
+        float fastAlpha = 0.35f;
+        if (fastDeltaRaw >= gramsToRawDelta(kFastFilterLargeDeltaGrams)) {
+            fastAlpha = 0.80f;
+        } else if (fastDeltaRaw >= gramsToRawDelta(kFastFilterMediumDeltaGrams)) {
+            fastAlpha = 0.55f;
+        }
+        g_fastWeightRaw = g_fastWeightRaw * (1.0f - fastAlpha) + median * fastAlpha;
+
+        // Stable path: still calm near the final value, but not needlessly slow
+        // after a large step such as putting a cup/portafilter on the scale.
+        float stableAlpha = 0.05f;
+        if (stableDeltaRaw >= gramsToRawDelta(kStableFilterLargeDeltaGrams)) {
+            stableAlpha = 0.18f;
+        } else if (stableDeltaRaw >= gramsToRawDelta(kStableFilterMediumDeltaGrams)) {
+            stableAlpha = 0.12f;
+        }
+        g_stableWeightRaw = g_stableWeightRaw * (1.0f - stableAlpha) + median * stableAlpha;
 
         const float movementDelta = fabsf(g_fastWeightRaw - previousFast);
         if (movementDelta > kMovementThresholdRaw) {
@@ -244,15 +274,21 @@ static void tickHx711Test(uint32_t now)
         }
 
         // Adaptive display path:
-        // - during movement: follow fast path
-        // - while settling: blend toward stable path
-        // - once stable: strongly favor stable path
+        // - during movement: follow fast path immediately
+        // - while settling and still visibly away from fast: keep catching up
+        // - once stable: blend more strongly to the calm stable path
+        const float displayFastDeltaRaw = fabsf(g_fastWeightRaw - g_displayWeightRaw);
         if (g_weightMoving) {
             g_displayWeightRaw = g_fastWeightRaw;
+        } else if (displayFastDeltaRaw >= gramsToRawDelta(kDisplaySettleFastDeltaGrams)) {
+            g_displayWeightRaw = g_displayWeightRaw * 0.40f + g_fastWeightRaw * 0.60f;
         } else if (g_weightStable) {
-            g_displayWeightRaw = g_displayWeightRaw * 0.80f + g_stableWeightRaw * 0.20f;
+            const float stableDisplayDeltaRaw = fabsf(g_stableWeightRaw - g_displayWeightRaw);
+            if (stableDisplayDeltaRaw >= gramsToRawDelta(kDisplayStableDeadbandGrams)) {
+                g_displayWeightRaw = g_displayWeightRaw * 0.85f + g_stableWeightRaw * 0.15f;
+            }
         } else {
-            g_displayWeightRaw = g_displayWeightRaw * 0.85f + g_stableWeightRaw * 0.15f;
+            g_displayWeightRaw = g_displayWeightRaw * 0.75f + g_stableWeightRaw * 0.25f;
         }
 
         g_lastHx711Filtered = g_displayWeightRaw;
