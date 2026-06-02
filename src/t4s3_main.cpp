@@ -92,7 +92,7 @@ static constexpr float kFastFilterMediumDeltaGrams = 1.0f;
 static constexpr float kStableFilterLargeDeltaGrams = 10.0f;
 static constexpr float kStableFilterMediumDeltaGrams = 2.0f;
 static constexpr float kDisplaySettleFastDeltaGrams = 1.5f;
-static constexpr float kDisplayStableDeadbandGrams = 0.12f;
+static constexpr float kDisplayStableDeadbandGrams = 0.08f;
 
 static float gramsToRawDelta(float grams)
 {
