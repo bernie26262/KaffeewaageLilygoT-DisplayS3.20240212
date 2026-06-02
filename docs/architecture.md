@@ -8,7 +8,7 @@ Die Kaffeewaage soll als eigenstaendiges ESP32-Geraet funktionieren und gleichze
 
 ### `main.cpp`
 
-Enthaelt weiterhin die zentrale Hardware- und Ablaufsteuerung:
+Enthaelt weiterhin die zentrale Hardware- und Ablaufsteuerung der Legacy-TFT-Version:
 
 - HX711-/LoadCell-Initialisierung und Messwertverarbeitung
 - TFT-Ausgabe
@@ -34,8 +34,9 @@ Enthaelt:
 - JSON-State-Erzeugung
 - PWA-Manifest-Handler
 - Icon-/Favicon-Routen
+- ausgelieferte WebUI-Teilassets `/coffee.css`, `/coffee_core.js`, `/coffee_render.js`, `/coffee_events.js`
 
-Die Hauptseite ist aktuell bewusst noch nicht nach SPIFFS ausgelagert, damit keine groessere WebUI-Umstrukturierung entsteht.
+Die Hauptseite ist aktuell bewusst noch nicht nach SPIFFS ausgelagert, damit keine groessere WebUI-Umstrukturierung entsteht. Die WebUI ist aber zur besseren Auslieferung und Performance in mehrere Firmware-Routen aufgeteilt. Der Browser rendert WebSocket-State-Nachrichten gebuendelt per `requestAnimationFrame` und schreibt DOM-Werte nur bei Aenderungen neu.
 
 ### `coffee_ota.cpp/.h`
 
@@ -47,18 +48,18 @@ Enthaelt die Update-Seite `/update` mit getrenntem Upload fuer:
 Der ESP rebootet nach Upload nicht automatisch. Der Neustart erfolgt per Button.
 
 
-### Zukuenftiges Modul: `coffee_wifi.cpp/.h`
+### `coffee_wifi.cpp/.h`
 
-Die WLAN-Konfiguration soll langfristig nicht mehr ueber fest einkompilierte `wifi_secrets.h` erfolgen, sondern ueber WLAN-Provisioning mit temporaerem Setup-Access-Point.
-
-Geplantes Ziel:
+Buendelt die WLAN-Konfiguration. Der aktuelle Legacy-Stand unterstuetzt:
 
 - WLAN-Daten in NVS/Preferences speichern
-- bei fehlenden oder ungueltigen WLAN-Daten einen Setup-Access-Point starten
-- einfache Einrichtungsseite zum Speichern von SSID und Passwort bereitstellen
-- `wifi_secrets.h` zunaechst als Entwicklungs-/Fallback-Option behalten und spaeter aus dem normalen Build entfernen
+- gespeicherte WLAN-Daten explizit aktivieren/deaktivieren
+- Rueckfall auf das Standard-WLAN aus `wifi_secrets.h`, wenn gespeicherte aktive Daten nicht verbinden
+- gespeicherte WLAN-Daten loeschen
+- manuellen Setup-Access-Point `Waagen-Setup` mit Setup-Seite unter `http://192.168.4.1/`
+- WLAN-Signalqualitaet fuer WebUI und TFT-Header
 
-Details stehen in `docs/wifi-provisioning.md`.
+`wifi_secrets.h` bleibt im Legacy-Projekt zunaechst als Entwicklungs-/Fallback-Option erhalten. Details stehen in `docs/wifi-provisioning.md`.
 
 ### `coffee_storage.cpp/.h`
 
@@ -91,7 +92,11 @@ Beispiele fuer Kommandobereiche:
 - Kalibrierfaktor speichern
 - Gefaess messen/speichern/loeschen
 - Wartungszeitpunkte zuruecksetzen
+- Wartungsintervalle setzen
+- Wartungen aktivieren/deaktivieren
 - Gesamtwerte bearbeiten
+- WLAN-Daten speichern/aktivieren/deaktivieren/loeschen
+- Setup-AP starten/stoppen
 
 ## Grundsaetze fuer weitere Refaktorierung
 
@@ -101,3 +106,15 @@ Beispiele fuer Kommandobereiche:
 - keine grossen JS-Umsortierungen ohne konkreten Anlass
 - keine direkte neue Preferences-Logik in `main.cpp`
 - neue Webserver-/OTA-/Storage-Themen in eigene Module auslagern
+
+
+## Legacy-TFT und T4-S3/LVGL
+
+Dieser Branch ist der Legacy-TFT-Stand. Die T4-S3-/LVGL-Variante wird im Branch `feature/t4s3-lvgl-touch` gepflegt. Gemeinsame Fachlogik wie Wartung, Autodetect, Storage und WebUI-Performance kann portiert werden, aber Diffs sollten wegen unterschiedlicher UI-Struktur nicht blind zwischen den Branches angewendet werden.
+
+## Aktuelle Fachlogik-Hinweise
+
+- Autodetect und Auto-Tara laufen unabhaengig davon, welche Legacy-TFT-Seite gerade sichtbar ist. WebUI-Bedienung darf dadurch nicht blockiert werden.
+- Sonderablaeufe wie Gefaess-Wizard, Kalibrier-Wizard und Web-Wizard blockieren Autodetect weiterhin bewusst.
+- Wenn eine Wartung deaktiviert ist, bleiben die zugehoerigen Shots-/Mahlgut-Zaehler gespeichert, werden bei `Save Dose` aber nicht weitergezaehlt. Nach Reaktivierung laufen sie ab dem alten Stand weiter.
+- In der WebUI werden deaktivierte Wartungszaehler als `disabled` angezeigt; auf dem Legacy-TFT werden platzsparend Striche verwendet.

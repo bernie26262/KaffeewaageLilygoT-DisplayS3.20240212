@@ -48,6 +48,23 @@ http://<ip>/coffee_events.js?v=test
 ```
 
 Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
+
+## WebSocket-Rendering und Langzeitbetrieb
+
+Die WebUI bekommt regelmaessig JSON-State-Nachrichten ueber `/ws`. Nach vielen Erweiterungen wurde das Rendering entlastet, damit der Browser-Hauptthread auch nach langer Laufzeit nicht blockiert:
+
+- State-Nachrichten werden mit `requestAnimationFrame` gebuendelt.
+- Wenn mehrere State-Nachrichten vor dem naechsten Frame eintreffen, wird nur der neueste State gerendert.
+- Text- und HTML-Inhalte werden nur ins DOM geschrieben, wenn sich der Inhalt geaendert hat.
+- Teurere Listenbereiche wie Wartung, Gefaesse, Siebtraeger und WLAN-Balken werden nicht bei jedem State komplett neu aufgebaut.
+
+Referenzproblem in Chrome:
+
+```text
+coffee_events.js ... [Violation] 'message' handler took ... ms
+```
+
+Nach Aenderungen an `coffee_web.cpp` sollte die WebUI mehrere Stunden offen bleiben und die Konsole beobachtet werden.
 ## PWA-/Homescreen-Integration
 
 Die WebUI enthaelt im HTML-`head` die relevanten PWA-/Mobile-Meta-Tags:

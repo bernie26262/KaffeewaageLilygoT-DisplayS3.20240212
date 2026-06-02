@@ -14,6 +14,23 @@ Erwartung:
 - keine neuen Fehler
 - neue Warnungen nur bewusst akzeptieren
 
+## Branch-Kontext
+
+Vor Tests pruefen, dass der richtige Branch aktiv ist:
+
+```powershell
+git branch --show-current
+git status
+```
+
+Legacy-TFT:
+
+```text
+feature/legacy-webui-maintenance-settings
+```
+
+T4-S3/LVGL wird separat im Branch `feature/t4s3-lvgl-touch` getestet.
+
 ## WebUI-Basistest
 
 Im Browser oeffnen:
@@ -31,6 +48,7 @@ Pruefen:
 - Zielgewicht kann eingegeben und gespeichert werden
 - Buttons reagieren
 - Log zeigt keine unerwarteten Fehler
+- Browser-Konsole zeigt keine dauerhaften `message handler took ... ms`-Violations
 
 ## PWA-/Icon-Test
 
@@ -117,6 +135,22 @@ Serverseitiger Schutz:
 - Firmware-Endpunkt akzeptiert nur `firmware.bin`.
 - Dateisystem-Endpunkt akzeptiert nur `spiffs.bin` oder `littlefs.bin`.
 
+## WebUI-Langzeittest
+
+Nach Aenderungen an `coffee_web.cpp` oder am WebSocket-State:
+
+1. WebUI im Browser oeffnen.
+2. DevTools/Konsole oeffnen.
+3. WebUI mindestens 2-3 Stunden offen lassen.
+4. Gewicht/Status gelegentlich veraendern.
+
+Erwartung:
+
+- keine fortlaufenden Chrome-Meldungen `coffee_events.js ... [Violation] 'message' handler took ... ms`
+- WebSocket bleibt verbunden oder verbindet sauber neu
+- Gewichtsanzeige bleibt reaktiv
+- Wartungs-/WLAN-/Datenwerte werden weiter aktualisiert
+
 ## Storage-/Preferences-Test
 
 Nach Storage-Aenderungen pruefen:
@@ -146,12 +180,24 @@ Autodetect EIN:
 - Gefaess abheben
 - Save wird gesperrt
 
+Seit der WebUI-/TFT-Entkopplung muss derselbe Test auch funktionieren, wenn auf dem Legacy-TFT nicht die Waagen-Seite sichtbar ist, z.B. TFT auf Daten/WLAN/Wartung und Bedienung ueber WebUI.
+
 Autodetect AUS:
 
 - manuell tara ausloesen
 - Save-Freigabe pruefen
 - Dose speichern
 - Statistikwerte pruefen
+- Test ebenfalls wiederholen, waehrend der TFT auf einer anderen Seite steht
+
+## Wartung aktiv/inaktiv
+
+- Alle Wartungen aktiv: `Save Dose` erhoeht Gesamtwerte und alle Wartungszaehler.
+- Eine Wartung deaktivieren: Warnung verschwindet, gespeicherte Werte bleiben erhalten.
+- `Save Dose`: Gesamtwerte laufen weiter, deaktivierte Wartungszaehler bleiben stehen.
+- WebUI zeigt fuer deaktivierte Wartungszaehler `disabled`.
+- Legacy-TFT zeigt fuer deaktivierte Wartungszaehler `-`.
+- Wartung wieder aktivieren: Zaehler laufen ab dem alten Stand weiter; falls faellig, erscheint die Warnung wieder.
 
 ## TFT-/HMI-Beobachtung
 

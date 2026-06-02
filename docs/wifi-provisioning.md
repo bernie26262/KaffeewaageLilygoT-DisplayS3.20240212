@@ -4,9 +4,9 @@
 
 Die Kaffeewaage soll langfristig ohne fest einkompilierte WLAN-Zugangsdaten betrieben werden koennen.
 
-Aktuell werden WLAN-Daten ueber `wifi_secrets.h` eingebunden. Fuer ein dauerhaft nutzbares oder spaeter verkaufbares Geraet ist das unpraktisch, weil jedes Geraet individuell kompiliert werden muesste und WLAN-Passwoerter nicht ins Repo gehoeren.
+Im aktuellen Legacy-Stand gibt es bereits gespeicherte WLAN-Daten in NVS, einen manuellen Setup-Access-Point und einen Fallback auf `wifi_secrets.h`. Fuer ein dauerhaft nutzbares oder spaeter verkaufbares Geraet ist das unpraktisch, weil jedes Geraet individuell kompiliert werden muesste und WLAN-Passwoerter nicht ins Repo gehoeren.
 
-Stattdessen soll die Waage einen Einrichtungsmodus bekommen, in dem sie temporaer einen eigenen WLAN-Zugangspunkt bereitstellt. Der Nutzer verbindet sich mit diesem Zugangspunkt und traegt dort die SSID und das Passwort des Ziel-WLANs ein.
+Dafuer stellt die Waage einen Einrichtungsmodus bereit, in dem sie temporaer einen eigenen WLAN-Zugangspunkt bereitstellt. Der Nutzer verbindet sich mit diesem Zugangspunkt und traegt dort die SSID und das Passwort des Ziel-WLANs ein.
 
 Der passende Begriff fuer diese Funktion ist:
 
@@ -54,11 +54,13 @@ http://192.168.4.1/
 
 ### Fall 3: gespeicherte Zugangsdaten vorhanden, Verbindung scheitert
 
-Empfohlenes Verhalten:
+Aktueller sicherer Legacy-Stand:
 
-- Waage versucht fuer eine begrenzte Zeit, sich zu verbinden.
-- Wenn kein Connect gelingt, startet sie den Setup-Access-Point.
-- Das lokale HMI zeigt einen Hinweis wie:
+- Waage versucht fuer eine begrenzte Zeit, sich mit aktivierten gespeicherten WLAN-Daten zu verbinden.
+- Wenn kein Connect gelingt, wird der Active-Marker geloescht und auf das Standard-WLAN aus der Firmware zurueckgefallen, damit kein OTA-/WebUI-Lockout entsteht.
+- Der Setup-Access-Point kann manuell gestartet werden.
+
+Spaeter kann der Setup-AP automatisch starten. Das lokale HMI zeigt dann einen Hinweis wie:
 
 ```text
 WLAN einrichten
@@ -141,10 +143,11 @@ Phase 2c ergaenzt eine explizite Aktivierung:
 - Falls die Verbindung mit aktivierten gespeicherten WLAN-Daten scheitert, wird der Active-Marker geloescht und temporaer auf das Standard-WLAN aus der Firmware zurueckgefallen.
 - Dadurch soll ein OTA-/WebUI-Lockout durch falsche gespeicherte WLAN-Daten verhindert werden.
 
-Noch nicht enthalten:
+Noch nicht enthalten bzw. bewusst noch offen:
 
-- Start des Setup-Access-Points
-- Verbindungstest vor dem Setzen von `active=true`
+- automatischer Start des Setup-Access-Points, wenn keine nutzbaren Daten vorhanden sind
+- Verbindungstest vor dem endgueltigen Setzen von `active=true`
+- Captive Portal mit DNS-Umleitung
 
 ## Webserver und Routen
 
@@ -170,7 +173,7 @@ Der manuelle Setup-AP ist als sicherer Zwischenschritt vor einem echten Captive 
 AP-SSID: Waagen-Setup
 AP-IP:   192.168.4.1
 Setup-Seite: http://192.168.4.1/
-Alternativ:  http://192.168.4.1/wifi-setup
+Rueckwaertskompatibel existiert auch: http://192.168.4.1/wifi-setup
 ```
 
 Die Setup-Seite speichert SSID und Passwort in Preferences/NVS und aktiviert diese gespeicherten WLAN-Daten fuer den naechsten Neustart. Das echte WLAN-Passwort wird weiterhin nicht im Klartext an die WebUI zurueckgegeben.

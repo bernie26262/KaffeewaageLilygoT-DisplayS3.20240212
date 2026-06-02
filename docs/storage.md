@@ -38,6 +38,12 @@ savedValues
 | `lstFltwchsl` | letzter Zeitpunkt Filterwechsel |
 | `nvsInitialised` | allgemeine Erstinitialisierung |
 | `statsV2Init` | Nachmigration neuer Statistikwerte |
+| `mntMachSec` | Wartungsintervall Kaffeemaschine in Sekunden |
+| `mntGrndSec` | Wartungsintervall Muehle in Sekunden |
+| `mntFiltSec` | Wartungsintervall Filter in Sekunden |
+| `mntMachEn` | Wartung Kaffeemaschine aktiv/inaktiv |
+| `mntGrndEn` | Wartung Muehle aktiv/inaktiv |
+| `mntFiltEn` | Wartung Filter aktiv/inaktiv |
 
 ## Initialisierung
 
@@ -54,6 +60,18 @@ groundWeightForever = preferences.getFloat("grndWghtFrvr", preferences.getULong(
 ```
 
 Das ist eine Bruecke fuer aeltere Installationen, bei denen einzelne Werte frueher als `ULong` statt als `Float` gespeichert wurden. Diese Kompatibilitaetslogik nicht ohne Migrationsplan entfernen.
+
+## Verhalten bei deaktivierter Wartung
+
+Die Wartungs-Enabled-Flags deaktivieren nur Warnungen und das Hochzaehlen der zugehoerigen Wartungszaehler. Die bereits gespeicherten Shots-/Mahlgut-Werte bleiben erhalten.
+
+Bei `Save Dose` gilt:
+
+- Gesamtwerte laufen immer weiter.
+- Zaehler seit Kaffeemaschinenreinigung laufen nur, wenn `mntMachEn=true`.
+- Zaehler seit Muehlenreinigung laufen nur, wenn `mntGrndEn=true`.
+- Zaehler seit Filterwechsel laufen nur, wenn `mntFiltEn=true`.
+- Nach Reaktivierung laufen die jeweiligen Werte ab dem vorher gespeicherten Stand weiter.
 
 ## Regeln fuer neue Speicherwerte
 
