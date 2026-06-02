@@ -69,7 +69,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="scale-controls">
       <div class="scale-target-row small">
         <span class="label">Sollgewicht</span>
-        <input id="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm">
+        <input id="targetWeight" name="targetWeight" type="text" inputmode="decimal" aria-label="Sollgewicht in Gramm" autocomplete="off">
         <span>g</span>
         <button id="targetSave" class="compact secondary" style="min-width: 110px; padding: 8px 12px; font-size: .9rem;">Speichern</button>
       </div>
@@ -82,7 +82,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
       <div class="scale-select-row small">
         <span class="label">Siebträger</span>
-        <select id="siebtraegerSelect" aria-label="Siebträger auswählen"></select>
+        <select id="siebtraegerSelect" name="siebtraegerSelect" aria-label="Siebträger auswählen"></select>
       </div>
     </div>
   </section>
@@ -271,7 +271,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div class="small">Backlight automatisch ausschalten.</div>
       <div class="settings-actions" style="margin-top: 12px;">
         <label>Timeout
-          <select id="displayTimeoutSelect">
+          <select id="displayTimeoutSelect" name="displayTimeoutSelect">
             <option value="1">1 Minute</option>
             <option value="5">5 Minuten</option>
             <option value="10">10 Minuten</option>
@@ -950,7 +950,7 @@ function renderCalibrationWizard() {
     setWizardContent(
       'Waage kalibrieren: Gewicht einstellen',
       'Bitte das Kalibriergewicht auflegen und den bekannten Gewichtswert eintragen.',
-      `<label class="wizard-field"><span>Kalibriergewicht in g</span><input id="calibrationWeightInput" type="text" inputmode="decimal" value="${current}"></label>`,
+      `<label class="wizard-field"><span>Kalibriergewicht in g</span><input id="calibrationWeightInput" name="calibrationWeightInput" type="text" inputmode="decimal" value="${current}" autocomplete="off"></label>`,
       [
         wizardButton('Zurück', 'secondary', () => { wizard.step = 0; renderWizard(); }),
         wizardButton('Weiter', '', () => {
@@ -1004,7 +1004,7 @@ function renderMeasureGefaessWizard() {
     setWizardContent(
       'Gefäße einmessen: Auswahl',
       'Bitte auswählen, welches Gefäß eingemessen werden soll.',
-      `<label class="wizard-field"><span>Gefäß</span><select id="gefaessWizardSelect">${options}</select></label>`,
+      `<label class="wizard-field"><span>Gefäß</span><select id="gefaessWizardSelect" name="gefaessWizardSelect">${options}</select></label>`,
       [
         wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
         wizardButton('Weiter', '', () => {
@@ -1063,8 +1063,8 @@ function renderStatsTotalsWizard() {
   setWizardContent(
     'Gesamtwerte wirklich verändern?',
     'Hier können die Gesamtzahl der Shots und das gesamte Mahlgut korrigiert werden. Wartungszähler seit Reinigung oder Filterwechsel bleiben unverändert.',
-    `<label class="wizard-field"><span>Gesamtzahl Shots</span><input id="editShotsTotal" type="number" min="0" step="1" inputmode="numeric" value="${currentShots}"></label>` +
-    `<label class="wizard-field"><span>Gesamtgewicht Mahlgut in g</span><input id="editGroundTotal" type="text" inputmode="decimal" value="${currentGround}"></label>`,
+    `<label class="wizard-field"><span>Gesamtzahl Shots</span><input id="editShotsTotal" name="editShotsTotal" type="number" min="0" step="1" inputmode="numeric" value="${currentShots}"></label>` +
+    `<label class="wizard-field"><span>Gesamtgewicht Mahlgut in g</span><input id="editGroundTotal" name="editGroundTotal" type="text" inputmode="decimal" value="${currentGround}" autocomplete="off"></label>`,
     [
       wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
       wizardButton('Speichern', '', () => {
@@ -1302,8 +1302,8 @@ function renderMaintenanceIntervalSettings(m) {
           <div class="maintenance-settings-row-meta">${row.standard}</div>
         </div>
         <div class="maintenance-interval-controls">
-          <input id="${row.key}IntervalValue" type="number" min="1" step="1" inputmode="numeric" value="${interval.value}" aria-label="Intervall ${row.label}">
-          <select id="${row.key}IntervalUnit" aria-label="Einheit ${row.label}">
+          <input id="${row.key}IntervalValue" name="${row.key}IntervalValue" type="number" min="1" step="1" inputmode="numeric" value="${interval.value}" aria-label="Intervall ${row.label}">
+          <select id="${row.key}IntervalUnit" name="${row.key}IntervalUnit" aria-label="Einheit ${row.label}">
             ${minuteOption}
             <option value="days" ${interval.unit === 'days' ? 'selected' : ''}>Tage</option>
             <option value="weeks" ${interval.unit === 'weeks' ? 'selected' : ''}>Wochen</option>
@@ -1371,7 +1371,7 @@ function renderSiebtraegerNameSettings(s) {
   list.innerHTML = labels.map((name, index) => {
     return `<div class="siebtraeger-name-row">
       <label for="siebtraegerName${index}">Siebträger ${index + 1}</label>
-      <input id="siebtraegerName${index}" class="siebtraeger-name-input" data-siebtraeger-index="${index}" type="text" maxlength="16" value="${escapeHtml(name)}" aria-label="Name für Siebträger ${index + 1}">
+      <input id="siebtraegerName${index}" name="siebtraegerName${index}" class="siebtraeger-name-input" data-siebtraeger-index="${index}" type="text" maxlength="16" value="${escapeHtml(name)}" aria-label="Name für Siebträger ${index + 1}" autocomplete="off">
       <button class="compact secondary save-siebtraeger-name" data-siebtraeger-index="${index}">Speichern</button>
     </div>`;
   }).join('');
