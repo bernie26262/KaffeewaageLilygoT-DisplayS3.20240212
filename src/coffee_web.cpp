@@ -131,6 +131,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="siebtraegerPicker" class="select-button" type="button" aria-haspopup="dialog" aria-expanded="false">Bodenloser ST · 8.5 g</button>
         <input id="siebtraegerSelect" type="hidden" value="0">
       </div>
+
+      <div class="scale-select-row small ble-status-row">
+        <span class="label">BLE</span>
+        <span id="bleStatus">aus</span>
+        <span id="bleDetails" class="muted-inline">---</span>
+      </div>
     </div>
   </section>
   </div>
@@ -477,6 +483,8 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .scale-controls { display: grid; gap: 12px; margin-top: 14px; }
     .scale-target-row, .scale-select-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .scale-target-row .label, .scale-select-row .label { min-width: 92px; }
+    .ble-status-row { align-items: baseline; }
+    .muted-inline { color: var(--muted); font-size: .86rem; }
     .weight-footer { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
     .weight-info { min-width: 0; }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -1532,8 +1540,24 @@ function renderWeightAndSelection(s) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
   }
   setText('status', s.status?.label || String(s.status?.mode ?? '---'));
+  renderBleStatus(s);
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
   el('siebtraegerPicker').textContent = siebtraegerOptionText(Number(s.selection?.siebtraeger ?? 0));
+}
+
+function renderBleStatus(s) {
+  const ble = s.ble || {};
+  const enabled = !!ble.enabled;
+  const connected = !!ble.connected;
+  const advertising = !!ble.advertising;
+  const status = !enabled ? 'aus' : (connected ? 'verbunden' : (advertising ? 'bereit' : 'aktiv'));
+  const hz = Number(ble.notify_hz || 0);
+  const parts = [];
+  if (enabled) parts.push(ble.mode || 'BLE');
+  if (connected && hz > 0) parts.push(`${hz.toFixed(1)} Hz`);
+  if (ble.last_command && ble.last_command !== '---') parts.push(`Cmd: ${ble.last_command}`);
+  setText('bleStatus', status);
+  setText('bleDetails', parts.length ? parts.join(' · ') : '---');
 }
 
 function renderAutodetect(s) {
@@ -2677,7 +2701,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<4096> doc;
+  StaticJsonDocument<5120> doc;
 
   doc["type"] = "state";
 
@@ -2691,6 +2715,17 @@ static String buildStateJson(const AppState& s)
 
   doc["stopwatch"]["ms"] = s.stopwatch.ms;
   doc["stopwatch"]["running"] = s.stopwatch.running;
+
+  doc["ble"]["enabled"] = s.ble.enabled;
+  doc["ble"]["connected"] = s.ble.connected;
+  doc["ble"]["advertising"] = s.ble.advertising;
+  doc["ble"]["mode"] = s.ble.mode;
+  doc["ble"]["last_command"] = s.ble.last_command;
+  doc["ble"]["notify_hz"] = s.ble.notify_hz;
+  doc["ble"]["last_weight_g"] = s.ble.last_weight_g;
+  doc["ble"]["packets_sent"] = s.ble.packets_sent;
+  doc["ble"]["commands_received"] = s.ble.commands_received;
+  doc["ble"]["last_notify_age_ms"] = s.ble.last_notify_age_ms;
 
   doc["selection"]["siebtraeger"] = s.selection.siebtraeger;
   doc["selection"]["gefaess"] = s.selection.gefaess;

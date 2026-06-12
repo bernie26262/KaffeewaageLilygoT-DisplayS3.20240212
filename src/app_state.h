@@ -92,6 +92,19 @@ struct StatusState {
   bool save_ready = false;
 };
 
+struct BleScaleState {
+  bool enabled = false;
+  bool connected = false;
+  bool advertising = false;
+  char mode[20] = "aus";
+  char last_command[16] = "---";
+  float notify_hz = 0.0f;
+  float last_weight_g = 0.0f;
+  uint32_t packets_sent = 0;
+  uint32_t commands_received = 0;
+  uint32_t last_notify_age_ms = 0;
+};
+
 struct AppState {
   WeightState weight;
   StopwatchState stopwatch;
@@ -103,4 +116,5 @@ struct AppState {
   TimeState time;
   SystemState system;
   StatusState status;
+  BleScaleState ble;
 };

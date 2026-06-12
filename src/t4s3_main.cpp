@@ -20,6 +20,7 @@
 #include "app_state.h"
 #include "coffee_web.h"
 #include "coffee_ota.h"
+#include "ble_scale.h"
 
 LilyGo_Class amoled;
 
@@ -51,6 +52,11 @@ static uint32_t g_webMaintenanceFilterEpoch = 0;
 static constexpr uint32_t kWebSettingsRefreshMs = 5000UL;
 static constexpr uint32_t kWebMaintenanceRefreshMs = 10000UL;
 static constexpr uint32_t kWebBroadcastIntervalMs = 500UL;
+#ifndef BLE_SCALE_START_DELAY_MS
+#define BLE_SCALE_START_DELAY_MS 15000UL
+#endif
+static constexpr uint32_t kBleStartDelayMs = BLE_SCALE_START_DELAY_MS;
+static bool g_bleStarted = false;
 
 #if COFFEE_T4S3_MAINTENANCE_TEST_30S
 static constexpr uint32_t kMaintenanceMachineIntervalSec = 30UL;
@@ -525,6 +531,60 @@ static const char *webWifiSignalLabel(uint8_t bars)
     return "nicht verbunden";
 }
 
+
+static void updateBleStateInAppState()
+{
+    const CoffeeBleScaleStatus ble = coffeeBleScaleStatus();
+    g_webState.ble.enabled = ble.enabled;
+    g_webState.ble.connected = ble.connected;
+    g_webState.ble.advertising = ble.advertising;
+    strlcpy(g_webState.ble.mode, ble.mode ? ble.mode : "aus", sizeof(g_webState.ble.mode));
+    strlcpy(g_webState.ble.last_command, ble.last_command ? ble.last_command : "---", sizeof(g_webState.ble.last_command));
+    g_webState.ble.notify_hz = ble.notify_hz;
+    g_webState.ble.last_weight_g = ble.last_weight_g;
+    g_webState.ble.packets_sent = ble.packets_sent;
+    g_webState.ble.commands_received = ble.commands_received;
+    g_webState.ble.last_notify_age_ms = ble.last_notify_age_ms;
+}
+
+static void handleBleCommands()
+{
+    CoffeeBleScaleCommand command = CoffeeBleScaleCommand::None;
+    while (coffeeBleScalePopCommand(command)) {
+        bool handled = false;
+        switch (command) {
+            case CoffeeBleScaleCommand::Tare:
+                handled = ui_t4s3_handle_web_command("tare");
+                break;
+            case CoffeeBleScaleCommand::TimerStart:
+                if (!ui_t4s3_web_stopwatch_running()) {
+                    handled = ui_t4s3_handle_web_command("stopwatch_start_stop");
+                } else {
+                    handled = true;
+                }
+                break;
+            case CoffeeBleScaleCommand::TimerStop:
+                if (ui_t4s3_web_stopwatch_running()) {
+                    handled = ui_t4s3_handle_web_command("stopwatch_start_stop");
+                } else {
+                    handled = true;
+                }
+                break;
+            case CoffeeBleScaleCommand::TimerReset:
+                handled = ui_t4s3_handle_web_command("stopwatch_reset");
+                break;
+            case CoffeeBleScaleCommand::None:
+            default:
+                break;
+        }
+
+        Serial.printf("[T4S3][BLE] command %s %s\n",
+                      coffeeBleScaleCommandName(command),
+                      handled ? "handled" : "not handled");
+        ui_t4s3_notify_activity();
+    }
+}
+
 static void updateWebState(uint32_t now)
 {
     refreshWebSettingsCache(now);
@@ -601,6 +661,8 @@ static void updateWebState(uint32_t now)
     g_webState.system.uptime_ms = now;
     g_webState.system.web_wizard_active = ui_t4s3_web_wizard_active();
     g_webState.system.autodetect_paused = ui_t4s3_web_wizard_active();
+
+    updateBleStateInAppState();
 }
 
 static bool handleT4S3WebCommand(const char *cmd)
@@ -722,6 +784,9 @@ void setup()
 
     t4s3_wifi_begin();
     t4s3_time_begin();
+#if ENABLE_BLE_SCALE
+    Serial.printf("[T4S3][BLE] enabled, delayed start in %lu ms\n", static_cast<unsigned long>(kBleStartDelayMs));
+#endif
     ui_t4s3_notify_activity();
     lv_disp_trig_activity(nullptr);
     g_sleepAllowedAfterWakeMs = millis() + kWakeGraceMs;
@@ -735,6 +800,19 @@ void loop()
     t4s3_time_tick();
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
     tickHx711Test(now);
+#endif
+#if ENABLE_BLE_SCALE
+    if (!g_bleStarted && now >= kBleStartDelayMs) {
+        Serial.println("[T4S3][BLE] delayed begin now");
+        Serial.flush();
+        // Gaggiuino/esp-arduino-ble-scales matcht den BLE-Namen per Prefix "WeighMyBru".
+        coffeeBleScaleBegin("WeighMyBru");
+        g_bleStarted = true;
+        Serial.println("[T4S3][BLE] delayed begin returned");
+        Serial.flush();
+    }
+    coffeeBleScaleTick(now, t4s3_scale_current_grams(), t4s3_scale_is_stable());
+    handleBleCommands();
 #endif
     ui_t4s3_tick();
     lv_task_handler();
