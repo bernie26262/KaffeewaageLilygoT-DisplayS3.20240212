@@ -214,6 +214,7 @@ lv_obj_t *maintenanceFilterLeftLabel = nullptr;
 lv_obj_t *maintenanceFilterTimeLabel = nullptr;
 
 void build_current_page();
+void reset_single_dose_automation_state();
 void open_target_overlay();
 void close_target_overlay(bool save);
 void open_vessel_overlay();
@@ -479,6 +480,11 @@ void update_hx711_grams_display(float grams, bool valid)
         }
     }
 
+    if (!ui_t4s3_single_dose_automation_allowed()) {
+        reset_single_dose_automation_state();
+        return;
+    }
+
     if (recover_negative_startup_tare_if_needed()) {
         return;
     }
@@ -621,13 +627,14 @@ const char *vessel_name(uint8_t index)
 
 void update_autodetect_display()
 {
-    const bool autodetectEffective = autodetectEnabled && !webWizardActive;
-    set_text(autodetectStateLabel, webWizardActive ? "Auto Pause" : "Auto");
+    const bool singleDoseMode = !ui_t4s3_is_shot_scale_mode();
+    const bool autodetectEffective = singleDoseMode && autodetectEnabled && !webWizardActive;
+    set_text(autodetectStateLabel, !singleDoseMode ? "Shot" : (webWizardActive ? "Auto Pause" : "Auto"));
     if (autodetectLed) {
         lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEffective ? COLOR_AUTODETECT_LED_ON : COLOR_AUTODETECT_LED_OFF), 0);
     }
     if (autodetectButtonLabel && lv_obj_is_valid(autodetectButtonLabel)) {
-        lv_label_set_text(autodetectButtonLabel, webWizardActive ? "Autodetect: PAUSE" : (autodetectEnabled ? "Autodetect: AN" : "Autodetect: AUS"));
+        lv_label_set_text(autodetectButtonLabel, !singleDoseMode ? "Autodetect: SHOT AUS" : (webWizardActive ? "Autodetect: PAUSE" : (autodetectEnabled ? "Autodetect: AN" : "Autodetect: AUS")));
     }
 }
 
@@ -673,6 +680,18 @@ void set_save_ready(bool ready)
     saveReady = ready;
     update_save_button_display();
 }
+
+void reset_single_dose_automation_state()
+{
+    autodetectDetectedGefaess = kNoDetectedGefaess;
+    autodetectPendingGefaess = kNoDetectedGefaess;
+    autodetectAutoTaredGefaess = kNoDetectedGefaess;
+    autodetectPendingSinceMs = 0;
+    manualTareSaveArmed = false;
+    set_save_ready(false);
+    update_autodetect_display();
+}
+
 
 bool recover_negative_startup_tare_if_needed()
 {
@@ -728,7 +747,8 @@ bool recover_negative_startup_tare_if_needed()
 
 void update_save_ready_from_weight()
 {
-    if (!hx711DisplayValid ||
+    if (!ui_t4s3_single_dose_automation_allowed() ||
+        !hx711DisplayValid ||
         !t4s3_scale_is_ready() ||
         !t4s3_scale_is_stable()) {
         return;
@@ -777,6 +797,7 @@ void update_save_ready_from_weight()
 void update_autodetect_gefaess_preview()
 {
     const bool blocked =
+        !ui_t4s3_single_dose_automation_allowed() ||
         !autodetectEnabled ||
         !hx711DisplayValid ||
         !t4s3_scale_is_ready() ||
@@ -1661,6 +1682,9 @@ void reset_timer()
 void navigate_to(Page page)
 {
     activePage = page;
+    if (activePage != Page::Waage) {
+        reset_single_dose_automation_state();
+    }
     build_current_page();
 }
 
@@ -2263,8 +2287,8 @@ static void button_event_cb(lv_event_t *event)
                 set_text_if_changed(systemHx711GramsLabel, "0,0 g");
                 set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
                 set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
-                manualTareSaveArmed = !autodetectEnabled;
-                update_status(autodetectEnabled ? "Tara gesetzt" : "Tara gesetzt - Save wird vorbereitet");
+                manualTareSaveArmed = ui_t4s3_single_dose_automation_allowed() && !autodetectEnabled;
+                update_status(ui_t4s3_is_shot_scale_mode() ? "Shot-Tara gesetzt" : (autodetectEnabled ? "Tara gesetzt" : "Tara gesetzt - Save wird vorbereitet"));
                 set_save_ready(false);
             } else {
                 update_status("Tara fehlgeschlagen - HX711 nicht bereit");
@@ -3235,7 +3259,7 @@ void create_nav(lv_obj_t *screen)
     lv_obj_t *navWaage = create_nav_button(screen, "Waage", "nav_waage", activePage == Page::Waage);
     lv_obj_align(navWaage, LV_ALIGN_BOTTOM_LEFT, 18, -16);
 
-    lv_obj_t *navStoppuhr = create_nav_button(screen, "Stoppuhr", "nav_stoppuhr", activePage == Page::Stoppuhr);
+    lv_obj_t *navStoppuhr = create_nav_button(screen, "Shot", "nav_stoppuhr", activePage == Page::Stoppuhr);
     lv_obj_align(navStoppuhr, LV_ALIGN_BOTTOM_LEFT, 158, -16);
 
     const bool dataActive = activePage == Page::Daten ||
@@ -3358,38 +3382,66 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_clear_flag(timerPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(timerPanel, LV_SCROLLBAR_MODE_OFF);
 
-    create_panel_title(timerPanel, "Stoppuhr");
+    create_panel_title(timerPanel, "Shot-Waage");
+
+    weightLabel = lv_label_create(timerPanel);
+    lv_label_set_text(weightLabel, "0,0 g");
+    lv_obj_set_width(weightLabel, 330);
+    lv_label_set_long_mode(weightLabel, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(weightLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(weightLabel, COLOR_WHITE);
+    lv_obj_set_style_text_font(weightLabel, &lv_font_montserrat_48, 0);
+    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -54);
 
     timerLabel = lv_label_create(timerPanel);
     lv_label_set_text(timerLabel, "00:00:0");
     lv_obj_set_width(timerLabel, 330);
     lv_label_set_long_mode(timerLabel, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(timerLabel, LV_TEXT_ALIGN_CENTER, 0);
-    style_label(timerLabel, COLOR_WHITE);
-    lv_obj_set_style_text_font(timerLabel, &lv_font_montserrat_48, 0);
-    lv_obj_align(timerLabel, LV_ALIGN_CENTER, 0, -24);
+    style_label(timerLabel, COLOR_GREEN);
+    lv_obj_set_style_text_font(timerLabel, &lv_font_montserrat_32, 0);
+    lv_obj_align(timerLabel, LV_ALIGN_CENTER, 0, 22);
     update_timer_display();
 
     lv_obj_t *timerInfo = lv_label_create(timerPanel);
-    lv_label_set_text(timerInfo, timerRunning ? "läuft" : "bereit");
+    lv_label_set_text(timerInfo, timerRunning ? "Remote aktiv · läuft" : "Remote aktiv · bereit");
     lv_obj_set_width(timerInfo, 330);
     lv_obj_set_style_text_align(timerInfo, LV_TEXT_ALIGN_CENTER, 0);
     style_label(timerInfo, timerRunning ? COLOR_GREEN : COLOR_MUTED);
-    lv_obj_align(timerInfo, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_align(timerInfo, LV_ALIGN_BOTTOM_MID, 0, -18);
 
     lv_obj_t *inputPanel = lv_obj_create(screen);
     style_plain_block(inputPanel, COLOR_BG);
     lv_obj_set_size(inputPanel, 195, 258);
     lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
 
-    lv_obj_t *start = create_button(inputPanel, timerRunning ? "Stop" : "Start", "timer_start_stop", 175, 78);
-    lv_obj_align(start, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_t *tare = create_button(inputPanel, "Tara", "tara", 175, 70);
+    lv_obj_align(tare, LV_ALIGN_TOP_MID, 0, 0);
 
-    lv_obj_t *reset = create_button(inputPanel, "Reset", "timer_reset", 175, 78);
-    lv_obj_align(reset, LV_ALIGN_TOP_MID, 0, 90);
+    lv_obj_t *remoteTitle = lv_label_create(inputPanel);
+    lv_label_set_text(remoteTitle, "Maschine steuert");
+    lv_obj_set_width(remoteTitle, 175);
+    lv_obj_set_style_text_align(remoteTitle, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(remoteTitle, COLOR_GREEN);
+    lv_obj_align(remoteTitle, LV_ALIGN_TOP_MID, 0, 92);
+
+    lv_obj_t *remoteHint = lv_label_create(inputPanel);
+    lv_label_set_text(remoteHint, "Start / Stop / Reset\nkommen per BLE");
+    lv_obj_set_width(remoteHint, 175);
+    lv_label_set_long_mode(remoteHint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(remoteHint, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(remoteHint, COLOR_MUTED);
+    lv_obj_align(remoteHint, LV_ALIGN_TOP_MID, 0, 124);
+
+    lv_obj_t *autoHint = lv_label_create(inputPanel);
+    lv_label_set_text(autoHint, "Autodetect aus");
+    lv_obj_set_width(autoHint, 175);
+    lv_obj_set_style_text_align(autoHint, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(autoHint, COLOR_MUTED);
+    lv_obj_align(autoHint, LV_ALIGN_TOP_MID, 0, 198);
 
     create_footer(screen,
-                  "Stoppuhr bereit",
+                  "Shot-Waage · Timer maschinengesteuert",
                   "");
 }
 
@@ -4165,8 +4217,8 @@ static bool ui_t4s3_web_tare()
     set_text_if_changed(systemHx711GramsLabel, "0,0 g");
     set_text_if_changed(scaleCalibrationWeightLabel, "0,0 g");
     set_text_if_changed(simLabel, "HX711-Gewicht aktiv");
-    manualTareSaveArmed = !autodetectEnabled;
-    update_status(autodetectEnabled ? "Tara gesetzt" : "Tara gesetzt - Save wird vorbereitet");
+    manualTareSaveArmed = ui_t4s3_single_dose_automation_allowed() && !autodetectEnabled;
+    update_status(ui_t4s3_is_shot_scale_mode() ? "Shot-Tara gesetzt" : (autodetectEnabled ? "Tara gesetzt" : "Tara gesetzt - Save wird vorbereitet"));
     set_save_ready(false);
     return true;
 }
@@ -4639,6 +4691,16 @@ bool ui_t4s3_handle_web_command(const char *cmd)
     if (strcmp(cmd, "autodetect_off") == 0) {
         return ui_t4s3_web_set_autodetect(false);
     }
+    if (strcmp(cmd, "mode_single_dose") == 0) {
+        navigate_to(Page::Waage);
+        update_status("Modus: Single-Dose-Waage");
+        return true;
+    }
+    if (strcmp(cmd, "mode_shot") == 0) {
+        navigate_to(Page::Stoppuhr);
+        update_status("Modus: Shot-Waage - Remote aktiv");
+        return true;
+    }
     if (strcmp(cmd, "stopwatch_start_stop") == 0) {
         set_timer_running(!timerRunning);
         return true;
@@ -4758,6 +4820,31 @@ bool ui_t4s3_handle_web_command(const char *cmd)
     }
 
     return false;
+}
+
+bool ui_t4s3_is_shot_scale_mode()
+{
+    return activePage == Page::Stoppuhr;
+}
+
+bool ui_t4s3_ble_remote_control_allowed()
+{
+    return ui_t4s3_is_shot_scale_mode();
+}
+
+bool ui_t4s3_single_dose_automation_allowed()
+{
+    return activePage == Page::Waage && !webWizardActive;
+}
+
+const char *ui_t4s3_scale_mode_key()
+{
+    return ui_t4s3_is_shot_scale_mode() ? "shot" : "single_dose";
+}
+
+const char *ui_t4s3_scale_mode_label()
+{
+    return ui_t4s3_is_shot_scale_mode() ? "Shot-Waage" : "Single Dose";
 }
 
 void ui_t4s3_create(uint16_t width, uint16_t height)

@@ -21,3 +21,8 @@ float ui_t4s3_web_calibration_weight_g();
 const char *ui_t4s3_web_siebtraeger_name(uint8_t idx);
 uint8_t ui_t4s3_web_selected_gefaess();
 bool ui_t4s3_web_wizard_active();
+bool ui_t4s3_is_shot_scale_mode();
+bool ui_t4s3_ble_remote_control_allowed();
+bool ui_t4s3_single_dose_automation_allowed();
+const char *ui_t4s3_scale_mode_key();
+const char *ui_t4s3_scale_mode_label();

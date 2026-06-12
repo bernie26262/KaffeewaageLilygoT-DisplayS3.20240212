@@ -77,7 +77,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 <body>
 <main>
   <section class="card top">
-    <h1>Single-Dose-Waage</h1>
+    <h1 id="appTitle">Single-Dose-Waage</h1>
     <div class="top-status">
       <span id="wifiSignalHeaderIcon" class="wifi-signal header-wifi-signal" aria-hidden="true" title="WLAN-Signal"></span>
       <span id="ws" class="pill">Getrennt</span>
@@ -87,7 +87,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <section class="bottom-nav-shell" aria-label="Hauptnavigation">
     <nav class="tab-nav">
       <button class="tab-button active" type="button" data-tab="scalePage"><span class="tab-icon" aria-hidden="true">⚖</span><span>Waage</span></button>
-      <button class="tab-button" type="button" data-tab="timerPage"><span class="tab-icon" aria-hidden="true">⏱</span><span>Stoppuhr</span></button>
+      <button class="tab-button" type="button" data-tab="timerPage"><span class="tab-icon" aria-hidden="true">☕</span><span>Shot</span></button>
       <button class="tab-button" type="button" data-tab="statsPage"><span class="tab-icon" aria-hidden="true">▦</span><span>Daten</span></button>
       <button class="tab-button" type="button" data-tab="settingsPage"><span class="tab-icon" aria-hidden="true">⚙</span><span>Einstellungen</span></button>
     </nav>
@@ -95,6 +95,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <div id="scalePage" class="page">
   <section class="card scale-card">
+    <div id="scaleModeBanner" class="mode-banner single-dose">Single-Dose-Waage · Autodetect aktiv</div>
     <div class="weight-head">
       <div class="label">Gewicht</div>
       <div class="autodetect-row small">
@@ -142,12 +143,18 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="timerPage" class="page hidden">
-  <section class="card">
-    <div class="label">Stoppuhr</div>
+  <section class="card shot-card">
+    <div id="shotModeBanner" class="mode-banner shot">Shot-Waage · maschinengesteuert</div>
+    <div class="label">Shot-Gewicht</div>
+    <div class="weight shot-weight"><span id="shotActual">--.-</span><span class="unit">g</span></div>
+    <div class="label" style="margin-top: 10px;">Shot-Timer</div>
     <div class="value" id="stopwatch">00:00:00:0</div>
-    <div class="grid" style="margin-top: 12px;">
-      <button id="swToggle" class="secondary" disabled>Start / Stop</button>
-      <button id="swReset" class="secondary" disabled>Reset</button>
+    <div class="button-row shot-controls">
+      <button id="shotTare" class="compact secondary">Tara</button>
+    </div>
+    <div class="small shot-remote-hint" style="margin-top: 12px;">
+      Tara kann lokal auf der Shot-Waage oder von der Kaffeemaschine ausgelöst werden.
+      Start, Stop und Reset werden von der Kaffeemaschine gesteuert.
     </div>
   </section>
   </div>
@@ -447,6 +454,15 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .maintenance-item.inactive { color: var(--muted); }
     /* ===== Autodetect / Gewichtskarte ===== */
     .scale-card { display: grid; gap: 12px; }
+    .mode-banner {
+      display: flex; align-items: center; justify-content: center;
+      padding: 8px 10px; border-radius: 13px; font-weight: 800;
+      border: 1px solid rgba(148,163,184,.25); background: rgba(15,23,42,.72);
+    }
+    .mode-banner.single-dose { color: #bbf7d0; border-color: rgba(85,195,66,.38); background: rgba(85,195,66,.12); }
+    .mode-banner.shot { color: #dbeafe; border-color: rgba(59,130,246,.46); background: rgba(59,130,246,.14); }
+    .shot-card { gap: 12px; }
+    .shot-weight { font-size: clamp(3rem, 17vw, 5.6rem); line-height: .95; }
     .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .autodetect-row { display: inline-flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0; padding: 0; border-bottom: 0; white-space: nowrap; }
     .autodetect-toggle {
@@ -855,6 +871,11 @@ function addLog(msg) {
 }
 
 function showTab(targetPageId) {
+  if (targetPageId === 'scalePage') {
+    sendCommand('mode_single_dose', 'Modus Single Dose gesendet …');
+  } else if (targetPageId === 'timerPage') {
+    sendCommand('mode_shot', 'Modus Shot-Waage gesendet …');
+  }
   ['scalePage', 'timerPage', 'statsPage', 'settingsPage'].forEach(pageId => {
     el(pageId).classList.toggle('hidden', pageId !== targetPageId);
   });
@@ -1438,7 +1459,8 @@ function currentStopwatchMs() {
 
 function renderStopwatch() {
   el('stopwatch').textContent = fmtStopwatchTime(currentStopwatchMs());
-  el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
+  const swToggle = el('swToggle');
+  if (swToggle) swToggle.textContent = stopwatchRunning ? 'Stop' : 'Start';
 }
 
 // ===== Settings / Gefaesse =====
@@ -1536,10 +1558,12 @@ function selectSiebtraeger(index) {
 function renderWeightAndSelection(s) {
   updateSiebtraegerSelectOptions(s);
   setText('actual', fmtG(s.weight?.actual_g));
+  setText('shotActual', fmtG(s.weight?.actual_g));
   if (!targetWeightDirty && document.activeElement !== el('targetWeight')) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
   }
   setText('status', s.status?.label || String(s.status?.mode ?? '---'));
+  renderScaleMode(s);
   renderBleStatus(s);
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
   el('siebtraegerPicker').textContent = siebtraegerOptionText(Number(s.selection?.siebtraeger ?? 0));
@@ -1555,24 +1579,39 @@ function renderBleStatus(s) {
   const parts = [];
   if (enabled) parts.push(ble.mode || 'BLE');
   if (connected && hz > 0) parts.push(`${hz.toFixed(1)} Hz`);
+  if (s.system?.ble_remote_control_allowed) parts.push('Remote aktiv');
+  else if (enabled) parts.push('Remote nur auf Shot-Seite');
   if (ble.last_command && ble.last_command !== '---') parts.push(`Cmd: ${ble.last_command}`);
   setText('bleStatus', status);
   setText('bleDetails', parts.length ? parts.join(' · ') : '---');
 }
 
+function renderScaleMode(s) {
+  const label = s.system?.scale_mode_label || (s.system?.shot_mode ? 'Shot-Waage' : 'Single Dose');
+  const shot = !!s.system?.shot_mode;
+  setText('appTitle', shot ? 'Shot-Waage' : 'Single-Dose-Waage');
+  setText('scaleModeBanner', 'Single-Dose-Waage · Autodetect und Save aktiv');
+  setText('shotModeBanner', shot ? 'Shot-Waage · maschinengesteuert' : 'Shot-Waage · beim Öffnen maschinengesteuert');
+  el('scaleModeBanner')?.classList.toggle('single-dose', !shot);
+  el('scaleModeBanner')?.classList.toggle('shot', shot);
+  el('shotModeBanner')?.classList.toggle('shot', true);
+  return label;
+}
+
 function renderAutodetect(s) {
   const autodetectOn = !!s.selection?.autodetect;
   const autodetectPaused = !!s.system?.autodetect_paused;
+  const singleDoseAutomation = s.system?.single_dose_automation_allowed !== false;
   const autodetectToggle = el('autodetectToggle');
   const autodetectLed = el('autodetectLed');
 
-  setText('autodetectStatus', autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus'));
+  setText('autodetectStatus', !singleDoseAutomation ? 'Shot aus' : (autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus')));
   autodetectToggle.classList.toggle('on', autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('off', !autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('paused', autodetectPaused);
   autodetectToggle.setAttribute('aria-pressed', autodetectOn ? 'true' : 'false');
-  autodetectToggle.disabled = autodetectPaused;
-  autodetectToggle.title = autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten');
+  autodetectToggle.disabled = autodetectPaused || !singleDoseAutomation;
+  autodetectToggle.title = !singleDoseAutomation ? 'Autodetect ist auf der Shot-Waage deaktiviert' : (autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten'));
   autodetectLed.classList.toggle('on', autodetectOn && !autodetectPaused);
 }
 
@@ -1657,8 +1696,10 @@ function renderStatsAndSystem(s) {
 
 function renderActionAvailability(s) {
   el('save').disabled = !s.status?.save_ready;
-  el('swToggle').disabled = false;
-  el('swReset').disabled = false;
+  const swToggle = el('swToggle');
+  const swReset = el('swReset');
+  if (swToggle) swToggle.disabled = false;
+  if (swReset) swReset.disabled = false;
 }
 
 function scheduleRenderState(s) {
@@ -1702,15 +1743,19 @@ function connect() {
   ws.onopen = () => {
     el('ws').textContent = 'Verbunden';
     el('ws').classList.add('ok');
-    el('swToggle').disabled = false;
-    el('swReset').disabled = false;
+    const swToggle = el('swToggle');
+    const swReset = el('swReset');
+    if (swToggle) swToggle.disabled = false;
+    if (swReset) swReset.disabled = false;
     addLog('WebSocket verbunden');
   };
   ws.onclose = () => {
     el('ws').textContent = 'Getrennt';
     el('ws').classList.remove('ok');
-    el('swToggle').disabled = true;
-    el('swReset').disabled = true;
+    const swToggle = el('swToggle');
+    const swReset = el('swReset');
+    if (swToggle) swToggle.disabled = true;
+    if (swReset) swReset.disabled = true;
     addLog('WebSocket getrennt, reconnect läuft …');
     setTimeout(connect, 1500);
   };
@@ -2046,8 +2091,11 @@ function handleTargetWeightKeyDown(e) {
 function bindDashboardHandlers() {
   el('save').addEventListener('click', handleSaveClick);
   el('tare').addEventListener('click', () => sendCommand(CMD.tare, 'Tara gesendet …'));
-  el('swToggle').addEventListener('click', handleStopwatchToggleClick);
-  el('swReset').addEventListener('click', () => sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …'));
+  el('shotTare')?.addEventListener('click', () => sendCommand(CMD.tare, 'Shot-Tara gesendet …'));
+  const swToggle = el('swToggle');
+  const swReset = el('swReset');
+  if (swToggle) swToggle.addEventListener('click', handleStopwatchToggleClick);
+  if (swReset) swReset.addEventListener('click', () => sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …'));
   el('siebtraegerPicker').addEventListener('click', openSiebtraegerOverlay);
   el('targetSave').addEventListener('click', sendTargetWeight);
   el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
@@ -2789,6 +2837,11 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi_setup_ap_ip"] = coffeeWifiSetupApIp();
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
+  doc["system"]["scale_mode"] = s.system.scale_mode;
+  doc["system"]["scale_mode_label"] = s.system.scale_mode_label;
+  doc["system"]["shot_mode"] = s.system.shot_mode;
+  doc["system"]["ble_remote_control_allowed"] = s.system.ble_remote_control_allowed;
+  doc["system"]["single_dose_automation_allowed"] = s.system.single_dose_automation_allowed;
 
   String out;
   serializeJson(doc, out);

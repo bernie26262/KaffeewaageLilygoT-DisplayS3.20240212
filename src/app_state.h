@@ -85,6 +85,11 @@ struct SystemState {
   uint32_t uptime_ms = 0;
   bool web_wizard_active = false;
   bool autodetect_paused = false;
+  char scale_mode[20] = "single_dose";
+  char scale_mode_label[24] = "Single Dose";
+  bool shot_mode = false;
+  bool ble_remote_control_allowed = false;
+  bool single_dose_automation_allowed = true;
 };
 
 struct StatusState {

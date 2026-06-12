@@ -552,6 +552,12 @@ static void handleBleCommands()
     CoffeeBleScaleCommand command = CoffeeBleScaleCommand::None;
     while (coffeeBleScalePopCommand(command)) {
         bool handled = false;
+        const bool remoteAllowed = ui_t4s3_ble_remote_control_allowed();
+        if (!remoteAllowed && command != CoffeeBleScaleCommand::None) {
+            Serial.printf("[T4S3][BLE] command %s ignored: not in Shot mode\n",
+                          coffeeBleScaleCommandName(command));
+            continue;
+        }
         switch (command) {
             case CoffeeBleScaleCommand::Tare:
                 handled = ui_t4s3_handle_web_command("tare");
@@ -660,7 +666,12 @@ static void updateWebState(uint32_t now)
     g_webState.system.wifi_signal_label = webWifiSignalLabel(wifi.qualityBars);
     g_webState.system.uptime_ms = now;
     g_webState.system.web_wizard_active = ui_t4s3_web_wizard_active();
-    g_webState.system.autodetect_paused = ui_t4s3_web_wizard_active();
+    g_webState.system.autodetect_paused = !ui_t4s3_single_dose_automation_allowed();
+    strlcpy(g_webState.system.scale_mode, ui_t4s3_scale_mode_key(), sizeof(g_webState.system.scale_mode));
+    strlcpy(g_webState.system.scale_mode_label, ui_t4s3_scale_mode_label(), sizeof(g_webState.system.scale_mode_label));
+    g_webState.system.shot_mode = ui_t4s3_is_shot_scale_mode();
+    g_webState.system.ble_remote_control_allowed = ui_t4s3_ble_remote_control_allowed();
+    g_webState.system.single_dose_automation_allowed = ui_t4s3_single_dose_automation_allowed();
 
     updateBleStateInAppState();
 }
