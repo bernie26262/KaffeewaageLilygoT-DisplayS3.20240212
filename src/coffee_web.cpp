@@ -72,7 +72,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=3d">
+  <link rel="stylesheet" href="/coffee.css?v=3f">
 </head>
 <body>
 <main>
@@ -144,7 +144,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <div id="timerPage" class="page hidden">
   <section class="card shot-card">
-    <div id="shotModeBanner" class="mode-banner shot">Shot-Waage · maschinengesteuert</div>
+    <div id="shotModeBanner" class="mode-banner shot">Shot-Waage · automatische Zeitmessung</div>
     <div class="label">Shot-Gewicht</div>
     <div class="weight shot-weight"><span id="shotActual">--.-</span><span class="unit">g</span></div>
     <div class="label" style="margin-top: 10px;">Shot-Timer</div>
@@ -152,9 +152,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="button-row shot-controls">
       <button id="shotTare" class="compact secondary">Tara</button>
     </div>
-    <div class="small shot-remote-hint" style="margin-top: 12px;">
-      Tara kann lokal auf der Shot-Waage oder von der Kaffeemaschine ausgelöst werden.
-      Start, Stop und Reset werden von der Kaffeemaschine gesteuert.
+    <div id="shotSessionStatus" class="small shot-remote-hint" style="margin-top: 12px;">
+      Tara auslösen, um die automatische Zeitmessung vorzubereiten.
     </div>
   </section>
   </div>
@@ -372,9 +371,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3e"></script>
-<script src="/coffee_render.js?v=3e"></script>
-<script src="/coffee_events.js?v=3e"></script>
+<script src="/coffee_core.js?v=3f"></script>
+<script src="/coffee_render.js?v=3f"></script>
+<script src="/coffee_events.js?v=3f"></script>
 </body>
 </html>)rawliteral";
 
@@ -1590,6 +1589,7 @@ function renderWeightAndSelection(s) {
   }
   setText('status', s.status?.label || String(s.status?.mode ?? '---'));
   renderScaleMode(s);
+  renderShotSession(s);
   renderBleStatus(s);
   el('siebtraegerSelect').value = String(s.selection?.siebtraeger ?? 0);
   el('siebtraegerPicker').textContent = siebtraegerOptionText(Number(s.selection?.siebtraeger ?? 0));
@@ -1620,12 +1620,25 @@ function renderBleStatus(s) {
   setText('bleDetails', parts.length ? parts.join(' · ') : '---');
 }
 
+function renderShotSession(s) {
+  const shot = s.shot || {};
+  let text = 'Tara auslösen, um die automatische Zeitmessung vorzubereiten.';
+  if (shot.running) {
+    text = 'Shot läuft · Zeitmessung ab erkanntem Gewichtszuwachs';
+  } else if (shot.armed) {
+    text = 'Bereit · wartet auf den ersten Gewichtszuwachs';
+  } else if (shot.completed) {
+    text = 'Shot abgeschlossen · bleibt bis zum nächsten Shot im RAM';
+  }
+  setText('shotSessionStatus', text);
+}
+
 function renderScaleMode(s) {
   const label = s.system?.scale_mode_label || (s.system?.shot_mode ? 'Shot-Waage' : 'Single Dose');
   const shot = !!s.system?.shot_mode;
   setText('appTitle', shot ? 'Shot-Waage' : 'Single-Dose-Waage');
   setText('scaleModeBanner', 'Single-Dose-Waage · Autodetect und Save aktiv');
-  setText('shotModeBanner', shot ? 'Shot-Waage · maschinengesteuert' : 'Shot-Waage · beim Öffnen maschinengesteuert');
+  setText('shotModeBanner', shot ? 'Shot-Waage · automatische Zeitmessung' : 'Shot-Waage · beim Öffnen automatisch');
   el('scaleModeBanner')?.classList.toggle('single-dose', !shot);
   el('scaleModeBanner')?.classList.toggle('shot', shot);
   el('shotModeBanner')?.classList.toggle('shot', true);
@@ -2797,6 +2810,16 @@ static String buildStateJson(const AppState& s)
 
   doc["stopwatch"]["ms"] = s.stopwatch.ms;
   doc["stopwatch"]["running"] = s.stopwatch.running;
+
+  doc["shot"]["state"] = s.shot.state;
+  doc["shot"]["armed"] = s.shot.armed;
+  doc["shot"]["running"] = s.shot.running;
+  doc["shot"]["completed"] = s.shot.completed;
+  doc["shot"]["elapsed_ms"] = s.shot.elapsed_ms;
+  doc["shot"]["peak_weight_g"] = s.shot.peak_weight_g;
+  doc["shot"]["final_weight_g"] = s.shot.final_weight_g;
+  doc["shot"]["sample_count"] = s.shot.sample_count;
+  doc["shot"]["sample_buffer_full"] = s.shot.sample_buffer_full;
 
   doc["ble"]["enabled"] = s.ble.enabled;
   doc["ble"]["connected"] = s.ble.connected;

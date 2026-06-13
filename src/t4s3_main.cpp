@@ -21,6 +21,7 @@
 #include "coffee_web.h"
 #include "coffee_ota.h"
 #include "ble_scale.h"
+#include "shot_session.h"
 
 LilyGo_Class amoled;
 
@@ -84,6 +85,7 @@ static float g_lastHx711Filtered = 0.0f;
 static float g_fastWeightRaw = 0.0f;
 static float g_stableWeightRaw = 0.0f;
 static float g_displayWeightRaw = 0.0f;
+static float g_shotWeightRaw = 0.0f;
 static bool g_weightPipelineInitialized = false;
 static bool g_weightMoving = false;
 static bool g_weightStable = false;
@@ -99,6 +101,11 @@ static constexpr float kStableFilterLargeDeltaGrams = 10.0f;
 static constexpr float kStableFilterMediumDeltaGrams = 2.0f;
 static constexpr float kDisplaySettleFastDeltaGrams = 1.5f;
 static constexpr float kDisplayStableDeadbandGrams = 0.08f;
+// Shot page: separate calm path. It follows the same median input but avoids
+// the immediate fast-path jumps used for responsive Single-Dose handling.
+static constexpr float kShotFilterAlpha = 0.10f;
+static constexpr float kShotFilterCatchupAlpha = 0.24f;
+static constexpr float kShotFilterCatchupDeltaGrams = 4.0f;
 
 static float gramsToRawDelta(float grams)
 {
@@ -164,6 +171,7 @@ static void sleepOverlayEvent(lv_event_t *event)
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 static void updateDisplayWakeByWeight();
+static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, float weightGrams);
 
 static void beginHx711Test()
 {
@@ -237,6 +245,7 @@ static void tickHx711Test(uint32_t now)
         g_fastWeightRaw = median;
         g_stableWeightRaw = median;
         g_displayWeightRaw = median;
+        g_shotWeightRaw = median;
         g_lastHx711Filtered = median;
         g_weightPipelineInitialized = true;
         g_lastMovementMs = now;
@@ -265,6 +274,15 @@ static void tickHx711Test(uint32_t now)
             stableAlpha = 0.12f;
         }
         g_stableWeightRaw = g_stableWeightRaw * (1.0f - stableAlpha) + median * stableAlpha;
+
+        // Calm Shot path: continuous extraction should look smooth instead of
+        // repeatedly switching to the fast movement filter. Large steps still
+        // catch up fast enough for placing/removing the cup.
+        const float shotDeltaRaw = fabsf(median - g_shotWeightRaw);
+        const float shotAlpha = shotDeltaRaw >= gramsToRawDelta(kShotFilterCatchupDeltaGrams)
+                                  ? kShotFilterCatchupAlpha
+                                  : kShotFilterAlpha;
+        g_shotWeightRaw = g_shotWeightRaw * (1.0f - shotAlpha) + median * shotAlpha;
 
         const float movementDelta = fabsf(g_fastWeightRaw - previousFast);
         if (movementDelta > kMovementThresholdRaw) {
@@ -300,17 +318,23 @@ static void tickHx711Test(uint32_t now)
         g_lastHx711Filtered = g_displayWeightRaw;
     }
 
+    const float shotWeightGrams = g_hx711CalFactorRawPerGram > 0.0f
+                                    ? g_shotWeightRaw / g_hx711CalFactorRawPerGram
+                                    : 0.0f;
+    handleShotSessionEvent(coffeeShotSessionTick(now, shotWeightGrams), now, shotWeightGrams);
+
     ui_t4s3_set_hx711_raw_value(static_cast<int32_t>(g_lastHx711Raw));
     ui_t4s3_set_hx711_grams_value(t4s3_scale_current_grams(), g_hx711Ready);
     updateDisplayWakeByWeight();
 
     if (now - g_lastHx711LogMs >= 250UL) {
         g_lastHx711LogMs = now;
-        Serial.printf("[HX711] raw=%.2f fast=%.2f stable=%.2f display=%.2f grams=%.2f moving=%d stable=%d cal=%.4f\n",
+        Serial.printf("[HX711] raw=%.2f fast=%.2f stable=%.2f display=%.2f shot=%.2f grams=%.2f moving=%d stable=%d cal=%.4f\n",
                       g_lastHx711Raw,
                       g_fastWeightRaw,
                       g_stableWeightRaw,
                       g_displayWeightRaw,
+                      g_shotWeightRaw,
                       t4s3_scale_current_grams(),
                       g_weightMoving ? 1 : 0,
                       g_weightStable ? 1 : 0,
@@ -340,6 +364,7 @@ bool t4s3_scale_tare()
     g_fastWeightRaw = 0.0f;
     g_stableWeightRaw = 0.0f;
     g_displayWeightRaw = 0.0f;
+    g_shotWeightRaw = 0.0f;
     g_weightPipelineInitialized = false;
     g_weightMoving = false;
     g_weightStable = false;
@@ -349,6 +374,10 @@ bool t4s3_scale_tare()
     g_hxHistoryFilled = false;
     g_sleepWeightReferenceValid = false;
     g_weightActivityReferenceValid = false;
+    if (ui_t4s3_is_shot_scale_mode()) {
+        coffeeShotSessionArm(millis(), 0.0f);
+        Serial.println("[T4S3][SHOT] armed by tare; waiting for first liquid");
+    }
     Serial.println("[HX711] tare done");
     return true;
 }
@@ -377,7 +406,42 @@ float t4s3_scale_current_grams()
     if (!g_hx711Ready || g_hx711CalFactorRawPerGram <= 0.0f) {
         return 0.0f;
     }
-    return g_displayWeightRaw / g_hx711CalFactorRawPerGram;
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+    const bool useShotPath = ui_t4s3_is_shot_scale_mode() || shot.running;
+    const float raw = useShotPath ? g_shotWeightRaw : g_displayWeightRaw;
+    return raw / g_hx711CalFactorRawPerGram;
+}
+
+float t4s3_scale_shot_grams()
+{
+    if (!g_hx711Ready || g_hx711CalFactorRawPerGram <= 0.0f) {
+        return 0.0f;
+    }
+    return g_shotWeightRaw / g_hx711CalFactorRawPerGram;
+}
+
+static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, float weightGrams)
+{
+    if (event == CoffeeShotSessionEvent::None) {
+        return;
+    }
+
+    if (event == CoffeeShotSessionEvent::Started) {
+        ui_t4s3_set_shot_timer(0, true);
+        Serial.printf("[T4S3][SHOT] auto START first-liquid weight=%.2f g at %lu ms\n",
+                      static_cast<double>(weightGrams),
+                      static_cast<unsigned long>(now));
+        return;
+    }
+
+    if (event == CoffeeShotSessionEvent::Stopped) {
+        const CoffeeShotSessionStatus status = coffeeShotSessionStatus(now);
+        ui_t4s3_set_shot_timer(status.elapsed_ms, false);
+        Serial.printf("[T4S3][SHOT] auto STOP elapsed=%lu ms final=%.2f g peak=%.2f g\n",
+                      static_cast<unsigned long>(status.elapsed_ms),
+                      static_cast<double>(status.final_weight_g),
+                      static_cast<double>(status.peak_weight_g));
+    }
 }
 
 static void updateDisplayWakeByWeight()
@@ -562,22 +626,25 @@ static void handleBleCommands()
             case CoffeeBleScaleCommand::Tare:
                 handled = ui_t4s3_handle_web_command("tare");
                 break;
-            case CoffeeBleScaleCommand::TimerStart:
-                if (!ui_t4s3_web_stopwatch_running()) {
-                    handled = ui_t4s3_handle_web_command("stopwatch_start_stop");
-                } else {
-                    handled = true;
-                }
+            case CoffeeBleScaleCommand::TimerStart: {
+                const uint32_t now = millis();
+                handleShotSessionEvent(coffeeShotSessionExternalStart(now, t4s3_scale_shot_grams()),
+                                       now, t4s3_scale_shot_grams());
+                handled = true;
                 break;
-            case CoffeeBleScaleCommand::TimerStop:
-                if (ui_t4s3_web_stopwatch_running()) {
-                    handled = ui_t4s3_handle_web_command("stopwatch_start_stop");
-                } else {
-                    handled = true;
-                }
+            }
+            case CoffeeBleScaleCommand::TimerStop: {
+                const uint32_t now = millis();
+                handleShotSessionEvent(coffeeShotSessionExternalStop(now, t4s3_scale_shot_grams()),
+                                       now, t4s3_scale_shot_grams());
+                handled = true;
                 break;
+            }
             case CoffeeBleScaleCommand::TimerReset:
-                handled = ui_t4s3_handle_web_command("stopwatch_reset");
+                // Keep the completed result visible. RESET only prepares the
+                // next detection; the old timer is replaced on the next START.
+                coffeeShotSessionArm(millis(), t4s3_scale_shot_grams());
+                handled = true;
                 break;
             case CoffeeBleScaleCommand::None:
             default:
@@ -605,6 +672,17 @@ static void updateWebState(uint32_t now)
 
     g_webState.stopwatch.ms = ui_t4s3_web_stopwatch_ms();
     g_webState.stopwatch.running = ui_t4s3_web_stopwatch_running();
+
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(now);
+    strlcpy(g_webState.shot.state, coffeeShotSessionStateName(shot.state), sizeof(g_webState.shot.state));
+    g_webState.shot.armed = shot.armed;
+    g_webState.shot.running = shot.running;
+    g_webState.shot.completed = shot.completed;
+    g_webState.shot.elapsed_ms = shot.elapsed_ms;
+    g_webState.shot.peak_weight_g = shot.peak_weight_g;
+    g_webState.shot.final_weight_g = shot.final_weight_g;
+    g_webState.shot.sample_count = shot.sample_count;
+    g_webState.shot.sample_buffer_full = shot.sample_buffer_full;
 
     g_webState.selection.siebtraeger = g_webSettingsCache.selectedSiebtraeger;
     g_webState.selection.gefaess = ui_t4s3_web_selected_gefaess();

@@ -17,6 +17,7 @@ bool ui_t4s3_handle_web_command(const char *cmd);
 bool ui_t4s3_web_save_ready();
 uint32_t ui_t4s3_web_stopwatch_ms();
 bool ui_t4s3_web_stopwatch_running();
+void ui_t4s3_set_shot_timer(uint32_t elapsed_ms, bool running);
 float ui_t4s3_web_calibration_weight_g();
 const char *ui_t4s3_web_siebtraeger_name(uint8_t idx);
 uint8_t ui_t4s3_web_selected_gefaess();

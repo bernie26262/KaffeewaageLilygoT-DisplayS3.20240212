@@ -19,6 +19,18 @@ struct StopwatchState {
   bool running = false;
 };
 
+struct ShotSessionState {
+  char state[16] = "idle";
+  bool armed = false;
+  bool running = false;
+  bool completed = false;
+  uint32_t elapsed_ms = 0;
+  float peak_weight_g = 0.0f;
+  float final_weight_g = 0.0f;
+  uint16_t sample_count = 0;
+  bool sample_buffer_full = false;
+};
+
 struct SelectionState {
   int siebtraeger = 0;
   int gefaess = 0;
@@ -113,6 +125,7 @@ struct BleScaleState {
 struct AppState {
   WeightState weight;
   StopwatchState stopwatch;
+  ShotSessionState shot;
   SelectionState selection;
   CalibrationState calibration;
   GefaessState gefaesse;

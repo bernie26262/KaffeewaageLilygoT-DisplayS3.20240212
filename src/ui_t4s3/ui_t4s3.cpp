@@ -7,6 +7,7 @@
 #include "../t4s3_scale.h"
 #include "../coffee_wifi.h"
 #include "../ble_scale.h"
+#include "../shot_session.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -71,6 +72,7 @@ lv_obj_t *statusLabel = nullptr;
 lv_obj_t *touchLabel = nullptr;
 lv_obj_t *simLabel = nullptr;
 lv_obj_t *timerLabel = nullptr;
+lv_obj_t *timerInfoLabel = nullptr;
 lv_obj_t *timerButtonLabel = nullptr;
 lv_obj_t *targetLabel = nullptr;
 lv_obj_t *clockLabel = nullptr;
@@ -280,6 +282,7 @@ void reset_dynamic_labels()
     touchLabel = nullptr;
     simLabel = nullptr;
     timerLabel = nullptr;
+    timerInfoLabel = nullptr;
     timerButtonLabel = nullptr;
     targetLabel = nullptr;
     clockLabel = nullptr;
@@ -1656,6 +1659,24 @@ void update_timer_display()
     char buf[24];
     format_timer(buf, sizeof(buf));
     set_text(timerLabel, buf);
+
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+    const char *info = "Remote aktiv - bereit";
+    uint32_t color = COLOR_MUTED;
+    if (shot.running || timerRunning) {
+        info = "Remote aktiv - läuft";
+        color = COLOR_GREEN;
+    } else if (shot.armed) {
+        info = "Bereit - wartet auf Bezug";
+        color = COLOR_BLE_ACTIVE;
+    } else if (shot.completed) {
+        info = "Shot abgeschlossen";
+        color = COLOR_GREEN;
+    }
+    set_text_if_changed(timerInfoLabel, info);
+    if (timerInfoLabel) {
+        lv_obj_set_style_text_color(timerInfoLabel, lv_color_hex(color), 0);
+    }
 }
 
 void set_timer_running(bool running)
@@ -1688,6 +1709,10 @@ void reset_timer()
 
 void navigate_to(Page page)
 {
+    const bool leavingShotPage = activePage == Page::Stoppuhr && page != Page::Stoppuhr;
+    if (leavingShotPage) {
+        coffeeShotSessionCancelArm();
+    }
     activePage = page;
     if (activePage != Page::Waage) {
         reset_single_dose_automation_state();
@@ -3442,12 +3467,13 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_align(timerLabel, LV_ALIGN_CENTER, 0, 22);
     update_timer_display();
 
-    lv_obj_t *timerInfo = lv_label_create(timerPanel);
-    lv_label_set_text(timerInfo, timerRunning ? "Remote aktiv - läuft" : "Remote aktiv - bereit");
-    lv_obj_set_width(timerInfo, 330);
-    lv_obj_set_style_text_align(timerInfo, LV_TEXT_ALIGN_CENTER, 0);
-    style_label(timerInfo, timerRunning ? COLOR_GREEN : COLOR_MUTED);
-    lv_obj_align(timerInfo, LV_ALIGN_BOTTOM_MID, 0, -18);
+    timerInfoLabel = lv_label_create(timerPanel);
+    lv_label_set_text(timerInfoLabel, "Remote aktiv - bereit");
+    lv_obj_set_width(timerInfoLabel, 330);
+    lv_obj_set_style_text_align(timerInfoLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(timerInfoLabel, COLOR_MUTED);
+    lv_obj_align(timerInfoLabel, LV_ALIGN_BOTTOM_MID, 0, -18);
+    update_timer_display();
 
     lv_obj_t *inputPanel = lv_obj_create(screen);
     style_plain_block(inputPanel, COLOR_BG);
@@ -3458,14 +3484,14 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_align(tare, LV_ALIGN_TOP_MID, 0, 0);
 
     lv_obj_t *remoteTitle = lv_label_create(inputPanel);
-    lv_label_set_text(remoteTitle, "Maschine steuert");
+    lv_label_set_text(remoteTitle, "Shot-Automatik");
     lv_obj_set_width(remoteTitle, 175);
     lv_obj_set_style_text_align(remoteTitle, LV_TEXT_ALIGN_CENTER, 0);
     style_label(remoteTitle, COLOR_GREEN);
     lv_obj_align(remoteTitle, LV_ALIGN_TOP_MID, 0, 92);
 
     lv_obj_t *remoteHint = lv_label_create(inputPanel);
-    lv_label_set_text(remoteHint, "Start / Stop / Reset\nkommen per BLE");
+    lv_label_set_text(remoteHint, "Tara kommt per BLE\nTimer ab erstem Tropfen");
     lv_obj_set_width(remoteHint, 175);
     lv_label_set_long_mode(remoteHint, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(remoteHint, LV_TEXT_ALIGN_CENTER, 0);
@@ -3480,7 +3506,7 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_align(autoHint, LV_ALIGN_TOP_MID, 0, 198);
 
     create_footer(screen,
-                  "Shot-Waage - Timer maschinengesteuert",
+                  "Shot-Waage - Timer automatisch",
                   "");
 }
 
@@ -4214,6 +4240,15 @@ bool ui_t4s3_web_stopwatch_running()
     return timerRunning;
 }
 
+void ui_t4s3_set_shot_timer(uint32_t elapsed_ms, bool running)
+{
+    timerBaseMs = elapsed_ms;
+    timerStartedMs = millis();
+    timerRunning = running;
+    update_timer_display();
+    update_status(running ? "Shot automatisch gestartet" : "Shot automatisch beendet");
+}
+
 
 float ui_t4s3_web_calibration_weight_g()
 {
@@ -4904,7 +4939,7 @@ void ui_t4s3_tick()
 
     const uint32_t now = millis();
 
-    if (timerRunning && now - lastTimerMs >= 100) {
+    if ((timerRunning || ui_t4s3_is_shot_scale_mode()) && now - lastTimerMs >= 100) {
         lastTimerMs = now;
         update_timer_display();
     }
