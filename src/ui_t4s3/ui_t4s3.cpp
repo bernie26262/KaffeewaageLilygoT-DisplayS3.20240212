@@ -6,6 +6,7 @@
 #include "../t4s3_settings.h"
 #include "../t4s3_scale.h"
 #include "../coffee_wifi.h"
+#include "../ble_scale.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -38,6 +39,8 @@ constexpr uint32_t COLOR_MUTED = 0xA8B8A8;
 constexpr uint32_t COLOR_DIM = 0x5F705F;
 constexpr uint32_t COLOR_AUTODETECT_LED_ON = 0x00FF4A;
 constexpr uint32_t COLOR_AUTODETECT_LED_OFF = 0x232A26;
+constexpr uint32_t COLOR_BLE_ACTIVE = 0x3B82F6;
+constexpr uint32_t COLOR_BLE_OFF = 0x4B5563;
 constexpr uint32_t COLOR_SAVE_DISABLED_BG = 0x263241;
 constexpr uint32_t COLOR_SAVE_DISABLED_BORDER = 0x475569;
 constexpr uint32_t COLOR_SAVE_DISABLED_TEXT = 0xB4C0D0;
@@ -118,6 +121,8 @@ lv_obj_t *systemUptimeLabel = nullptr;
 lv_obj_t *systemDataSsidLabel = nullptr;
 lv_obj_t *systemDataIpLabel = nullptr;
 lv_obj_t *systemDataSignalLabel = nullptr;
+lv_obj_t *headerBleBadge = nullptr;
+lv_obj_t *headerBleLabel = nullptr;
 lv_obj_t *systemHx711RawLabel = nullptr;
 lv_obj_t *systemHx711GramsLabel = nullptr;
 lv_obj_t *headerWifiBars[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -307,6 +312,8 @@ void reset_dynamic_labels()
     systemDataSsidLabel = nullptr;
     systemDataIpLabel = nullptr;
     systemDataSignalLabel = nullptr;
+    headerBleBadge = nullptr;
+    headerBleLabel = nullptr;
     systemHx711RawLabel = nullptr;
     systemHx711GramsLabel = nullptr;
     saveButton = nullptr;
@@ -3202,6 +3209,23 @@ void update_header_wifi_display()
     update_wifi_bars(headerWifiBars, wifi.qualityBars);
 }
 
+void update_header_ble_display()
+{
+    if (!headerBleBadge || !lv_obj_is_valid(headerBleBadge)) {
+        headerBleBadge = nullptr;
+        return;
+    }
+
+    const CoffeeBleScaleStatus ble = coffeeBleScaleStatus();
+    const bool enabled = ble.enabled;
+    const bool connected = ble.connected;
+    const bool active = enabled && (connected || ble.advertising);
+    const uint32_t color = connected ? COLOR_GREEN : (active ? COLOR_BLE_ACTIVE : COLOR_BLE_OFF);
+
+    lv_obj_set_style_bg_color(headerBleBadge, lv_color_hex(color), 0);
+    lv_obj_set_style_border_color(headerBleBadge, lv_color_hex(color), 0);
+}
+
 void update_wlan_page_display()
 {
     T4S3WifiStatus wifi;
@@ -3228,14 +3252,29 @@ void create_header(lv_obj_t *screen)
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 12);
 
     clockLabel = lv_label_create(screen);
-    lv_obj_set_width(clockLabel, 190);
+    lv_obj_set_width(clockLabel, 220);
     lv_obj_set_style_text_align(clockLabel, LV_TEXT_ALIGN_RIGHT, 0);
     style_label(clockLabel, COLOR_WHITE);
-    lv_obj_align(clockLabel, LV_ALIGN_TOP_RIGHT, -74, 12);
+    lv_obj_align(clockLabel, LV_ALIGN_TOP_RIGHT, -104, 12);
     update_clock_display();
 
-    create_wifi_quality_icon(screen, 540, 10, 0, headerWifiBars);
+    headerBleBadge = lv_obj_create(screen);
+    style_plain_block(headerBleBadge, COLOR_BLE_OFF);
+    lv_obj_set_size(headerBleBadge, 30, 22);
+    lv_obj_set_style_radius(headerBleBadge, 11, 0);
+    lv_obj_set_style_border_width(headerBleBadge, 1, 0);
+    lv_obj_set_style_border_color(headerBleBadge, lv_color_hex(COLOR_BLE_OFF), 0);
+    lv_obj_align(headerBleBadge, LV_ALIGN_TOP_RIGHT, -58, 10);
+
+    lv_obj_t *bleText = lv_label_create(headerBleBadge);
+    lv_label_set_text(bleText, "BT");
+    style_label(bleText, COLOR_WHITE);
+    lv_obj_set_style_text_font(bleText, &lv_font_montserrat_12, 0);
+    lv_obj_center(bleText);
+
+    create_wifi_quality_icon(screen, 560, 10, 0, headerWifiBars);
     update_header_wifi_display();
+    update_header_ble_display();
 }
 
 void create_footer(lv_obj_t *screen, const char *statusText, const char *hintText)
@@ -3404,7 +3443,7 @@ void create_stoppuhr_page(lv_obj_t *screen)
     update_timer_display();
 
     lv_obj_t *timerInfo = lv_label_create(timerPanel);
-    lv_label_set_text(timerInfo, timerRunning ? "Remote aktiv · läuft" : "Remote aktiv · bereit");
+    lv_label_set_text(timerInfo, timerRunning ? "Remote aktiv - läuft" : "Remote aktiv - bereit");
     lv_obj_set_width(timerInfo, 330);
     lv_obj_set_style_text_align(timerInfo, LV_TEXT_ALIGN_CENTER, 0);
     style_label(timerInfo, timerRunning ? COLOR_GREEN : COLOR_MUTED);
@@ -3441,7 +3480,7 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_align(autoHint, LV_ALIGN_TOP_MID, 0, 198);
 
     create_footer(screen,
-                  "Shot-Waage · Timer maschinengesteuert",
+                  "Shot-Waage - Timer maschinengesteuert",
                   "");
 }
 
@@ -4877,6 +4916,7 @@ void ui_t4s3_tick()
         update_clock_display();
         update_system_uptime_display();
         update_header_wifi_display();
+        update_header_ble_display();
         update_wlan_page_display();
         process_wlan_setup_overlay_state();
 

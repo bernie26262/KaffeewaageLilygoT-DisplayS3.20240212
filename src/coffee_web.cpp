@@ -79,6 +79,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <section class="card top">
     <h1 id="appTitle">Single-Dose-Waage</h1>
     <div class="top-status">
+      <span id="bleHeaderIcon" class="bt-icon header-bt-icon status-off" aria-hidden="true" title="Bluetooth">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path class="bt-rune" d="M12 2 L12 22 M12 2 L18 7 L12 12 L18 17 L12 22 M12 12 L6 7 M12 12 L6 17"/>
+          <path class="bt-slash" d="M4 20 L20 4"/>
+        </svg>
+      </span>
       <span id="wifiSignalHeaderIcon" class="wifi-signal header-wifi-signal" aria-hidden="true" title="WLAN-Signal"></span>
       <span id="ws" class="pill">Getrennt</span>
     </div>
@@ -132,12 +138,6 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="siebtraegerPicker" class="select-button" type="button" aria-haspopup="dialog" aria-expanded="false">Bodenloser ST · 8.5 g</button>
         <input id="siebtraegerSelect" type="hidden" value="0">
       </div>
-
-      <div class="scale-select-row small ble-status-row">
-        <span class="label">BLE</span>
-        <span id="bleStatus">aus</span>
-        <span id="bleDetails" class="muted-inline">---</span>
-      </div>
     </div>
   </section>
   </div>
@@ -190,6 +190,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div>SSID: <b class="mono" id="statsWifiSsid">---</b></div>
       <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
       <div>WLAN-Signal: <span class="wifi-signal-row"><span id="statsWifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="statsWifiSignalLabel">---</b> <span class="muted-inline" id="statsWifiSignalRssi">---</span></span></div>
+      <div>Bluetooth: <span class="ble-data-row"><span id="bleStatusIcon" class="bt-icon status-off" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path class="bt-rune" d="M12 2 L12 22 M12 2 L18 7 L12 12 L18 17 L12 22 M12 12 L6 7 M12 12 L6 17"/>
+          <path class="bt-slash" d="M4 20 L20 4"/>
+        </svg>
+      </span> <b id="bleStatus">---</b> <span id="bleDetails" class="muted-inline">---</span></span></div>
     </div>
   </section>
   </div>
@@ -499,7 +505,27 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .scale-controls { display: grid; gap: 12px; margin-top: 14px; }
     .scale-target-row, .scale-select-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .scale-target-row .label, .scale-select-row .label { min-width: 92px; }
-    .ble-status-row { align-items: baseline; }
+    .ble-status-row { align-items: center; gap: 10px; }
+    .ble-data-row { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .header-bt-icon { margin-right: 2px; }
+    .bt-icon {
+      width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 999px; border: 1px solid rgba(148,163,184,.28); background: rgba(15,23,42,.65);
+      flex: 0 0 22px;
+    }
+    .bt-icon svg { width: 16px; height: 16px; overflow: visible; }
+    .bt-icon .bt-rune, .bt-icon .bt-slash { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.9; }
+    .bt-icon .bt-rune { stroke: #9ca3af; }
+    .bt-icon .bt-slash { stroke: transparent; }
+    .bt-icon.status-off { border-color: rgba(107,114,128,.46); background: rgba(31,41,55,.58); }
+    .bt-icon.status-off .bt-rune { stroke: #9ca3af; }
+    .bt-icon.status-off .bt-slash { stroke: #9ca3af; }
+    .bt-icon.status-active { border-color: rgba(59,130,246,.48); background: rgba(59,130,246,.16); box-shadow: 0 0 0 3px rgba(59,130,246,.10); }
+    .bt-icon.status-active .bt-rune { stroke: #93c5fd; }
+    .bt-icon.status-active .bt-slash { stroke: transparent; }
+    .bt-icon.status-connected { border-color: rgba(34,197,94,.46); background: rgba(34,197,94,.14); box-shadow: 0 0 0 3px rgba(34,197,94,.10); }
+    .bt-icon.status-connected .bt-rune { stroke: #86efac; }
+    .bt-icon.status-connected .bt-slash { stroke: transparent; }
     .muted-inline { color: var(--muted); font-size: .86rem; }
     .weight-footer { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
     .weight-info { min-width: 0; }
@@ -1580,8 +1606,16 @@ function renderBleStatus(s) {
   if (enabled) parts.push(ble.mode || 'BLE');
   if (connected && hz > 0) parts.push(`${hz.toFixed(1)} Hz`);
   if (s.system?.ble_remote_control_allowed) parts.push('Remote aktiv');
-  else if (enabled) parts.push('Remote nur auf Shot-Seite');
+  else if (enabled) parts.push('Maschinensteuerung gesperrt');
   if (ble.last_command && ble.last_command !== '---') parts.push(`Cmd: ${ble.last_command}`);
+  const iconState = !enabled ? 'status-off' : (connected ? 'status-connected' : 'status-active');
+  ['bleHeaderIcon', 'bleStatusIcon'].forEach((id) => {
+    const node = el(id);
+    if (!node) return;
+    node.classList.remove('status-off', 'status-active', 'status-connected');
+    node.classList.add(iconState);
+    node.title = `Bluetooth: ${status}`;
+  });
   setText('bleStatus', status);
   setText('bleDetails', parts.length ? parts.join(' · ') : '---');
 }
