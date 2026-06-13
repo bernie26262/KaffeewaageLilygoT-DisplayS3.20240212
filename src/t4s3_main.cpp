@@ -681,6 +681,7 @@ static void updateWebState(uint32_t now)
     g_webState.shot.elapsed_ms = shot.elapsed_ms;
     g_webState.shot.peak_weight_g = shot.peak_weight_g;
     g_webState.shot.final_weight_g = shot.final_weight_g;
+    g_webState.shot.current_flow_g_s = shot.current_flow_g_s;
     g_webState.shot.sample_count = shot.sample_count;
     g_webState.shot.sample_buffer_full = shot.sample_buffer_full;
 

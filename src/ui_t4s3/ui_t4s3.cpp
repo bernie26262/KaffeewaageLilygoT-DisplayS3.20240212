@@ -73,6 +73,7 @@ lv_obj_t *touchLabel = nullptr;
 lv_obj_t *simLabel = nullptr;
 lv_obj_t *timerLabel = nullptr;
 lv_obj_t *timerInfoLabel = nullptr;
+lv_obj_t *flowLabel = nullptr;
 lv_obj_t *timerButtonLabel = nullptr;
 lv_obj_t *targetLabel = nullptr;
 lv_obj_t *clockLabel = nullptr;
@@ -283,6 +284,7 @@ void reset_dynamic_labels()
     simLabel = nullptr;
     timerLabel = nullptr;
     timerInfoLabel = nullptr;
+    flowLabel = nullptr;
     timerButtonLabel = nullptr;
     targetLabel = nullptr;
     clockLabel = nullptr;
@@ -1661,6 +1663,15 @@ void update_timer_display()
     set_text(timerLabel, buf);
 
     const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+    if (flowLabel) {
+        const int32_t flowTenths = static_cast<int32_t>(shot.current_flow_g_s * 10.0f + 0.5f);
+        char flowBuf[24];
+        snprintf(flowBuf, sizeof(flowBuf), "%ld,%ld g/s",
+                 static_cast<long>(flowTenths / 10),
+                 static_cast<long>(flowTenths % 10));
+        set_text_if_changed(flowLabel, flowBuf);
+    }
+
     const char *info = "Remote aktiv - bereit";
     uint32_t color = COLOR_MUTED;
     if (shot.running || timerRunning) {
@@ -3455,7 +3466,7 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_set_style_text_align(weightLabel, LV_TEXT_ALIGN_CENTER, 0);
     style_label(weightLabel, COLOR_WHITE);
     lv_obj_set_style_text_font(weightLabel, &lv_font_montserrat_48, 0);
-    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -54);
+    lv_obj_align(weightLabel, LV_ALIGN_CENTER, 0, -68);
 
     timerLabel = lv_label_create(timerPanel);
     lv_label_set_text(timerLabel, "00:00:0");
@@ -3464,7 +3475,17 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_set_style_text_align(timerLabel, LV_TEXT_ALIGN_CENTER, 0);
     style_label(timerLabel, COLOR_GREEN);
     lv_obj_set_style_text_font(timerLabel, &lv_font_montserrat_32, 0);
-    lv_obj_align(timerLabel, LV_ALIGN_CENTER, 0, 22);
+    lv_obj_align(timerLabel, LV_ALIGN_CENTER, 0, -2);
+
+    flowLabel = lv_label_create(timerPanel);
+    lv_label_set_text(flowLabel, "0,0 g/s");
+    lv_obj_set_width(flowLabel, 330);
+    lv_label_set_long_mode(flowLabel, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(flowLabel, LV_TEXT_ALIGN_CENTER, 0);
+    style_label(flowLabel, COLOR_BLE_ACTIVE);
+    lv_obj_set_style_text_font(flowLabel, &lv_font_montserrat_24, 0);
+    lv_obj_align(flowLabel, LV_ALIGN_CENTER, 0, 52);
+
     update_timer_display();
 
     timerInfoLabel = lv_label_create(timerPanel);
@@ -3472,7 +3493,7 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_obj_set_width(timerInfoLabel, 330);
     lv_obj_set_style_text_align(timerInfoLabel, LV_TEXT_ALIGN_CENTER, 0);
     style_label(timerInfoLabel, COLOR_MUTED);
-    lv_obj_align(timerInfoLabel, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_align(timerInfoLabel, LV_ALIGN_BOTTOM_MID, 0, -6);
     update_timer_display();
 
     lv_obj_t *inputPanel = lv_obj_create(screen);

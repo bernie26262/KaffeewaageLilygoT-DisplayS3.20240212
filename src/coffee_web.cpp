@@ -72,7 +72,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=3f">
+  <link rel="stylesheet" href="/coffee.css?v=3g">
 </head>
 <body>
 <main>
@@ -149,6 +149,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     <div class="weight shot-weight"><span id="shotActual">--.-</span><span class="unit">g</span></div>
     <div class="label" style="margin-top: 10px;">Shot-Timer</div>
     <div class="value" id="stopwatch">00:00:00:0</div>
+    <div class="label" style="margin-top: 10px;">Flowrate</div>
+    <div class="value shot-flow"><span id="shotFlow">0.0</span><span class="shot-flow-unit"> g/s</span></div>
     <div class="button-row shot-controls">
       <button id="shotTare" class="compact secondary">Tara</button>
     </div>
@@ -371,9 +373,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3f"></script>
-<script src="/coffee_render.js?v=3f"></script>
-<script src="/coffee_events.js?v=3f"></script>
+<script src="/coffee_core.js?v=3g"></script>
+<script src="/coffee_render.js?v=3g"></script>
+<script src="/coffee_events.js?v=3g"></script>
 </body>
 </html>)rawliteral";
 
@@ -468,6 +470,8 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .mode-banner.shot { color: #dbeafe; border-color: rgba(59,130,246,.46); background: rgba(59,130,246,.14); }
     .shot-card { gap: 12px; }
     .shot-weight { font-size: clamp(3rem, 17vw, 5.6rem); line-height: .95; }
+    .shot-flow { color: #93c5fd; font-variant-numeric: tabular-nums; }
+    .shot-flow-unit { color: var(--muted-2); font-size: .9em; }
     .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .autodetect-row { display: inline-flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0; padding: 0; border-bottom: 0; white-space: nowrap; }
     .autodetect-toggle {
@@ -1622,6 +1626,7 @@ function renderBleStatus(s) {
 
 function renderShotSession(s) {
   const shot = s.shot || {};
+  setText('shotFlow', fmtG(shot.current_flow_g_s || 0));
   let text = 'Tara auslösen, um die automatische Zeitmessung vorzubereiten.';
   if (shot.running) {
     text = 'Shot läuft · Zeitmessung ab erkanntem Gewichtszuwachs';
@@ -2818,6 +2823,7 @@ static String buildStateJson(const AppState& s)
   doc["shot"]["elapsed_ms"] = s.shot.elapsed_ms;
   doc["shot"]["peak_weight_g"] = s.shot.peak_weight_g;
   doc["shot"]["final_weight_g"] = s.shot.final_weight_g;
+  doc["shot"]["current_flow_g_s"] = s.shot.current_flow_g_s;
   doc["shot"]["sample_count"] = s.shot.sample_count;
   doc["shot"]["sample_buffer_full"] = s.shot.sample_buffer_full;
 
