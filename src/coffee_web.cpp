@@ -11,6 +11,13 @@ static bool pwaAssetsAvailable = false;
 
 static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
+// Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
+// Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
+#define COFFEE_WEB_ASSET_VERSION "20260614b"
+
+static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
+  "no-cache, max-age=0, must-revalidate";
+
 void coffeeWebSetPwaAssetsAvailable(bool available)
 {
   pwaAssetsAvailable = available;
@@ -60,7 +67,8 @@ static void sendPwaAsset(AsyncWebServerRequest* request, const char* path, const
 // immer zusammenpassen. Falls HTML/CSS/JS spaeter nach LittleFS wandern, sollte
 // die fachliche Logik trotzdem weiterhin im Core/AppState bleiben.
 
-static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
+static const char INDEX_HTML[] PROGMEM =
+R"rawliteral(<!doctype html>
 <html lang="de">
 <head>
   <meta charset="utf-8">
@@ -73,7 +81,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=3h">
+  <link rel="stylesheet" href="/coffee.css?v=)rawliteral"
+COFFEE_WEB_ASSET_VERSION
+R"rawliteral(">
 </head>
 <body>
 <main>
@@ -388,9 +398,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3h"></script>
-<script src="/coffee_render.js?v=3h"></script>
-<script src="/coffee_events.js?v=3h"></script>
+<script src="/coffee_core.js?v=)rawliteral"
+COFFEE_WEB_ASSET_VERSION
+R"rawliteral("></script>
+<script src="/coffee_render.js?v=)rawliteral"
+COFFEE_WEB_ASSET_VERSION
+R"rawliteral("></script>
+<script src="/coffee_events.js?v=)rawliteral"
+COFFEE_WEB_ASSET_VERSION
+R"rawliteral("></script>
 </body>
 </html>)rawliteral";
 
@@ -945,12 +961,28 @@ function addLog(msg) {
   el('log').textContent = `${now}  ${msg}`;
 }
 
-function showTab(targetPageId) {
-  if (targetPageId === 'scalePage') {
-    sendCommand('mode_single_dose', 'Modus Single Dose gesendet …');
-  } else if (targetPageId === 'timerPage') {
-    sendCommand('mode_shot', 'Modus Shot-Waage gesendet …');
-  }
+const PAGE_COMMANDS = {
+  scalePage: 'page_scale',
+  timerPage: 'page_shot',
+  statsPage: 'page_data',
+  settingsPage: 'page_settings'
+};
+
+const SETTINGS_PAGE_COMMANDS = {
+  settingsMaintenancePanel: 'page_settings_maintenance',
+  settingsScalePanel: 'page_settings_scale',
+  settingsWifiPanel: 'page_settings_wifi',
+  settingsSystemPanel: 'page_settings_system'
+};
+
+let activeMainTab = 'scalePage';
+let activeSettingsPanel = 'settingsMaintenancePanel';
+
+function applyTab(targetPageId, scrollToTop = true) {
+  if (!PAGE_COMMANDS[targetPageId]) return;
+  const changed = activeMainTab !== targetPageId;
+  activeMainTab = targetPageId;
+
   ['scalePage', 'timerPage', 'statsPage', 'settingsPage'].forEach(pageId => {
     el(pageId).classList.toggle('hidden', pageId !== targetPageId);
   });
@@ -960,12 +992,21 @@ function showTab(targetPageId) {
     button.setAttribute('aria-current', active ? 'page' : 'false');
   });
 
-  // Beim Seitenwechsel immer oben starten.
-  // Sonst bleibt die Scrollposition der vorherigen Seite erhalten.
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  if (changed && scrollToTop) {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }
 }
 
-function showSettingsTab(targetPanelId) {
+function showTab(targetPageId) {
+  const cmd = PAGE_COMMANDS[targetPageId];
+  if (!cmd) return;
+  applyTab(targetPageId);
+  sendCommand(cmd, `Seite ${targetPageId} gesendet …`);
+}
+
+function applySettingsTab(targetPanelId) {
+  if (!SETTINGS_PAGE_COMMANDS[targetPanelId]) return;
+  activeSettingsPanel = targetPanelId;
   ['settingsMaintenancePanel', 'settingsScalePanel', 'settingsWifiPanel', 'settingsSystemPanel'].forEach(panelId => {
     el(panelId).classList.toggle('hidden', panelId !== targetPanelId);
   });
@@ -974,6 +1015,25 @@ function showSettingsTab(targetPanelId) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-current', active ? 'page' : 'false');
   });
+}
+
+function showSettingsTab(targetPanelId) {
+  const cmd = SETTINGS_PAGE_COMMANDS[targetPanelId];
+  if (!cmd) return;
+  applySettingsTab(targetPanelId);
+  sendCommand(cmd, `Einstellungsseite ${targetPanelId} gesendet …`);
+}
+
+function syncNavigationFromState(s) {
+  const targetPage = PAGE_COMMANDS[s.system?.ui_page] ? s.system.ui_page : 'scalePage';
+  applyTab(targetPage);
+
+  if (targetPage === 'settingsPage') {
+    const targetPanel = SETTINGS_PAGE_COMMANDS[s.system?.ui_settings_panel]
+      ? s.system.ui_settings_panel
+      : 'settingsMaintenancePanel';
+    applySettingsTab(targetPanel);
+  }
 }
 
 function goToMaintenanceSettings() {
@@ -2006,6 +2066,7 @@ function scheduleRenderState(s) {
 function render(s) {
   lastState = s;
   syncMaintenanceTimers(s.maintenance);
+  syncNavigationFromState(s);
 
   renderWeightAndSelection(s);
   renderAutodetect(s);
@@ -2798,23 +2859,19 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/coffee.css", HTTP_GET, [](AsyncWebServerRequest* request) {
-    // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemResponse(request, COFFEE_CSS, "text/css", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_CSS, "text/css", COFFEE_WEB_ASSET_CACHE_CONTROL);
   });
 
   server.on("/coffee_core.js", HTTP_GET, [](AsyncWebServerRequest* request) {
-    // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemResponse(request, COFFEE_CORE_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_CORE_JS, "application/javascript", COFFEE_WEB_ASSET_CACHE_CONTROL);
   });
 
   server.on("/coffee_render.js", HTTP_GET, [](AsyncWebServerRequest* request) {
-    // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemResponse(request, COFFEE_RENDER_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_RENDER_JS, "application/javascript", COFFEE_WEB_ASSET_CACHE_CONTROL);
   });
 
   server.on("/coffee_events.js", HTTP_GET, [](AsyncWebServerRequest* request) {
-    // Versionierung erfolgt per Query-String im HTML-Link.
-    sendProgmemResponse(request, COFFEE_EVENTS_JS, "application/javascript", "public, max-age=31536000, immutable");
+    sendProgmemResponse(request, COFFEE_EVENTS_JS, "application/javascript", COFFEE_WEB_ASSET_CACHE_CONTROL);
   });
 
   server.on("/api/shot/samples", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -3079,7 +3136,7 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/manifest.json", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send_P(200, "application/manifest+json", PWA_MANIFEST_JSON);
+    sendProgmemResponse(request, PWA_MANIFEST_JSON, "application/manifest+json", COFFEE_WEB_ASSET_CACHE_CONTROL);
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -3215,6 +3272,8 @@ static String buildStateJson(const AppState& s)
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
   doc["system"]["scale_mode"] = s.system.scale_mode;
   doc["system"]["scale_mode_label"] = s.system.scale_mode_label;
+  doc["system"]["ui_page"] = s.system.ui_page;
+  doc["system"]["ui_settings_panel"] = s.system.ui_settings_panel;
   doc["system"]["shot_mode"] = s.system.shot_mode;
   doc["system"]["ble_remote_control_allowed"] = s.system.ble_remote_control_allowed;
   doc["system"]["single_dose_automation_allowed"] = s.system.single_dose_automation_allowed;

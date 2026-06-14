@@ -27,3 +27,5 @@ bool ui_t4s3_ble_remote_control_allowed();
 bool ui_t4s3_single_dose_automation_allowed();
 const char *ui_t4s3_scale_mode_key();
 const char *ui_t4s3_scale_mode_label();
+const char *ui_t4s3_web_page_key();
+const char *ui_t4s3_web_settings_panel_key();

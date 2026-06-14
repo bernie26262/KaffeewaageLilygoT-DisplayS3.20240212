@@ -749,6 +749,8 @@ static void updateWebState(uint32_t now)
     g_webState.system.autodetect_paused = !ui_t4s3_single_dose_automation_allowed();
     strlcpy(g_webState.system.scale_mode, ui_t4s3_scale_mode_key(), sizeof(g_webState.system.scale_mode));
     strlcpy(g_webState.system.scale_mode_label, ui_t4s3_scale_mode_label(), sizeof(g_webState.system.scale_mode_label));
+    strlcpy(g_webState.system.ui_page, ui_t4s3_web_page_key(), sizeof(g_webState.system.ui_page));
+    strlcpy(g_webState.system.ui_settings_panel, ui_t4s3_web_settings_panel_key(), sizeof(g_webState.system.ui_settings_panel));
     g_webState.system.shot_mode = ui_t4s3_is_shot_scale_mode();
     g_webState.system.ble_remote_control_allowed = ui_t4s3_ble_remote_control_allowed();
     g_webState.system.single_dose_automation_allowed = ui_t4s3_single_dose_automation_allowed();

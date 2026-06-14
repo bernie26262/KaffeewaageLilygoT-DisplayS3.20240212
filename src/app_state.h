@@ -101,6 +101,8 @@ struct SystemState {
   bool autodetect_paused = false;
   char scale_mode[20] = "single_dose";
   char scale_mode_label[24] = "Single Dose";
+  char ui_page[20] = "scalePage";
+  char ui_settings_panel[32] = "settingsMaintenancePanel";
   bool shot_mode = false;
   bool ble_remote_control_allowed = false;
   bool single_dose_automation_allowed = true;

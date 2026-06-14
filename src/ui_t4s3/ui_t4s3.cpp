@@ -4786,14 +4786,40 @@ bool ui_t4s3_handle_web_command(const char *cmd)
     if (strcmp(cmd, "autodetect_off") == 0) {
         return ui_t4s3_web_set_autodetect(false);
     }
-    if (strcmp(cmd, "mode_single_dose") == 0) {
+    if (strcmp(cmd, "mode_single_dose") == 0 || strcmp(cmd, "page_scale") == 0) {
         navigate_to(Page::Waage);
         update_status("Modus: Single-Dose-Waage");
         return true;
     }
-    if (strcmp(cmd, "mode_shot") == 0) {
+    if (strcmp(cmd, "mode_shot") == 0 || strcmp(cmd, "page_shot") == 0) {
         navigate_to(Page::Stoppuhr);
         update_status("Modus: Shot-Waage - Remote aktiv");
+        return true;
+    }
+    if (strcmp(cmd, "page_data") == 0) {
+        navigate_to(Page::Daten);
+        update_status("Daten bereit");
+        return true;
+    }
+    if (strcmp(cmd, "page_settings") == 0) {
+        navigate_to(Page::Settings);
+        update_status("Settings bereit");
+        return true;
+    }
+    if (strcmp(cmd, "page_settings_maintenance") == 0) {
+        navigate_to(Page::SettingsWartung);
+        return true;
+    }
+    if (strcmp(cmd, "page_settings_scale") == 0) {
+        navigate_to(Page::SettingsWaage);
+        return true;
+    }
+    if (strcmp(cmd, "page_settings_wifi") == 0) {
+        navigate_to(Page::SettingsWlan);
+        return true;
+    }
+    if (strcmp(cmd, "page_settings_system") == 0) {
+        navigate_to(Page::SettingsSystem);
         return true;
     }
     if (strcmp(cmd, "stopwatch_start_stop") == 0) {
@@ -4940,6 +4966,45 @@ const char *ui_t4s3_scale_mode_key()
 const char *ui_t4s3_scale_mode_label()
 {
     return ui_t4s3_is_shot_scale_mode() ? "Shot-Waage" : "Single Dose";
+}
+
+const char *ui_t4s3_web_page_key()
+{
+    switch (activePage) {
+        case Page::Stoppuhr:
+            return "timerPage";
+        case Page::Daten:
+        case Page::DatenMahldaten:
+        case Page::DatenSystem:
+            return "statsPage";
+        case Page::Settings:
+        case Page::SettingsWartung:
+        case Page::SettingsWaage:
+        case Page::SettingsTotals:
+        case Page::SettingsWlan:
+        case Page::SettingsSystem:
+            return "settingsPage";
+        case Page::Waage:
+        default:
+            return "scalePage";
+    }
+}
+
+const char *ui_t4s3_web_settings_panel_key()
+{
+    switch (activePage) {
+        case Page::SettingsWaage:
+        case Page::SettingsTotals:
+            return "settingsScalePanel";
+        case Page::SettingsWlan:
+            return "settingsWifiPanel";
+        case Page::SettingsSystem:
+            return "settingsSystemPanel";
+        case Page::Settings:
+        case Page::SettingsWartung:
+        default:
+            return "settingsMaintenancePanel";
+    }
 }
 
 void ui_t4s3_create(uint16_t width, uint16_t height)
