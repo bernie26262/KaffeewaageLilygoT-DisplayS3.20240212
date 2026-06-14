@@ -25,6 +25,7 @@ struct CoffeeShotSample {
 };
 
 struct CoffeeShotSessionStatus {
+    uint32_t session_id = 0;
     CoffeeShotSessionState state = CoffeeShotSessionState::Idle;
     bool armed = false;
     bool running = false;

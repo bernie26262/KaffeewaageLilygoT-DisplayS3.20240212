@@ -20,6 +20,7 @@ struct StopwatchState {
 };
 
 struct ShotSessionState {
+  uint32_t session_id = 0;
   char state[16] = "idle";
   bool armed = false;
   bool running = false;

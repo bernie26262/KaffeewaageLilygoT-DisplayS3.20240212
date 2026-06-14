@@ -674,6 +674,7 @@ static void updateWebState(uint32_t now)
     g_webState.stopwatch.running = ui_t4s3_web_stopwatch_running();
 
     const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(now);
+    g_webState.shot.session_id = shot.session_id;
     strlcpy(g_webState.shot.state, coffeeShotSessionStateName(shot.state), sizeof(g_webState.shot.state));
     g_webState.shot.armed = shot.armed;
     g_webState.shot.running = shot.running;

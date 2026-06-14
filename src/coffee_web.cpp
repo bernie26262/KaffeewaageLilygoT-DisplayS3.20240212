@@ -3,6 +3,7 @@
 #include <SPIFFS.h>
 
 #include "coffee_wifi.h"
+#include "shot_session.h"
 
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
@@ -72,7 +73,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=3g">
+  <link rel="stylesheet" href="/coffee.css?v=3h">
 </head>
 <body>
 <main>
@@ -156,6 +157,20 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </div>
     <div id="shotSessionStatus" class="small shot-remote-hint" style="margin-top: 12px;">
       Tara auslösen, um die automatische Zeitmessung vorzubereiten.
+    </div>
+    <div id="shotChartWrap" class="shot-chart">
+      <div class="shot-chart-head">
+        <span>Shot-Verlauf</span>
+        <span class="shot-chart-legend" aria-hidden="true">
+          <span class="legend-weight">Gewicht</span>
+          <span class="legend-flow">Flow</span>
+        </span>
+      </div>
+      <div class="shot-chart-canvas-wrap">
+        <canvas id="shotChartCanvas" aria-label="Verlauf von Gewicht und Flowrate während des letzten Shots"></canvas>
+        <div id="shotChartEmpty" class="shot-chart-empty">Noch kein Shot-Verlauf im RAM.</div>
+      </div>
+      <div class="small shot-chart-note">Zeitmessung ab dem ersten erkannten Gewichtszuwachs.</div>
     </div>
   </section>
   </div>
@@ -373,9 +388,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3g"></script>
-<script src="/coffee_render.js?v=3g"></script>
-<script src="/coffee_events.js?v=3g"></script>
+<script src="/coffee_core.js?v=3h"></script>
+<script src="/coffee_render.js?v=3h"></script>
+<script src="/coffee_events.js?v=3h"></script>
 </body>
 </html>)rawliteral";
 
@@ -472,6 +487,31 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .shot-weight { font-size: clamp(3rem, 17vw, 5.6rem); line-height: .95; }
     .shot-flow { color: #93c5fd; font-variant-numeric: tabular-nums; }
     .shot-flow-unit { color: var(--muted-2); font-size: .9em; }
+    .shot-chart {
+      margin-top: 6px; padding: 12px; border: 1px solid rgba(148,163,184,.20);
+      border-radius: 16px; background: rgba(6,16,24,.52); min-width: 0;
+    }
+    .shot-chart-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      margin-bottom: 8px; color: var(--text); font-weight: 750;
+    }
+    .shot-chart-legend { display: inline-flex; gap: 14px; color: var(--muted-2); font-size: .82rem; font-weight: 650; }
+    .shot-chart-legend span::before { content: ""; display: inline-block; width: 16px; height: 3px; margin-right: 6px; border-radius: 3px; vertical-align: middle; }
+    .shot-chart-legend .legend-weight::before { background: #86efac; }
+    .shot-chart-legend .legend-flow::before { background: #93c5fd; }
+    .shot-chart-canvas-wrap { position: relative; width: 100%; height: 250px; min-height: 190px; }
+    #shotChartCanvas { display: block; width: 100%; height: 100%; }
+    .shot-chart-empty {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 18px; color: var(--muted); text-align: center; pointer-events: none;
+    }
+    .shot-chart-empty.hidden { display: none; }
+    .shot-chart-note { margin-top: 6px; color: var(--muted); text-align: center; }
+    @media (max-width: 560px) {
+      .shot-chart { padding: 10px 8px; }
+      .shot-chart-head { align-items: flex-start; flex-direction: column; gap: 5px; padding: 0 4px; }
+      .shot-chart-canvas-wrap { height: 220px; }
+    }
     .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .autodetect-row { display: inline-flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0; padding: 0; border-bottom: 0; white-space: nowrap; }
     .autodetect-toggle {
@@ -794,6 +834,12 @@ let targetWeightDirty = false;
 let pendingConfirm = null;
 let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
+let shotChartSamples = [];
+let shotChartSessionId = 0;
+let shotChartTargetCount = 0;
+let shotChartFetchInFlight = false;
+let shotChartFetchGeneration = 0;
+let shotChartResizeObserver = null;
 const el = id => document.getElementById(id);
 const setText = (id, value) => {
   const node = el(id);
@@ -1624,9 +1670,200 @@ function renderBleStatus(s) {
   setText('bleDetails', parts.length ? parts.join(' · ') : '---');
 }
 
+function clearShotChartSamples(sessionId = 0) {
+  shotChartSamples = [];
+  shotChartSessionId = Number(sessionId) || 0;
+  shotChartTargetCount = 0;
+  shotChartFetchGeneration++;
+  drawShotChart();
+}
+
+async function fetchShotChartBatch() {
+  if (shotChartFetchInFlight || shotChartSamples.length >= shotChartTargetCount || !shotChartSessionId) return;
+
+  const from = shotChartSamples.length;
+  const requestedSessionId = shotChartSessionId;
+  const generation = shotChartFetchGeneration;
+  shotChartFetchInFlight = true;
+
+  try {
+    const response = await fetch(`/api/shot/samples?from=${from}&limit=120`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+
+    if (generation !== shotChartFetchGeneration || Number(data.session_id || 0) !== requestedSessionId) return;
+    if (Number(data.from || 0) !== from) {
+      clearShotChartSamples(requestedSessionId);
+      shotChartTargetCount = Number(data.total || 0);
+      return;
+    }
+
+    const rows = Array.isArray(data.samples) ? data.samples : [];
+    rows.forEach(row => {
+      if (!Array.isArray(row) || row.length < 3) return;
+      const timeMs = Number(row[0]);
+      const weightG = Number(row[1]);
+      const flowGPerS = Number(row[2]);
+      if (!Number.isFinite(timeMs) || !Number.isFinite(weightG) || !Number.isFinite(flowGPerS)) return;
+      shotChartSamples.push({ timeMs, weightG, flowGPerS });
+    });
+
+    shotChartTargetCount = Math.max(shotChartTargetCount, Number(data.total || 0));
+    drawShotChart();
+  } catch (error) {
+    const empty = el('shotChartEmpty');
+    if (empty && shotChartSamples.length === 0) {
+      empty.textContent = 'Shot-Verlauf konnte nicht geladen werden.';
+      empty.classList.remove('hidden');
+    }
+  } finally {
+    shotChartFetchInFlight = false;
+    if (shotChartSamples.length < shotChartTargetCount) {
+      setTimeout(fetchShotChartBatch, 0);
+    }
+  }
+}
+
+function syncShotChart(shot) {
+  const sessionId = Number(shot?.session_id || 0);
+  const targetCount = Math.max(0, Number(shot?.sample_count || 0));
+
+  if (sessionId !== shotChartSessionId) {
+    clearShotChartSamples(sessionId);
+  } else if (targetCount < shotChartSamples.length) {
+    // Auto-Stop may trim the three-second confirmation tail.
+    clearShotChartSamples(sessionId);
+  }
+
+  shotChartTargetCount = targetCount;
+  if (!sessionId || targetCount === 0) {
+    drawShotChart();
+    return;
+  }
+  fetchShotChartBatch();
+}
+
+function drawShotChart() {
+  const canvas = el('shotChartCanvas');
+  const empty = el('shotChartEmpty');
+  if (!canvas || !empty) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(280, Math.round(rect.width || 0));
+  const height = Math.max(180, Math.round(rect.height || 0));
+  const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  const pixelWidth = Math.round(width * dpr);
+  const pixelHeight = Math.round(height * dpr);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  if (shotChartSamples.length === 0) {
+    empty.textContent = 'Noch kein Shot-Verlauf im RAM.';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  const pad = { left: 48, right: 46, top: 14, bottom: 32 };
+  const plotW = Math.max(1, width - pad.left - pad.right);
+  const plotH = Math.max(1, height - pad.top - pad.bottom);
+  const lastTimeS = shotChartSamples[shotChartSamples.length - 1].timeMs / 1000;
+  const maxTimeS = Math.max(10, lastTimeS);
+  const maxWeight = Math.max(5, ...shotChartSamples.map(point => point.weightG));
+  const weightScaleMax = Math.max(5, Math.ceil(maxWeight / 5) * 5);
+  const maxFlow = Math.max(0, ...shotChartSamples.map(point => point.flowGPerS));
+  const flowScaleMax = Math.max(1, Math.ceil(maxFlow * 2) / 2);
+
+  const xFor = point => pad.left + (point.timeMs / 1000 / maxTimeS) * plotW;
+  const weightYFor = point => pad.top + plotH - (Math.max(0, point.weightG) / weightScaleMax) * plotH;
+  const flowYFor = point => pad.top + plotH - (Math.max(0, point.flowGPerS) / flowScaleMax) * plotH;
+
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.lineWidth = 1;
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i <= 4; i++) {
+    const ratio = i / 4;
+    const y = pad.top + plotH - ratio * plotH;
+    ctx.strokeStyle = 'rgba(148,163,184,.16)';
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(width - pad.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = '#86efac';
+    ctx.textAlign = 'right';
+    ctx.fillText((weightScaleMax * ratio).toFixed(0), pad.left - 7, y);
+    ctx.fillStyle = '#93c5fd';
+    ctx.textAlign = 'left';
+    ctx.fillText((flowScaleMax * ratio).toFixed(1), width - pad.right + 7, y);
+  }
+
+  for (let i = 0; i <= 5; i++) {
+    const ratio = i / 5;
+    const x = pad.left + ratio * plotW;
+    ctx.strokeStyle = 'rgba(148,163,184,.10)';
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, pad.top + plotH);
+    ctx.stroke();
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = i === 0 ? 'left' : (i === 5 ? 'right' : 'center');
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${(maxTimeS * ratio).toFixed(0)} s`, x, pad.top + plotH + 8);
+  }
+
+  const drawSeries = (yFor, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    shotChartSamples.forEach((point, index) => {
+      const x = xFor(point);
+      const y = yFor(point);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  };
+
+  drawSeries(weightYFor, '#86efac');
+  drawSeries(flowYFor, '#93c5fd');
+
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#86efac';
+  ctx.textAlign = 'left';
+  ctx.fillText('g', 4, 2);
+  ctx.fillStyle = '#93c5fd';
+  ctx.textAlign = 'right';
+  ctx.fillText('g/s', width - 4, 2);
+}
+
+function initShotChart() {
+  const wrap = el('shotChartWrap');
+  if (!wrap) return;
+  if ('ResizeObserver' in window) {
+    shotChartResizeObserver = new ResizeObserver(() => drawShotChart());
+    shotChartResizeObserver.observe(wrap);
+  } else {
+    window.addEventListener('resize', drawShotChart);
+  }
+  drawShotChart();
+}
+
 function renderShotSession(s) {
   const shot = s.shot || {};
   setText('shotFlow', fmtG(shot.current_flow_g_s || 0));
+  syncShotChart(shot);
   let text = 'Tara auslösen, um die automatische Zeitmessung vorzubereiten.';
   if (shot.running) {
     text = 'Shot läuft · Zeitmessung ab erkanntem Gewichtszuwachs';
@@ -2270,6 +2507,7 @@ function initWebUi() {
   bindSettingsHandlers();
   bindOverlayHandlers();
   startClientTimers();
+  initShotChart();
   setTimeout(connect, 750);
 }
 
@@ -2579,6 +2817,80 @@ void coffeeWebBegin(AsyncWebServer& server)
     sendProgmemResponse(request, COFFEE_EVENTS_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
+  server.on("/api/shot/samples", HTTP_GET, [](AsyncWebServerRequest* request) {
+    constexpr size_t kMaxShotBatch = 120;
+    size_t from = 0;
+    size_t limit = kMaxShotBatch;
+
+    if (request->hasParam("from")) {
+      const long value = request->getParam("from")->value().toInt();
+      if (value > 0) from = static_cast<size_t>(value);
+    }
+    if (request->hasParam("limit")) {
+      const long value = request->getParam("limit")->value().toInt();
+      if (value > 0) limit = static_cast<size_t>(value);
+    }
+    if (limit > kMaxShotBatch) limit = kMaxShotBatch;
+
+    CoffeeShotSessionStatus before = coffeeShotSessionStatus(millis());
+    size_t total = coffeeShotSessionSampleCount();
+    if (from > total) from = total;
+    const size_t available = total - from;
+    const size_t requestedCount = available < limit ? available : limit;
+
+    CoffeeShotSample samples[kMaxShotBatch];
+    size_t count = 0;
+    for (; count < requestedCount; ++count) {
+      if (!coffeeShotSessionGetSample(from + count, samples[count])) break;
+    }
+
+    const CoffeeShotSessionStatus after = coffeeShotSessionStatus(millis());
+    if (after.session_id != before.session_id) {
+      before = after;
+      from = 0;
+      total = after.sample_count;
+      count = 0;
+    } else {
+      // Auto-Stop can trim the confirmation tail while this request is built.
+      total = after.sample_count;
+      if (from > total) {
+        from = total;
+        count = 0;
+      } else if (from + count > total) {
+        count = total - from;
+      }
+    }
+
+    String out;
+    out.reserve(160 + count * 34);
+    out += F("{\"session_id\":");
+    out += String(before.session_id);
+    out += F(",\"from\":");
+    out += String(from);
+    out += F(",\"count\":");
+    out += String(count);
+    out += F(",\"total\":");
+    out += String(total);
+    out += F(",\"state\":\"");
+    out += coffeeShotSessionStateName(before.state);
+    out += F("\",\"samples\":[");
+    for (size_t i = 0; i < count; ++i) {
+      if (i > 0) out += ',';
+      out += '[';
+      out += String(samples[i].time_ms);
+      out += ',';
+      out += String(samples[i].weight_g, 2);
+      out += ',';
+      out += String(samples[i].flow_g_s, 2);
+      out += ']';
+    }
+    out += F("]}");
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", out);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+
   server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {
     const bool ok = coffeeWifiStartSetupAp();
     StaticJsonDocument<192> doc;
@@ -2816,6 +3128,7 @@ static String buildStateJson(const AppState& s)
   doc["stopwatch"]["ms"] = s.stopwatch.ms;
   doc["stopwatch"]["running"] = s.stopwatch.running;
 
+  doc["shot"]["session_id"] = s.shot.session_id;
   doc["shot"]["state"] = s.shot.state;
   doc["shot"]["armed"] = s.shot.armed;
   doc["shot"]["running"] = s.shot.running;

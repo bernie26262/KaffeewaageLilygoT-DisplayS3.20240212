@@ -18,14 +18,20 @@ constexpr float kMinimumShotWeightG = 4.0f;
 constexpr float kSignificantGrowthG = 0.20f;
 constexpr uint32_t kStopNoGrowthMs = 3000UL;
 constexpr uint32_t kSampleIntervalMs = 100UL;
-constexpr uint32_t kFlowWindowMs = 1000UL;
-constexpr uint32_t kFlowMinimumSpanMs = 500UL;
-constexpr size_t kFlowMinimumSamples = 4;
+// Flow is a derivative of the weight curve and therefore amplifies even small
+// measurement noise.  Use a longer regression window plus a gentle EMA so the
+// displayed value follows the extraction trend instead of individual HX711
+// fluctuations.  This affects only the displayed/stored flow value; weight
+// notifications to the machine remain unchanged.
+constexpr uint32_t kFlowWindowMs = 2500UL;
+constexpr uint32_t kFlowMinimumSpanMs = 1200UL;
+constexpr size_t kFlowMinimumSamples = 10;
 constexpr float kFlowDeadbandGPerS = 0.05f;
 constexpr float kFlowMaximumGPerS = 20.0f;
-constexpr float kFlowFilterAlpha = 0.35f;
+constexpr float kFlowFilterAlpha = 0.15f;
 
 CoffeeShotSessionStatus g_status;
+uint32_t g_session_id = 0;
 uint32_t g_armed_at_ms = 0;
 float g_arm_weight_g = 0.0f;
 bool g_start_candidate = false;
@@ -39,6 +45,15 @@ uint32_t g_last_sample_ms = 0;
 bool g_sample_buffer_full = false;
 float g_current_flow_g_s = 0.0f;
 bool g_flow_initialized = false;
+
+uint32_t nextSessionId()
+{
+    ++g_session_id;
+    if (g_session_id == 0) {
+        ++g_session_id;
+    }
+    return g_session_id;
+}
 
 float finiteWeight(float value)
 {
@@ -148,12 +163,16 @@ void recordSample(uint32_t now_ms, float weight_g, bool force)
         return;
     }
 
-    CoffeeShotSample &sample = g_samples[g_sample_count++];
+    const size_t sampleIndex = g_sample_count;
+    CoffeeShotSample &sample = g_samples[sampleIndex];
     sample.time_ms = elapsedMs;
     sample.weight_g = weight;
     sample.flow_g_s = 0.0f;
     g_last_sample_ms = now_ms;
 
+    // Publish the new count only after the time/weight fields are complete.
+    // The WebUI sample endpoint may read the RAM buffer from another task.
+    g_sample_count = sampleIndex + 1;
     updateCurrentFlow();
     sample.flow_g_s = g_current_flow_g_s;
 }
@@ -172,6 +191,7 @@ void trimSamplesAfter(uint32_t stopped_at_ms)
 CoffeeShotSessionEvent startSession(uint32_t now_ms, float weight_g)
 {
     const float weight = finiteWeight(weight_g);
+    g_status.session_id = nextSessionId();
     g_status.state = CoffeeShotSessionState::Running;
     g_status.armed = false;
     g_status.running = true;
@@ -329,7 +349,9 @@ CoffeeShotSessionEvent coffeeShotSessionExternalStop(uint32_t now_ms, float weig
 
 void coffeeShotSessionReset()
 {
+    const uint32_t clearedSessionId = nextSessionId();
     g_status = CoffeeShotSessionStatus{};
+    g_status.session_id = clearedSessionId;
     g_armed_at_ms = 0;
     g_arm_weight_g = 0.0f;
     g_start_candidate = false;
