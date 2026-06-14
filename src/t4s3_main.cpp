@@ -54,7 +54,7 @@ static constexpr uint32_t kWebSettingsRefreshMs = 5000UL;
 static constexpr uint32_t kWebMaintenanceRefreshMs = 10000UL;
 static constexpr uint32_t kWebBroadcastIntervalMs = 500UL;
 #ifndef BLE_SCALE_START_DELAY_MS
-#define BLE_SCALE_START_DELAY_MS 15000UL
+#define BLE_SCALE_START_DELAY_MS 5000UL
 #endif
 static constexpr uint32_t kBleStartDelayMs = BLE_SCALE_START_DELAY_MS;
 static bool g_bleStarted = false;
