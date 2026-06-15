@@ -38,7 +38,7 @@ Zentrale T4-S3-Hardware- und Ablaufsteuerung:
 LVGL-HMI für den T4-S3:
 
 - Waage
-- Stoppuhr
+- Shot-Waage mit Gewicht, Zeit und Flowrate
 - Daten
 - Wartung
 - WLAN / Netzwerk
@@ -68,6 +68,15 @@ T4-S3-nahe WLAN-Status- und Hilfslogik.
 
 Gemeinsamer Zustand für WebUI/JSON-Ausgabe. `t4s3_main.cpp` aktualisiert den AppState; `coffee_web.cpp` serialisiert ihn für WebSocket-Clients.
 
+Der AppState transportiert zusätzlich:
+
+- aktiven Waagenmodus (`single_dose` / `shot`)
+- aktive HMI-Hauptseite und Einstellungs-Unterseite
+- BLE-Status
+- Shot-Session-Status einschließlich Flowrate und Sampleanzahl
+
+Das lokale HMI ist Master für den Seitenzustand. Ein neu verbundener WebUI-Client übernimmt nach dem ersten WebSocket-State die aktuelle HMI-Seite, ohne beim Initialisieren einen konkurrierenden Seitenbefehl zurückzusenden.
+
 ### `src/coffee_web.cpp/.h`
 
 Gemeinsame WebUI- und WebSocket-Schicht für Legacy und T4-S3:
@@ -79,8 +88,40 @@ Gemeinsame WebUI- und WebSocket-Schicht für Legacy und T4-S3:
 - JSON-State-Erzeugung
 - PWA-Manifest-Handler
 - Icon-/Favicon-Routen
+- Shot-Sample-Endpunkt `/api/shot/samples`
+- zentrale Asset-Versionierung und Produktiv-Caching
+- Synchronisierung mehrerer WebUI-Clients mit dem HMI-Seitenzustand
 
 Das WebUI-Rendering ist browserseitig optimiert: WebSocket-State-Nachrichten werden per `requestAnimationFrame` gebündelt, und DOM-Werte werden nur bei Änderung geschrieben. Das verhindert nach Langlauf die Chrome-Meldungen `message handler took ... ms`.
+
+
+### `src/ble_scale.cpp/.h`
+
+WeighMyBru-kompatible BLE-Peripheral-Schicht:
+
+- Gerätename `WeighMyBru` für Gaggiuino-Erkennung
+- Nordic-UART-artiger Service `6E400001-...`
+- Gewichtspakete mit 5 Hz
+- Kommando-Characteristic für `TARE`, `START`, `STOP` und `RESET`
+- Advertising-Neustart nach Disconnect
+- BLE-Start fünf Sekunden nach Boot, damit Display, WLAN und BLE-Koexistenz stabil bleiben
+
+Im aktuell getesteten Gaggiuino-Client wird nur `TARE` gesendet. Die Unterstützung der übrigen Kommandos bleibt für andere Clients beziehungsweise spätere Firmwarestände erhalten.
+
+### `src/shot_session.cpp/.h`
+
+Zentrale, nicht persistente Shot-Session:
+
+- Zustände `Idle`, `Armed`, `Running`, `Completed`
+- Arming durch Tara im Shot-Modus
+- automatischer Start beim ersten bestätigten Flüssigkeitsgewicht
+- Armed-Timeout nach 45 Sekunden
+- automatischer Stop nach ausbleibendem relevantem Gewichtszuwachs
+- maximal 1.200 Samples bei 10 Hz, entsprechend 120 Sekunden
+- letzter Shot bleibt bis zum tatsächlichen Start des nächsten Shots im RAM
+- Flowrate über lineare Regression eines 2,5-Sekunden-Fensters plus EMA-Glättung
+
+Die Shot-Zeit beginnt bewusst beim ersten erkannten Tropfen und ist nicht identisch mit der Pumpenzeit inklusive Pre-Infusion.
 
 ### `src/coffee_ota.cpp/.h`
 
@@ -103,6 +144,28 @@ WLAN-Provisioning und gespeicherte WLAN-Daten:
 ### `src/coffee_storage.cpp/.h`
 
 Legacy-kompatible Storage-Schicht für klassische Werte und WebUI-Funktionen. Für T4-S3-spezifische HMI-Werte wird zusätzlich `t4s3_settings` verwendet.
+
+
+## Betriebsarten Single Dose und Shot
+
+Die Betriebsart wird zentral aus der aktiven HMI-Hauptseite abgeleitet. BLE bleibt in beiden Modi initialisiert und verbunden.
+
+### Single Dose
+
+- Autodetect, Gefäßerkennung, Auto-Tara und Save-ready aktiv
+- Maschinenkommandos über BLE werden nicht ausgeführt
+- schneller adaptiver Anzeigeweg für Bohnen und Gefäßwechsel
+
+### Shot-Waage
+
+- Autodetect und Single-Dose-Save-Logik vollständig deaktiviert
+- Tara lokal oder von der Maschine möglich
+- BLE-Maschinenkommandos freigegeben
+- eigener ruhiger Shot-Gewichtspfad
+- automatische Zeitmessung ab erstem Tropfen
+- Flowrate und RAM-Verlauf für HMI/WebUI
+
+Ein Seitenwechsel beendet die BLE-Verbindung nicht. Dadurch werden unnötige Reconnects vermieden.
 
 ## Waagenlogik und Autodetect
 

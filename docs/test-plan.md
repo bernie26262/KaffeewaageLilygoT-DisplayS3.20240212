@@ -215,3 +215,86 @@ Aktueller Umgang:
 - nur beobachten
 - nicht ohne Reproduktion umbauen
 - bei erneutem Auftreten Foto, Zeitpunkt und Bedienkontext notieren
+
+
+## BLE-/Gaggiuino-Basistest
+
+Monitor:
+
+```powershell
+pio device monitor -e lilygo-t4-s3-lvgl -b 115200 | Select-String "\[BLE\]|\[T4S3\]\[BLE\]|\[T4S3\]\[SHOT\]|Guru|abort|Brownout|Reboot"
+```
+
+Prüfen:
+
+1. BLE startet etwa fünf Sekunden nach Boot.
+2. Ohne Maschine: Status blau/`bereit`, Advertising aktiv.
+3. Mit Maschine: Status grün/verbunden.
+4. Disconnect startet Advertising erneut.
+5. Tara von Gaggiuino wird auf der Shot-Seite ausgeführt.
+6. Tara von Gaggiuino wird im Single-Dose-Modus ignoriert.
+7. WLAN, WebUI und HX711 bleiben während BLE-Betrieb stabil.
+
+Bekannte Einschränkung: Beim getesteten Gaggiuino-Client werden keine `START`, `STOP` oder `RESET`-Kommandos gesendet. Ein Aus-/Einschalten der Bluetooth-Scale-Funktion auf der Maschine kann auf Gaggiuino-Seite zu einem Neustart führen. Die Waage selbst zeigt dabei bisher keinen Guru, Abort oder Brownout.
+
+## Shot-Automatik und Flowrate
+
+### Tara ohne Shot
+
+1. Shot-Seite öffnen.
+2. Tara über HMI, WebUI oder Maschine auslösen.
+3. Status zeigt `wartet auf Bezug`.
+4. 45 Sekunden nichts auflegen/einlaufen lassen.
+5. Erwartung: Armed endet, Session geht in Bereitschaft zurück.
+6. Ein zuvor abgeschlossener Graph bleibt erhalten.
+
+### Realer Shot
+
+1. Tara auslösen.
+2. Bezug starten.
+3. Timer startet beim ersten bestätigten Flüssigkeitsgewicht.
+4. Gewicht, Zeit und Flowrate laufen auf HMI/WebUI.
+5. Nach Ende des relevanten Gewichtszuwachses stoppt die Session automatisch.
+6. Endzeit, Endgewicht und Graph bleiben sichtbar.
+7. Pre-Infusion vor dem ersten Tropfen ist bewusst nicht Teil dieser Zeit.
+
+### Zweiter Shot
+
+1. Nach abgeschlossenem Shot erneut Tara auslösen.
+2. Vorheriger Graph bleibt während Armed sichtbar.
+3. Erst beim echten Start des neuen Shots wird der alte Puffer überschrieben.
+
+### Plausibilität Flowrate
+
+- blaue Flowrate-Kurve soll den Trend zeigen und nicht jedem HX711-Zittern folgen
+- Einschwingzeit von etwa 1 bis 2 Sekunden ist durch das 2,5-Sekunden-Regressionsfenster normal
+- nach Stop wird der aktuelle Flow-Wert auf 0 gesetzt
+- Gewichtsdaten an Gaggiuino bleiben von der Flowrate-Glättung unabhängig
+
+## Shot-Graph / RAM-Reconnect
+
+1. Shot durchführen und Graph abwarten.
+2. Browser neu laden oder WebSocket kurz trennen.
+3. Erwartung: letzter Shot wird über `/api/shot/samples` wieder aus RAM geladen.
+4. Tara ohne folgenden Shot darf den Graph nicht löschen.
+5. ESP-Neustart darf den Graph bewusst löschen.
+
+## Mehrgeräte- und HMI-Seitensynchronisierung
+
+1. HMI auf Shot stellen.
+2. WebUI auf einem neuen Gerät öffnen.
+3. Erwartung: neue WebUI öffnet nach erstem State Shot.
+4. Desktop auf Daten wechseln.
+5. Erwartung: HMI und weiteres Mobilgerät wechseln ebenfalls auf Daten.
+6. Einstellungen-Unterseiten ebenfalls prüfen.
+7. OTA-Seite öffnen und über `Zurück zur WebUI` zurückkehren.
+8. Erwartung: aktuelle HMI-Seite wird wiederhergestellt.
+
+## Produktiv-Cache
+
+1. Nach einer Firmware mit neuer `COFFEE_WEB_ASSET_VERSION` WebUI einmal neu öffnen.
+2. Desktop und Mobilgerät prüfen.
+3. Danach Browser schließen und erneut öffnen.
+4. Erwartung: Assets laden schnell aus Cache, WebSocket verbindet normal.
+5. Bei späteren WebUI-Änderungen zentrale Asset-Version erhöhen.
+6. Browserdaten dürfen im Normalfall nicht manuell gelöscht werden müssen.

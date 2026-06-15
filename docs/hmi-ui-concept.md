@@ -19,7 +19,7 @@ Die WebUI soll deshalb nicht wie eine klassische Webseite aufgebaut sein, sonder
 Die Hauptnavigation besteht aus vier Bereichen:
 
 ```text
-Waage | Stoppuhr | Daten | Einstellungen
+Waage | Shot | Daten | Einstellungen
 ```
 
 Diese Bereiche sind in der WebUI aktuell Tabs innerhalb der Hauptseite `/`. Sie sind keine eigenen URLs.
@@ -28,7 +28,7 @@ Im T4-S3-HMI sind diese Bereiche als echte Screens umgesetzt:
 
 ```text
 ScaleScreen
-TimerScreen
+ShotScreen
 DataScreen
 SettingsScreen
 ```
@@ -56,17 +56,21 @@ Nicht auf die Hauptseite gehoeren:
 
 Diese Informationen liegen in Daten oder Einstellungen.
 
-## Stoppuhr
+## Shot-Waage
 
-Die Stoppuhr soll ebenfalls ohne Scrollen bedienbar sein.
+Die frühere Stoppuhr-Seite ist die maschinennahe Shot-Waage. Sie bleibt ohne Scrollen bedienbar.
 
 Inhalte:
 
-- grosse Zeitanzeige
-- Start/Stopp
-- Reset
+- großes aktuelles Gewicht
+- Extraktionszeit ab erstem Tropfen
+- aktuelle geglättete Flowrate in g/s
+- Tara-Button
+- Status `bereit`, `wartet auf Bezug`, `läuft` oder `abgeschlossen`
 
-Die Button-Optik soll dem restlichen HMI folgen: dunkle Buttons mit gruenem Rand. Vollton- oder Warnfarben bleiben Sonderaktionen vorbehalten.
+Start, Stop und Reset werden nicht als lokale Buttons angeboten. Gaggiuino sendet im getesteten WeighMyBru-Betrieb nur Tara. Die Waage startet daher automatisch beim ersten bestätigten Flüssigkeitsgewicht und stoppt nach ausbleibendem relevantem Gewichtszuwachs.
+
+Ein Tara aktiviert die Erkennung für maximal 45 Sekunden. Ohne beginnenden Shot kehrt die Session in den Bereitschaftszustand zurück. Der zuvor abgeschlossene Verlauf bleibt im RAM erhalten.
 
 ## Daten
 
@@ -139,7 +143,7 @@ Scrollen soll auf dem HMI moeglich, aber nicht die Standardbedienung sein.
 Empfohlene Regeln:
 
 - Waage: kein Scrollen
-- Stoppuhr: kein Scrollen
+- Shot-Waage: kein Scrollen
 - Daten: Scrollen erlaubt
 - Einstellungen: besser Unterseiten statt langer Scrollseite
 - Bottom-Navigation bleibt sichtbar
@@ -152,6 +156,16 @@ Wenn innerhalb eines Einstellungsbereichs gescrollt werden muss, soll nur der In
 ## Header und Status
 
 Der Header soll kompakt bleiben, damit auf kleinen Displays kein Platz verloren geht.
+
+Rechts stehen ausschließlich die kompakten Statussymbole für Bluetooth und WLAN. Datum/Uhrzeit stehen links davon und dürfen nicht überdeckt werden.
+
+Bluetooth-Farben:
+
+- grau/durchgestrichen: BLE aus oder nicht verfügbar
+- blau: BLE aktiv und advertised, aber kein Client verbunden
+- grün: Maschine verbunden
+
+Die Farbe zeigt nur den Verbindungsstatus. Ob Maschinensteuerung erlaubt ist, entscheidet der aktive Modus.
 
 Aktueller Zieltext:
 
@@ -186,3 +200,15 @@ Die WebUI bietet weiterhin Funktionen, die auf dem lokalen HMI nicht benoetigt w
 - gruene Akzentfarbe fuer normale Aktionen
 - rote Warnfarbe nur fuer destruktive oder gefaehrliche Aktionen
 - kleine, testbare UI-Schritte
+
+## HMI als Seiten-Master
+
+Das lokale HMI ist Master für die aktive Hauptseite und die aktive Einstellungs-Unterseite. WebUI-Clients übernehmen diesen Zustand nach dem Verbinden.
+
+Beispiele:
+
+- HMI steht auf Shot, neues Mobilgerät öffnet `/` → WebUI öffnet Shot.
+- Desktop wechselt auf Daten → HMI und weitere verbundene WebUI-Clients wechseln ebenfalls auf Daten.
+- Rückkehr von `/update` zur Hauptseite → nach WebSocket-Verbindung wird wieder die aktuelle HMI-Seite angezeigt.
+
+Damit kann kein Zustand mehr entstehen, bei dem die WebUI Single Dose zeigt, intern aber noch Shot aktiv ist.

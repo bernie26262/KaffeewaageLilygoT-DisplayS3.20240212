@@ -21,6 +21,12 @@ Der T4-S3-Stand kombiniert:
 - OTA-Seite für `firmware.bin` und `spiffs.bin` / `littlefs.bin`
 - PWA-/Homescreen-Integration
 - NVS/Preferences für UI-, Waagen-, Wartungs- und WLAN-Werte
+- WeighMyBru-kompatible BLE-Waage für Gaggiuino
+- getrennte Betriebsarten **Single Dose** und **Shot-Waage**
+- automatische Shot-Zeitmessung ab erstem Tropfen
+- geglättete Flowrate in g/s auf HMI und WebUI
+- WebUI-Shotgraph für Gewicht und Flowrate
+- letzter Shot ausschließlich im RAM, ohne doppelte dauerhafte Historie
 
 Wichtige zuletzt getestete Punkte:
 
@@ -31,6 +37,11 @@ Wichtige zuletzt getestete Punkte:
 - Negative Null wird in der HMI-Gewichtsanzeige unterdrückt: gerundete `-0,0 g` wird als `0,0 g` angezeigt.
 - Die adaptive HX711-Anzeige reagiert schnell bei großen Änderungen und bleibt im stabilen Zustand ruhig. Die Stable-Deadband der Anzeige liegt aktuell bei `0.08 g`, damit einzelne Bohnen ab etwas über `0.1 g` sichtbar werden.
 - WebUI-WebSocket-Rendering ist per `requestAnimationFrame` gebündelt und schreibt DOM-Werte nur bei Änderung. Dadurch traten nach Langzeittest keine Chrome-`message handler took ... ms`-Meldungen mehr auf.
+- BLE startet fünf Sekunden nach dem Boot. Die Verbindung bleibt unabhängig vom aktiven Modus bestehen; Maschinenkommandos werden nur auf der Shot-Seite ausgeführt.
+- Gaggiuino sendet im getesteten WeighMyBru-Betrieb zuverlässig `TARE`, jedoch keine Timerkommandos. Deshalb erkennt die Waage Shot-Start und -Ende anhand des ruhigen Shot-Gewichtspfads.
+- Der letzte Shot wird mit maximal 1.200 Samples bei 10 Hz im RAM gehalten. Ein neuer Shot überschreibt den alten erst beim tatsächlichen Start.
+- Das lokale HMI ist Master für die aktive Haupt- und Einstellungsseite. Neu verbundene WebUI-Geräte übernehmen diesen Zustand.
+- WebUI-Assets verwenden eine zentrale Versionskennung und werden im Produktivbetrieb langfristig mit `immutable` gecacht.
 
 ## Build
 
@@ -59,7 +70,7 @@ pio run -e KaffeewaageLilygoT-DisplayS3_20240212
 Für Repo-Analysen immer das Export-Tool verwenden:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .	ools\export_repo_zip.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\export_repo_zip.ps1
 ```
 
 Das erzeugte ZIP liegt automatisch im Downloads-Ordner und schließt Secrets aus.
@@ -89,7 +100,7 @@ Bei OTA-Nutzung nicht `uploadfs` verwenden. Stattdessen nur das Dateisystem-Imag
 pio run -e lilygo-t4-s3-lvgl -t buildfs
 ```
 
-Danach die erzeugte Datei aus `.piouild\lilygo-t4-s3-lvgl\` über die OTA-Dateisystem-Upload-Seite hochladen.
+Danach die erzeugte Datei aus `.pio\build\lilygo-t4-s3-lvgl\` über die OTA-Dateisystem-Upload-Seite hochladen.
 
 ## WebUI
 
@@ -123,6 +134,7 @@ Details stehen im Ordner `docs/`:
 - `docs/ota_filename_validation.md`
 - `docs/storage.md`
 - `docs/test-plan.md`
+- `docs/ble-shot-scale.md`
 
 ## Beobachtungspunkt
 

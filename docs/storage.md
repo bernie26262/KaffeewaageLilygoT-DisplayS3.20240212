@@ -76,3 +76,17 @@ Erwartung:
 ```text
 keine Treffer
 ```
+
+
+## Shot-Verlauf bewusst nicht persistent
+
+Der Shot-Verlauf wird nicht in NVS, SPIFFS oder LittleFS gespeichert. Gaggiuino übernimmt bereits die dauerhafte Shot-Historie; eine zweite Historie auf der Waage wäre redundant.
+
+Die Waage hält ausschließlich:
+
+- den laufenden Shot oder
+- den zuletzt abgeschlossenen Shot
+
+im RAM. Der Puffer umfasst maximal 1.200 Samples bei 10 Hz. Ein neuer Shot überschreibt den alten erst beim tatsächlichen Start. Ein Neustart löscht den Verlauf bewusst.
+
+Dadurch entstehen keine zusätzlichen Flash-Schreibvorgänge und kein Verwaltungsaufwand für alte Shots.

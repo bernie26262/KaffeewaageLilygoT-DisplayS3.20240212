@@ -98,9 +98,9 @@ Schneller Gewichtspfad.
 
 Verwendung:
 
-- Live-Anzeige
-- Reaktion auf Auflegen
-- Shot-Dynamik
+- schnelle Single-Dose-Anzeige
+- Reaktion auf Auflegen und Abheben
+- Erkennung kleiner Bohnenänderungen
 
 Eigenschaften:
 
@@ -176,6 +176,45 @@ Ziel:
 
 ---
 
+
+## 5. SHOT PATH
+
+Für die Shot-Seite existiert ein eigener ruhiger Gewichtspfad. Er verwendet denselben Median-Vorfilter, schaltet bei Bewegung aber nicht unmittelbar auf den schnellen Single-Dose-Wert. Stattdessen folgt ein gleichmäßiger EMA mit schnellerem Nachziehen nur bei großen Abweichungen.
+
+Verwendung:
+
+- Gewichtsanzeige der Shot-Seite
+- Gewichtsdaten an Gaggiuino während des Shot-Modus
+- automatische First-Drop-Erkennung
+- Stop-Erkennung
+- Sample-Puffer und Flowrate
+
+Dadurch bleiben Single Dose und Shot getrennt optimierbar:
+
+- Single Dose: schnelle Reaktion auf einzelne Bohnen und Gefäßwechsel
+- Shot: ruhige kontinuierliche Gewichtskurve
+
+---
+
+# Flowrate
+
+Die Flowrate ist die Steigung der Gewichtskurve in g/s. Da eine Ableitung Messrauschen stark verstärkt, wird sie nicht aus zwei benachbarten Samples berechnet.
+
+Aktueller Stand:
+
+- Sample-Rate: 10 Hz
+- Regressionsfenster: 2,5 s
+- Mindestspanne: 1,2 s
+- mindestens 10 Samples
+- lineare Regression über Gewicht gegen Zeit
+- anschließende EMA-Glättung mit Alpha `0.15`
+- Deadband `0.05 g/s`
+- Begrenzung auf `20 g/s`
+
+Die Flowrate dient nur der Darstellung und dem Shot-Verlauf. Sie verändert weder die Rohmessung noch die Single-Dose-Stabilitätslogik.
+
+---
+
 # Bewegungs- und Stabilitätserkennung
 
 Aktueller T4-S3-Stand:
@@ -238,24 +277,14 @@ bereits ein sehr gutes Ergebnis.
 
 ---
 
-# Nächster Schritt
+# Aktueller Integrationsstand
 
-## Ziel
+Die echte HX711-Messung ist vollständig in HMI, WebUI, Autodetect, Shot-Erkennung und BLE-Gewichtsübertragung integriert. Der Simulator dient nur noch als Fallback, wenn kein gültiger HX711-Wert verfügbar ist.
 
-Echte HX711-Gewichtsanzeige auf der Waagen-Seite verwenden.
+Die wichtigsten getrennten Verbraucher sind:
 
-Der bisherige Simulator soll schrittweise ersetzt werden.
-
-## Geplanter Ablauf
-
-1. Anzeigegewicht auf der Waagen-Seite an DISPLAY koppeln
-2. bestehende UI-Logik weiterverwenden
-3. Stabilitätslogik später für:
-   - Auto-Tara
-   - Gefäß-Erkennung
-   - Save-Freigabe
-   verwenden
-
+- DISPLAY/STABLE für Single Dose, Autodetect und Save
+- SHOT für maschinennahe Anzeige, Shot-Erkennung und Flowrate
 
 ---
 

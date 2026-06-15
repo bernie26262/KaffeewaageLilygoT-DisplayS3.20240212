@@ -65,6 +65,37 @@ Der aktuelle Stand reduziert die Last im Browser:
 
 Der Fix wurde auf dem T4-S3 nach mehreren Stunden Laufzeit ohne neue `message handler`-Violations getestet.
 
+
+## Shot-Graph und Sample-Endpunkt
+
+Die Shot-Seite zeigt den laufenden oder zuletzt abgeschlossenen RAM-Shot mit zwei Kurven:
+
+- Gewicht in Gramm
+- Flowrate in g/s
+
+Die normalen WebSocket-State-Nachrichten enthalten nur Status, aktuelle Werte, Session-ID und Sampleanzahl. Die Messpunkte werden paketweise über folgenden Endpunkt nachgeladen:
+
+```text
+/api/shot/samples?from=<index>&limit=120
+```
+
+Eigenschaften:
+
+- maximal 1.200 Punkte bei 10 Hz
+- nur laufender beziehungsweise letzter Shot
+- kein Flash- oder NVS-Logging
+- Browser-Reconnect lädt den vorhandenen RAM-Verlauf erneut
+- neuer Verlauf beginnt erst beim tatsächlichen Shot-Start
+- Tara ohne Shot und Armed-Timeout löschen den vorherigen Verlauf nicht
+
+## Seitensynchronisierung
+
+Das lokale HMI ist Master für Hauptseite und Einstellungs-Unterseite. Der AppState liefert `ui_page` und `ui_settings_panel`.
+
+Ein neuer WebUI-Client wartet auf den ersten WebSocket-State und öffnet danach die aktuelle HMI-Seite, ohne beim initialen Abgleich einen eigenen Navigationsbefehl zurückzusenden. Spätere Bedienwechsel werden über HMI/AppState an alle Clients verteilt.
+
+Das gilt auch bei der Rückkehr von der OTA-Seite. Der Link führt schlicht auf `/`; nach dem WebSocket-Verbindungsaufbau erscheint wieder die aktuelle HMI-Seite.
+
 ## PWA-/Homescreen-Integration
 
 Die WebUI enthaelt im HTML-`head` die relevanten PWA-/Mobile-Meta-Tags:
@@ -93,20 +124,29 @@ Die Icons werden ueber stabile URLs bereitgestellt:
 
 Diese Routen mappen auf die Dateien im SPIFFS.
 
-## Cache-Busting
+## Cache-Busting und Produktiv-Caching
 
-Die WebUI verwendet Versionsparameter an PWA-/Icon-URLs, z.B.:
+CSS und JavaScript verwenden eine gemeinsame zentrale Versionskennung in `src/coffee_web.cpp`:
 
-```text
-/manifest.json?v=1
-/icon-192.png?v=1
-/icon-512.png?v=1
-/favicon.ico?v=1
+```cpp
+#define COFFEE_WEB_ASSET_VERSION "20260614b"
 ```
 
-Bei Icon-Aenderungen kann die Version erhoeht werden, damit Browser und Android nicht alte Icons weiterverwenden.
+Die Versionskennung wird automatisch an `/coffee.css` und alle JavaScript-Routen angehängt. Bei jeder Änderung an eingebettetem HTML, CSS oder JavaScript muss ausschließlich diese zentrale Kennung erhöht werden.
 
-Android aktualisiert Homescreen-Icons oft nicht zuverlaessig nachtraeglich. Bei Icon-Aenderungen daher alte Homescreen-Verknuepfung loeschen und neu anlegen.
+Produktivstrategie:
+
+| Ressource | Cache-Control |
+|---|---|
+| HTML `/` | `no-store` |
+| CSS/JavaScript | `public, max-age=31536000, immutable` |
+| Manifest | `no-cache, max-age=0, must-revalidate` |
+| Icons/Favicon | `public, max-age=31536000, immutable` |
+| Shot-Samples | `no-store` |
+
+Damit werden unveränderte Assets schnell aus dem Browsercache geladen. Nach einer Versionsänderung entstehen neue URLs, sodass kein Gemisch aus neuem HTML und altem JavaScript mehr auftreten sollte.
+
+Bei Icon-Änderungen zusätzlich die Icon-Version im HTML erhöhen. Android aktualisiert Homescreen-Icons häufig erst nach Löschen und erneutem Anlegen der Verknüpfung.
 
 ## Pruef-URLs
 
