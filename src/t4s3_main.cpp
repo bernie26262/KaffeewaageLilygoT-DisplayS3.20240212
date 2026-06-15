@@ -877,7 +877,7 @@ void setup()
 
     t4s3_wifi_begin();
     t4s3_time_begin();
-#if ENABLE_BLE_SCALE
+#if ENABLE_BLE_SCALE && BLE_SCALE_STARTUP_DIAGNOSTICS
     Serial.printf("[T4S3][BLE] enabled, delayed start in %lu ms\n", static_cast<unsigned long>(kBleStartDelayMs));
 #endif
     ui_t4s3_notify_activity();
@@ -896,13 +896,17 @@ void loop()
 #endif
 #if ENABLE_BLE_SCALE
     if (!g_bleStarted && now >= kBleStartDelayMs) {
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
         Serial.println("[T4S3][BLE] delayed begin now");
         Serial.flush();
+#endif
         // Gaggiuino/esp-arduino-ble-scales matcht den BLE-Namen per Prefix "WeighMyBru".
         coffeeBleScaleBegin("WeighMyBru");
         g_bleStarted = true;
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
         Serial.println("[T4S3][BLE] delayed begin returned");
         Serial.flush();
+#endif
     }
     coffeeBleScaleTick(now, t4s3_scale_current_grams(), t4s3_scale_is_stable());
     handleBleCommands();

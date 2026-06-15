@@ -5,6 +5,14 @@
 #define ENABLE_BLE_SCALE 0
 #endif
 
+#ifndef BLE_SCALE_STARTUP_DIAGNOSTICS
+#define BLE_SCALE_STARTUP_DIAGNOSTICS 0
+#endif
+
+#ifndef BLE_SCALE_VERBOSE_LOGS
+#define BLE_SCALE_VERBOSE_LOGS 0
+#endif
+
 struct CoffeeBleScaleStatus {
   bool enabled = false;
   bool advertising = false;

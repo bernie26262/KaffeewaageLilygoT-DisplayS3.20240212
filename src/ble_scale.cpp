@@ -17,9 +17,6 @@ constexpr const char* kWeightUuid = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 constexpr const char* kBeanConquerorWeightUuid = "6E400004-B5A3-F393-E0A9-E50E24DCCA9E";
 constexpr const char* kCommandUuid = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 constexpr uint32_t kNotifyIntervalMs = 200UL; // 5 Hz: Stabilitaetstest gegen BLE-GATT-Congestion
-#ifndef BLE_SCALE_VERBOSE_LOGS
-#define BLE_SCALE_VERBOSE_LOGS 0
-#endif
 constexpr uint32_t kNotifyLogIntervalMs = 2000UL; // nur bei BLE_SCALE_VERBOSE_LOGS
 // Gaggiuino abonniert nur 6E400002. Notifications auf 6E400004 erzeugen ohne Subscriber
 // ESP-IDF-Fehlerlogs (esp_ble_gatts_send_notify rc=-1). Der Wert bleibt lesbar, wird aber nicht gepusht.
@@ -203,42 +200,55 @@ void coffeeBleScaleBegin(const char* deviceName)
   }
 
   const char* name = (deviceName && deviceName[0]) ? deviceName : "SingleDose-WeighMyBru";
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.printf("[BLE] begin: name='%s', freeHeap=%lu, minHeap=%lu\n",
                 name,
                 static_cast<unsigned long>(ESP.getFreeHeap()),
                 static_cast<unsigned long>(ESP.getMinFreeHeap()));
-  Serial.flush();
-
   Serial.println("[BLE] pre-step: enable WiFi modem sleep for BLE coexistence");
   Serial.flush();
+#endif
+
   WiFi.setSleep(true);
   delay(50);
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 1/8: BLEDevice::init");
   Serial.flush();
+#endif
   BLEDevice::init(name);
 
 #if BLE_SCALE_LOW_POWER
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 2/8: setPower low ESP_PWR_LVL_N12");
   Serial.flush();
+#endif
   BLEDevice::setPower(ESP_PWR_LVL_N12);
 #else
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 2/8: setPower normal ESP_PWR_LVL_P3");
   Serial.flush();
+#endif
   BLEDevice::setPower(ESP_PWR_LVL_P3);
 #endif
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 3/8: createServer");
   Serial.flush();
+#endif
   g_server = BLEDevice::createServer();
   g_server->setCallbacks(new ServerCallbacks());
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 4/8: createService");
   Serial.flush();
+#endif
   BLEService* service = g_server->createService(kServiceUuid);
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 5/8: create characteristics");
   Serial.flush();
+#endif
   // Gaggiuino/esp-arduino-ble-scales liest dieses Characteristic als WeighMyBru-Gewicht.
   g_weightCharacteristic = service->createCharacteristic(
       kWeightUuid,
@@ -257,30 +267,37 @@ void coffeeBleScaleBegin(const char* deviceName)
       BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   g_commandCharacteristic->setCallbacks(new CommandCallbacks());
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 6/8: service->start");
   Serial.flush();
+#endif
   service->start();
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 7/8: configure advertising");
   Serial.flush();
+#endif
   BLEAdvertising* advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(kServiceUuid);
   advertising->setScanResponse(true);
   advertising->setMinPreferred(0x06);
   advertising->setMaxPreferred(0x12);
 
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.println("[BLE] step 8/8: startAdvertising");
   Serial.flush();
+#endif
   BLEDevice::startAdvertising();
 
   g_started = true;
   g_advertising = true;
   g_rateWindowStartMs = millis();
-  Serial.printf("[BLE] %s mode started as '%s', freeHeap=%lu, minHeap=%lu\n",
-                kModeName,
-                name,
+  Serial.printf("[BLE] %s started as '%s'\n", kModeName, name);
+#if BLE_SCALE_STARTUP_DIAGNOSTICS
+  Serial.printf("[BLE] startup heap: free=%lu, min=%lu\n",
                 static_cast<unsigned long>(ESP.getFreeHeap()),
                 static_cast<unsigned long>(ESP.getMinFreeHeap()));
+#endif
   Serial.flush();
 }
 
