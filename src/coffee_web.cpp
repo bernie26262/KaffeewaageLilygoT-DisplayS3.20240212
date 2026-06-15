@@ -16,6 +16,9 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 #define COFFEE_WEB_ASSET_VERSION "20260614b"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
+  "public, max-age=31536000, immutable";
+
+static constexpr const char* COFFEE_WEB_MANIFEST_CACHE_CONTROL =
   "no-cache, max-age=0, must-revalidate";
 
 void coffeeWebSetPwaAssetsAvailable(bool available)
@@ -3136,7 +3139,7 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/manifest.json", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendProgmemResponse(request, PWA_MANIFEST_JSON, "application/manifest+json", COFFEE_WEB_ASSET_CACHE_CONTROL);
+    sendProgmemResponse(request, PWA_MANIFEST_JSON, "application/manifest+json", COFFEE_WEB_MANIFEST_CACHE_CONTROL);
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
