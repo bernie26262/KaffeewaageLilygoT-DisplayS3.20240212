@@ -27,12 +27,12 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=3b">
+  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260616a">
 </head>
 <body>
 <main>
   <section class="card top">
-    <h1>Single-Dose-Waage</h1>
+    <h1 id="appTitle">Single-Dose-Waage</h1>
     <div class="top-status">
       <span id="wifiSignalHeaderIcon" class="wifi-signal header-wifi-signal" aria-hidden="true" title="WLAN-Signal"></span>
       <span id="ws" class="pill">Getrennt</span>
@@ -42,7 +42,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <section class="bottom-nav-shell" aria-label="Hauptnavigation">
     <nav class="tab-nav">
       <button class="tab-button active" type="button" data-tab="scalePage"><span class="tab-icon" aria-hidden="true">⚖</span><span>Waage</span></button>
-      <button class="tab-button" type="button" data-tab="timerPage"><span class="tab-icon" aria-hidden="true">⏱</span><span>Stoppuhr</span></button>
+      <button class="tab-button" type="button" data-tab="timerPage"><span class="tab-icon" aria-hidden="true">☕</span><span>Shot</span></button>
       <button class="tab-button" type="button" data-tab="statsPage"><span class="tab-icon" aria-hidden="true">▦</span><span>Daten</span></button>
       <button class="tab-button" type="button" data-tab="settingsPage"><span class="tab-icon" aria-hidden="true">⚙</span><span>Einstellungen</span></button>
     </nav>
@@ -90,7 +90,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <div id="timerPage" class="page hidden">
   <section class="card">
-    <div class="label">Stoppuhr</div>
+    <div class="label">Shot-Waage</div>
     <div class="value stopwatch-value" id="stopwatch">00:00:00:0</div>
     <div class="grid" style="margin-top: 12px;">
       <button id="swToggle" class="secondary" disabled>Start / Stop</button>
@@ -313,9 +313,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=3c"></script>
-<script src="/coffee_render.js?v=3c"></script>
-<script src="/coffee_events.js?v=3c"></script>
+<script src="/coffee_core.js?v=legacy-shot-20260616a"></script>
+<script src="/coffee_render.js?v=legacy-shot-20260616a"></script>
+<script src="/coffee_events.js?v=legacy-shot-20260616a"></script>
 </body>
 </html>)rawliteral";
 
@@ -696,6 +696,9 @@ let targetWeightDirty = false;
 let pendingConfirm = null;
 let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
+let currentMainTab = 'scalePage';
+let initialScaleModeSyncDone = false;
+let lastShotMode = null;
 const el = id => document.getElementById(id);
 const setText = (id, value) => { el(id).textContent = value; };
 const GEFAESS_COUNT = 4;
@@ -719,7 +722,9 @@ const CMD = Object.freeze({
   setMaintenanceEnabledPrefix: 'set_maintenance_enabled_',
   restartDevice: 'restart_device',
   setStatsTotalsPrefix: 'set_stats_totals_',
-  setDisplayTimeoutPrefix: 'set_display_timeout_'
+  setDisplayTimeoutPrefix: 'set_display_timeout_',
+  modeSingleDose: 'mode_single_dose',
+  modeShot: 'mode_shot'
 });
 const fmtG = v => {
   let n = Number(v || 0);
@@ -785,6 +790,7 @@ function addLog(msg) {
 }
 
 function showTab(targetPageId) {
+  currentMainTab = targetPageId;
   ['scalePage', 'timerPage', 'statsPage', 'settingsPage'].forEach(pageId => {
     el(pageId).classList.toggle('hidden', pageId !== targetPageId);
   });
@@ -808,6 +814,34 @@ function showSettingsTab(targetPanelId) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-current', active ? 'page' : 'false');
   });
+}
+
+function syncScaleModeNavigation(s) {
+  const shotMode = !!s.system?.shot_mode;
+  const targetPage = shotMode ? 'timerPage' : 'scalePage';
+
+  setText('appTitle', shotMode ? 'Shot-Waage' : 'Single-Dose-Waage');
+
+  if (!initialScaleModeSyncDone) {
+    showTab(targetPage);
+    initialScaleModeSyncDone = true;
+    lastShotMode = shotMode;
+    return;
+  }
+
+  if (lastShotMode !== shotMode && (currentMainTab === 'scalePage' || currentMainTab === 'timerPage')) {
+    showTab(targetPage);
+  }
+  lastShotMode = shotMode;
+}
+
+function handleMainTabClick(targetPageId) {
+  showTab(targetPageId);
+  if (targetPageId === 'scalePage') {
+    sendCommand(CMD.modeSingleDose, 'Modus Single-Dose gesendet …');
+  } else if (targetPageId === 'timerPage') {
+    sendCommand(CMD.modeShot, 'Modus Shot-Waage gesendet …');
+  }
 }
 
 function openMaintenanceSettings() {
@@ -1409,17 +1443,20 @@ function renderWeightAndSelection(s) {
 function renderAutodetect(s) {
   const autodetectOn = !!s.selection?.autodetect;
   const autodetectPaused = !!s.system?.autodetect_paused;
+  const singleDoseAutomation = s.system?.single_dose_automation_allowed !== false;
   const autodetectToggle = el('autodetectToggle');
   const autodetectLed = el('autodetectLed');
 
-  setText('autodetectStatus', autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus'));
-  autodetectToggle.classList.toggle('on', autodetectOn && !autodetectPaused);
-  autodetectToggle.classList.toggle('off', !autodetectOn && !autodetectPaused);
-  autodetectToggle.classList.toggle('paused', autodetectPaused);
+  setText('autodetectStatus', !singleDoseAutomation ? 'Shot aus' : (autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus')));
+  autodetectToggle.classList.toggle('on', singleDoseAutomation && autodetectOn && !autodetectPaused);
+  autodetectToggle.classList.toggle('off', singleDoseAutomation && !autodetectOn && !autodetectPaused);
+  autodetectToggle.classList.toggle('paused', autodetectPaused || !singleDoseAutomation);
   autodetectToggle.setAttribute('aria-pressed', autodetectOn ? 'true' : 'false');
-  autodetectToggle.disabled = autodetectPaused;
-  autodetectToggle.title = autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten');
-  autodetectLed.classList.toggle('on', autodetectOn && !autodetectPaused);
+  autodetectToggle.disabled = autodetectPaused || !singleDoseAutomation;
+  autodetectToggle.title = !singleDoseAutomation
+    ? 'Autodetect ist im Shot-Modus deaktiviert'
+    : (autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten'));
+  autodetectLed.classList.toggle('on', singleDoseAutomation && autodetectOn && !autodetectPaused);
 }
 
 function renderWifiBars(id, level, title) {
@@ -1517,6 +1554,7 @@ function render(s) {
   syncMaintenanceTimers(s.maintenance);
 
   renderWeightAndSelection(s);
+  syncScaleModeNavigation(s);
   renderAutodetect(s);
   syncStopwatchTimer(s.stopwatch);
   renderStopwatch();
@@ -1860,7 +1898,7 @@ function bindDashboardHandlers() {
 
 function bindNavigationHandlers() {
   document.querySelectorAll('.tab-button').forEach(button => {
-    button.addEventListener('click', () => showTab(button.dataset.tab));
+    button.addEventListener('click', () => handleMainTabClick(button.dataset.tab));
   });
   document.querySelectorAll('.settings-tab-button').forEach(button => {
     button.addEventListener('click', () => showSettingsTab(button.dataset.settingsTab));
@@ -2557,6 +2595,10 @@ static String buildStateJson(const AppState& s)
   doc["system"]["web_wizard_active"] = s.system.web_wizard_active;
   doc["system"]["autodetect_paused"] = s.system.autodetect_paused;
   doc["system"]["display_timeout_minutes"] = s.system.display_timeout_minutes;
+  doc["system"]["scale_mode"] = s.system.scale_mode == SCALE_UI_MODE_SHOT ? "shot" : "single_dose";
+  doc["system"]["scale_mode_label"] = s.system.scale_mode == SCALE_UI_MODE_SHOT ? "Shot-Waage" : "Single Dose";
+  doc["system"]["shot_mode"] = s.system.shot_mode;
+  doc["system"]["single_dose_automation_allowed"] = s.system.single_dose_automation_allowed;
 
   String out;
   serializeJson(doc, out);

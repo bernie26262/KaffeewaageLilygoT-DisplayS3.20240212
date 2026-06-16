@@ -316,11 +316,12 @@ static String urlDecode(String encoded)
 
 byte pageID = 0;
 byte newPageID = 0;
+ScaleUiMode scaleUiMode = SCALE_UI_MODE_SINGLE_DOSE;
 const String headerOfPageID[] =
 { "Single-Dose-Waage        ",   // 0
   "Einstellungen             ",  // 1
   "Siebtraeger               ",  // 2
-  "Stoppuhr                   ", // 3
+  "Shot-Waage                 ", // 3
   "Soll einstellen            ",   // 4
   "Gefaess messen 1/4       " ,  // 5
   "Kalibrieren 1/3          ",   // 6
@@ -348,11 +349,11 @@ const String headerOfPageID[] =
 
 String menuItemsOfPage[HMI_PAGE_COUNT][4] =
 {  // Menu 0                      Menu 1                                 Menu 2                           Menu 3                               Page ID
-  {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                ",       "Soll:              "},                   //0
+  {"Einstellungen            ",  siebtraeger[selectedST],               "Shot                    ",       "Soll:              "},                   //0
   {"Gefaess messen         ",    "Kalibrieren               ",          "Autodetect            "        , "Pflege/Daten       "},               //1
   {"Bodenloser ST         ",     "1er-Siebtraeger         ",            "2er-Siebtraeger",                "Custom-ST          "},               //2
   {"                           ","                           ",         "                           ",    "                           "},       //3
-  {"Einstellungen            ",  siebtraeger[selectedST],               "Stoppuhr                ",       "Soll:              "},               //4
+  {"Einstellungen            ",  siebtraeger[selectedST],               "Shot                    ",       "Soll:              "},               //4
   {"Gefaess 1                ",  "Gefaess 2                         ",  "Gefaess 3              ",        "Gefaess 4            "},        //5
   {"Tarieren                 ",  "                              ",      "                              ", "                            "},      //6
   {"An                        ",  "Aus                         ",       "                              ", "                            "},      //7
@@ -821,6 +822,9 @@ static void updateCoffeeAppStateFromGlobals()
   appState.system.web_wizard_active = webWizardActive;
   appState.system.autodetect_paused = webWizardActive && webWizardAutodetectPaused;
   appState.system.display_timeout_minutes = displayTimeoutMinutes;
+  appState.system.scale_mode = scaleUiMode;
+  appState.system.shot_mode = scaleUiMode == SCALE_UI_MODE_SHOT;
+  appState.system.single_dose_automation_allowed = scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE;
   appState.system.uptime_ms = millis();
 }
 
@@ -1334,6 +1338,8 @@ static constexpr const char* CMD_SAVE_DOSE = "save_dose";
 static constexpr const char* CMD_TARE = "tare";
 static constexpr const char* CMD_STOPWATCH_START_STOP = "stopwatch_start_stop";
 static constexpr const char* CMD_STOPWATCH_RESET = "stopwatch_reset";
+static constexpr const char* CMD_MODE_SINGLE_DOSE = "mode_single_dose";
+static constexpr const char* CMD_MODE_SHOT = "mode_shot";
 static constexpr const char* CMD_AUTODETECT_ON = "autodetect_on";
 static constexpr const char* CMD_AUTODETECT_OFF = "autodetect_off";
 static constexpr const char* CMD_WEB_WIZARD_BEGIN = "web_wizard_begin";
@@ -1689,9 +1695,40 @@ static bool setDisplayTimeoutFromWeb(uint16_t minutes)
   return true;
 }
 
+static bool setScaleUiModeFromWeb(ScaleUiMode mode)
+{
+  scaleUiMode = mode;
+  const byte targetPage = mode == SCALE_UI_MODE_SHOT ? 3 : 0;
+
+  if (pageID != targetPage) {
+    pageID = targetPage;
+    newPageID = targetPage;
+    encoderPos = highlightedMenuItemWhenEnteringPage[targetPage];
+    menuItemPos = encoderPos;
+    pageEntered = true;
+
+    if (displayOff != 0) {
+      displayOff = 0;
+      DisplayOnOff();
+    }
+    lastActionAgainstDisplayOff = millis();
+  }
+
+  broadcastWebStateFromGlobals();
+  return true;
+}
+
 static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
 {
   handled = true;
+
+  if (cmdEquals(cmd, CMD_MODE_SINGLE_DOSE)) {
+    return setScaleUiModeFromWeb(SCALE_UI_MODE_SINGLE_DOSE);
+  }
+
+  if (cmdEquals(cmd, CMD_MODE_SHOT)) {
+    return setScaleUiModeFromWeb(SCALE_UI_MODE_SHOT);
+  }
 
   if (cmdEquals(cmd, CMD_STOPWATCH_START_STOP)) {
     toggleStopwatchCore();
@@ -3523,9 +3560,20 @@ static bool isHmiScaleAutomationBlocked()
   }
 }
 
+static void updateScaleUiModeFromHmiPage()
+{
+  if (pageID == 0) {
+    scaleUiMode = SCALE_UI_MODE_SINGLE_DOSE;
+  } else if (pageID == 3) {
+    scaleUiMode = SCALE_UI_MODE_SHOT;
+  }
+}
+
 static bool shouldRunScaleAutomation()
 {
-  return !webWizardActive && !isHmiScaleAutomationBlocked();
+  return scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
+         !webWizardActive &&
+         !isHmiScaleAutomationBlocked();
 }
 
 void Autodetect()
@@ -4395,6 +4443,7 @@ void setup()
   oldsetWeightST[3] = setWeightST[3];
 
   pageID = 0;
+  scaleUiMode = SCALE_UI_MODE_SINGLE_DOSE;
   encoderPos = 3;
   oldEncPos = 3;
   encoderPosChanged = true;
@@ -4440,6 +4489,7 @@ void loop(void)
   rotaryMenu();
   LoadCell.update();
   actualWeight = LoadCell.getData();
+  updateScaleUiModeFromHmiPage();
   updateCoffeeAppStateFromGlobals();
   checkHmiWifiSetupSaved();
   const unsigned long nowWebMs = millis();

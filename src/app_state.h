@@ -1,6 +1,11 @@
 #pragma once
 #include <Arduino.h>
 
+enum ScaleUiMode {
+  SCALE_UI_MODE_SINGLE_DOSE,
+  SCALE_UI_MODE_SHOT
+};
+
 enum AppStatusMode {
   APP_STATUS_IDLE,
   APP_STATUS_MEASURING,
@@ -85,6 +90,9 @@ struct SystemState {
   bool web_wizard_active = false;
   bool autodetect_paused = false;
   uint16_t display_timeout_minutes = 10;
+  ScaleUiMode scale_mode = SCALE_UI_MODE_SINGLE_DOSE;
+  bool shot_mode = false;
+  bool single_dose_automation_allowed = true;
 };
 
 struct StatusState {
