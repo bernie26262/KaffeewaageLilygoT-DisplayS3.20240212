@@ -40,6 +40,7 @@
 #include "coffee_web.h"
 #include "coffee_ota.h"
 #include "coffee_storage.h"
+#include "ble_scale.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -455,6 +456,13 @@ float actualWeight = 5;
 char actualWeightAsChar[9] = {0};
 String actualWeightAsString;
 String oldActualWeightAsString;
+
+#ifndef BLE_SCALE_START_DELAY_MS
+#define BLE_SCALE_START_DELAY_MS 5000UL
+#endif
+static constexpr uint32_t kBleScaleStartDelayMs = BLE_SCALE_START_DELAY_MS;
+static bool bleScaleStartAttempted = false;
+static uint32_t lastBleLogSequenceCopied = UINT32_MAX;
 char setWeightCalibrationAsChar[9] = {0};
 String setWeightCalibrationAsString;
 
@@ -826,6 +834,26 @@ static void updateCoffeeAppStateFromGlobals()
   appState.system.shot_mode = scaleUiMode == SCALE_UI_MODE_SHOT;
   appState.system.single_dose_automation_allowed = scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE;
   appState.system.uptime_ms = millis();
+
+  const CoffeeBleScaleStatus ble = coffeeBleScaleStatus();
+  appState.ble.enabled = ble.enabled;
+  appState.ble.started = ble.started;
+  appState.ble.connected = ble.connected;
+  appState.ble.advertising = ble.advertising;
+  appState.ble.mode = ble.mode ? ble.mode : "aus";
+  appState.ble.last_command = ble.last_command ? ble.last_command : "---";
+  appState.ble.notify_hz = ble.notify_hz;
+  appState.ble.last_weight_g = ble.last_weight_g;
+  appState.ble.packets_sent = ble.packets_sent;
+  appState.ble.commands_received = ble.commands_received;
+  appState.ble.last_notify_age_ms = ble.last_notify_age_ms;
+  appState.ble.log_sequence = ble.log_sequence;
+  if (ble.log_sequence != lastBleLogSequenceCopied) {
+    char logBuffer[1200];
+    coffeeBleScaleCopyLog(logBuffer, sizeof(logBuffer));
+    appState.ble.log_text = logBuffer;
+    lastBleLogSequenceCopied = ble.log_sequence;
+  }
 }
 
 void RefreshFooter();
@@ -1430,7 +1458,7 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
 
   doTara();
 
-  if (!webWizardTare && autoDetect == 0) {
+  if (!webWizardTare && autoDetect == 0 && scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE) {
     scheduleAutoDetectPostTara(true, false);
   }
 
@@ -1441,6 +1469,70 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
 
   broadcastWebStateFromGlobals();
   return true;
+}
+
+static void appendBleCommandResult(CoffeeBleScaleCommand command, const char* result)
+{
+  char message[80];
+  snprintf(message, sizeof(message), "Command %s: %s", coffeeBleScaleCommandName(command), result ? result : "---");
+  coffeeBleScaleAppendLog(message);
+}
+
+static void handleBleCommands()
+{
+  CoffeeBleScaleCommand command = CoffeeBleScaleCommand::None;
+  while (coffeeBleScalePopCommand(command)) {
+    if (scaleUiMode != SCALE_UI_MODE_SHOT) {
+      appendBleCommandResult(command, "ignoriert - Single Dose aktiv");
+      continue;
+    }
+
+    bool handled = false;
+    switch (command) {
+      case CoffeeBleScaleCommand::Tare:
+        handleWebTareCommand(CMD_TARE, handled);
+        break;
+      case CoffeeBleScaleCommand::TimerStart:
+        if (!stopWatchRunning) {
+          toggleStopwatchCore();
+        }
+        handled = true;
+        break;
+      case CoffeeBleScaleCommand::TimerStop:
+        if (stopWatchRunning) {
+          toggleStopwatchCore();
+        }
+        handled = true;
+        break;
+      case CoffeeBleScaleCommand::TimerReset:
+        resetStopwatchCore();
+        handled = true;
+        break;
+      case CoffeeBleScaleCommand::None:
+      default:
+        break;
+    }
+
+    appendBleCommandResult(command, handled ? "ausgeführt" : "nicht ausgeführt");
+    if (handled) {
+      broadcastWebStateFromGlobals();
+    }
+  }
+}
+
+static void tickBleScale(uint32_t nowMs)
+{
+#if ENABLE_BLE_SCALE
+  if (!bleScaleStartAttempted && nowMs >= kBleScaleStartDelayMs) {
+    bleScaleStartAttempted = true;
+    coffeeBleScaleBegin("WeighMyBru");
+  }
+
+  coffeeBleScaleTick(nowMs, actualWeight, true);
+  handleBleCommands();
+#else
+  (void)nowMs;
+#endif
 }
 
 static bool handleWebWizardCommand(const char* cmd, bool& handled)
@@ -4466,6 +4558,9 @@ void setup()
   //initWebSocket();
   initWebServer();
   debugln("Webserver initialisert");
+#if ENABLE_BLE_SCALE
+  coffeeBleScaleAppendLog("BLE-Start nach 5 Sekunden vorgesehen");
+#endif
 
   //init and get the time
   configTime(0, 0, NTP_SERVER);
@@ -4490,6 +4585,7 @@ void loop(void)
   LoadCell.update();
   actualWeight = LoadCell.getData();
   updateScaleUiModeFromHmiPage();
+  tickBleScale(millis());
   updateCoffeeAppStateFromGlobals();
   checkHmiWifiSetupSaved();
   const unsigned long nowWebMs = millis();

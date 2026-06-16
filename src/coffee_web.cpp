@@ -27,13 +27,19 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260616a">
+  <link rel="stylesheet" href="/coffee.css?v=legacy-ble-20260616a">
 </head>
 <body>
 <main>
   <section class="card top">
     <h1 id="appTitle">Single-Dose-Waage</h1>
     <div class="top-status">
+      <span id="bleStatusHeaderIcon" class="bt-icon status-off" aria-hidden="true" title="Bluetooth-Waage">
+        <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <path class="bt-rune" d="M12 2 L12 22 M12 2 L18 7 L12 12 L18 17 L12 22 M12 12 L6 7 M12 12 L6 17"/>
+          <path class="bt-slash" d="M4 20 L20 4"/>
+        </svg>
+      </span>
       <span id="wifiSignalHeaderIcon" class="wifi-signal header-wifi-signal" aria-hidden="true" title="WLAN-Signal"></span>
       <span id="ws" class="pill">Getrennt</span>
     </div>
@@ -127,6 +133,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <div>SSID: <b class="mono" id="statsWifiSsid">---</b></div>
       <div>IP-Adresse: <b class="mono" id="ip">---</b></div>
       <div>WLAN-Signal: <span class="wifi-signal-row"><span id="statsWifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="statsWifiSignalLabel">---</b> <span class="muted-inline" id="statsWifiSignalRssi">---</span></span></div>
+      <div>Bluetooth-Waage: <b id="statsBleStatus">---</b> <span class="muted-inline" id="statsBleDetails">---</span></div>
     </div>
   </section>
   </div>
@@ -283,8 +290,21 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </section>
 
     <section class="card">
-      <div class="stats-title">Log</div>
-      <div class="small">Letzte WebUI-/Systemmeldung.</div>
+      <div class="stats-title">Bluetooth-Waage</div>
+      <div class="small">Status und Diagnose der WeighMyBru-Verbindung. Das Log liegt nur im RAM.</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>Status: <b id="bleStatus">---</b></div>
+        <div>Modus: <b id="bleMode">---</b></div>
+        <div>Letzter Command: <b id="bleLastCommand">---</b></div>
+        <div>Notify-Rate: <b id="bleNotifyRate">---</b></div>
+        <div>Pakete / Commands: <b id="bleCounters">---</b></div>
+      </div>
+      <pre class="ble-log mono" id="bleLog">Noch keine BLE-Ereignisse.</pre>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">WebUI-Meldung</div>
+      <div class="small">Letzte lokale Meldung dieses Browsers.</div>
       <div class="log mono" id="log"></div>
     </section>
   </div>
@@ -313,9 +333,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=legacy-shot-20260616a"></script>
-<script src="/coffee_render.js?v=legacy-shot-20260616a"></script>
-<script src="/coffee_events.js?v=legacy-shot-20260616a"></script>
+<script src="/coffee_core.js?v=legacy-ble-20260616a"></script>
+<script src="/coffee_render.js?v=legacy-ble-20260616a"></script>
+<script src="/coffee_events.js?v=legacy-ble-20260616a"></script>
 </body>
 </html>)rawliteral";
 
@@ -532,6 +552,12 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       min-height: 1.2em;
     }
     .log:empty { display: none; }
+    .ble-log {
+      margin: 12px 0 0; padding: 12px; border-radius: 14px;
+      background: #07111b; border: 1px solid rgba(148,163,184,.24);
+      color: #cbd5e1; white-space: pre-wrap; overflow-wrap: anywhere;
+      max-height: 280px; overflow-y: auto; line-height: 1.45;
+    }
     .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
     .stats-title { font-size: 1.05rem; font-weight: 750; margin-bottom: 8px; color: var(--text); }
     .stat-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,.14); }
@@ -544,6 +570,21 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .wifi-form label { display: grid; gap: 5px; color: var(--muted); font-size: .9rem; }
     .wifi-form input { width: 100%; box-sizing: border-box; }
     .wifi-form-note { color: var(--muted); font-size: .86rem; line-height: 1.35; }
+    .bt-icon {
+      width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 999px; border: 1px solid rgba(148,163,184,.28); background: rgba(15,23,42,.65);
+      flex: 0 0 24px;
+    }
+    .bt-icon svg { width: 17px; height: 17px; overflow: visible; }
+    .bt-icon .bt-rune, .bt-icon .bt-slash { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.9; }
+    .bt-icon .bt-rune { stroke: #9ca3af; }
+    .bt-icon .bt-slash { stroke: transparent; }
+    .bt-icon.status-off { border-color: rgba(107,114,128,.46); background: rgba(31,41,55,.58); }
+    .bt-icon.status-off .bt-rune, .bt-icon.status-off .bt-slash { stroke: #9ca3af; }
+    .bt-icon.status-active { border-color: rgba(59,130,246,.48); background: rgba(59,130,246,.16); box-shadow: 0 0 0 3px rgba(59,130,246,.10); }
+    .bt-icon.status-active .bt-rune { stroke: #93c5fd; }
+    .bt-icon.status-connected { border-color: rgba(34,197,94,.46); background: rgba(34,197,94,.14); box-shadow: 0 0 0 3px rgba(34,197,94,.10); }
+    .bt-icon.status-connected .bt-rune { stroke: #86efac; }
     .wifi-signal-row { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .wifi-signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; vertical-align: -2px; }
     .wifi-signal .bar { display: block; width: 4px; border-radius: 2px 2px 0 0; background: rgba(148,163,184,.35); }
@@ -1485,6 +1526,44 @@ function renderWifiSignal(s) {
   setText('statsWifiSignalRssi', rssiText);
 }
 
+function renderBle(s) {
+  const ble = s.ble || {};
+  const enabled = !!ble.enabled;
+  const started = !!ble.started;
+  const connected = !!ble.connected;
+  const advertising = !!ble.advertising;
+  const status = !enabled ? 'aus' : (!started ? 'startet' : (connected ? 'verbunden' : (advertising ? 'bereit' : 'aktiv')));
+  const hz = Number(ble.notify_hz || 0);
+  const icon = el('bleStatusHeaderIcon');
+  if (icon) {
+    const iconState = !enabled ? 'status-off' : (connected ? 'status-connected' : 'status-active');
+    icon.classList.remove('status-off', 'status-active', 'status-connected');
+    icon.classList.add(iconState);
+    icon.title = `Bluetooth-Waage: ${status}`;
+  }
+  const detailParts = [];
+  if (enabled) detailParts.push(ble.mode || 'WeighMyBru');
+  if (connected && hz > 0) detailParts.push(`${hz.toFixed(1)} Hz`);
+  detailParts.push(s.system?.shot_mode ? 'Remote aktiv' : 'Remote gesperrt');
+
+  setText('statsBleStatus', status);
+  setText('statsBleDetails', detailParts.join(' · '));
+  setText('bleStatus', status);
+  setText('bleMode', ble.mode || '---');
+  setText('bleLastCommand', ble.last_command || '---');
+  setText('bleNotifyRate', connected ? `${hz.toFixed(1)} Hz` : '---');
+  setText('bleCounters', `${Number(ble.packets_sent || 0)} / ${Number(ble.commands_received || 0)}`);
+
+  const log = el('bleLog');
+  if (log) {
+    const text = String(ble.log_text || '').trim();
+    if (log.textContent !== (text || 'Noch keine BLE-Ereignisse.')) {
+      log.textContent = text || 'Noch keine BLE-Ereignisse.';
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+}
+
 function renderDisplayTimeout(s) {
   const select = el('displayTimeoutSelect');
   if (!select) return;
@@ -1518,6 +1597,7 @@ function renderStatsAndSystem(s) {
   setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
   setText('wifiSsid', s.system?.wifi_ssid || '---');
   renderWifiSignal(s);
+  renderBle(s);
   renderDisplayTimeout(s);
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
@@ -2519,7 +2599,7 @@ void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler)
 
 static String buildStateJson(const AppState& s)
 {
-  StaticJsonDocument<4096> doc;
+  JsonDocument doc;
 
   doc["type"] = "state";
 
@@ -2599,6 +2679,20 @@ static String buildStateJson(const AppState& s)
   doc["system"]["scale_mode_label"] = s.system.scale_mode == SCALE_UI_MODE_SHOT ? "Shot-Waage" : "Single Dose";
   doc["system"]["shot_mode"] = s.system.shot_mode;
   doc["system"]["single_dose_automation_allowed"] = s.system.single_dose_automation_allowed;
+
+  doc["ble"]["enabled"] = s.ble.enabled;
+  doc["ble"]["started"] = s.ble.started;
+  doc["ble"]["connected"] = s.ble.connected;
+  doc["ble"]["advertising"] = s.ble.advertising;
+  doc["ble"]["mode"] = s.ble.mode;
+  doc["ble"]["last_command"] = s.ble.last_command;
+  doc["ble"]["notify_hz"] = s.ble.notify_hz;
+  doc["ble"]["last_weight_g"] = s.ble.last_weight_g;
+  doc["ble"]["packets_sent"] = s.ble.packets_sent;
+  doc["ble"]["commands_received"] = s.ble.commands_received;
+  doc["ble"]["last_notify_age_ms"] = s.ble.last_notify_age_ms;
+  doc["ble"]["log_sequence"] = s.ble.log_sequence;
+  doc["ble"]["log_text"] = s.ble.log_text;
 
   String out;
   serializeJson(doc, out);

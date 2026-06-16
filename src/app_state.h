@@ -95,6 +95,23 @@ struct SystemState {
   bool single_dose_automation_allowed = true;
 };
 
+
+struct BleScaleState {
+  bool enabled = false;
+  bool started = false;
+  bool connected = false;
+  bool advertising = false;
+  String mode = "aus";
+  String last_command = "---";
+  float notify_hz = 0.0f;
+  float last_weight_g = 0.0f;
+  uint32_t packets_sent = 0;
+  uint32_t commands_received = 0;
+  uint32_t last_notify_age_ms = 0;
+  uint32_t log_sequence = 0;
+  String log_text;
+};
+
 struct StatusState {
   AppStatusMode mode = APP_STATUS_IDLE;
   bool save_ready = false;
@@ -111,4 +128,5 @@ struct AppState {
   TimeState time;
   SystemState system;
   StatusState status;
+  BleScaleState ble;
 };
