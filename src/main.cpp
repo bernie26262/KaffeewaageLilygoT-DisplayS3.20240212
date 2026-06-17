@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <stdarg.h>
 
 //for Debugging nach https://github.com/RalphBacon/224-Superior-Serial.print-statements/blob/main/README.md
 #define DEBUG 1
@@ -41,6 +42,7 @@
 #include "coffee_ota.h"
 #include "coffee_storage.h"
 #include "ble_scale.h"
+#include "shot_session.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -180,6 +182,7 @@ static float lastWebBroadcastWeightG = 0.0f;
 static bool hasWebBroadcastWeight = false;
 static const unsigned long WEB_STATE_FULL_BROADCAST_INTERVAL_MS = 1000;
 static const unsigned long WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS = 200;
+static const unsigned long WEB_STATE_SHOT_BROADCAST_INTERVAL_MS = 200;
 static const float WEB_STATE_WEIGHT_BROADCAST_DELTA_G = 0.1f;
 
 
@@ -390,7 +393,7 @@ static void syncSiebtraegerMenuItems()
 }
 
 //pageID                                            0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
-const byte footerOfPageID[] =                      {0, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};                      // es gibt zwei unterschiedliche Footer, die dargestellt werden können
+const byte footerOfPageID[] =                      {0, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};                      // es gibt zwei unterschiedliche Footer, die dargestellt werden können
 const byte firstMenuItemOnPage[] =                 {0, 0, 0, 4, 3, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};                 //  bei 4 wird der Curser nicht dargestellt
 const byte lastMenuItemOnPage[] =                  {3, 3, 3, 4, 3, 3, 0, 1, 3, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};
 byte highlightedMenuItemWhenEnteringPage[] =       {3, 0, 0, 4, 3, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};      // Wenn eine Seite betreten wird, wird der Cursor neben dieses Element gesetzt
@@ -456,6 +459,29 @@ float actualWeight = 5;
 char actualWeightAsChar[9] = {0};
 String actualWeightAsString;
 String oldActualWeightAsString;
+
+// Eigener ruhiger Gewichtspfad fuer die Shot-Waage. Die Single-Dose-Logik
+// arbeitet weiterhin mit actualWeight; BLE, Shot-Erkennung und Shot-Anzeige
+// verwenden im Shot-Modus diesen geglaetteten Pfad.
+static float shotWeightFiltered = 0.0f;
+static bool shotWeightFilterInitialized = false;
+static constexpr float SHOT_FILTER_ALPHA = 0.12f;
+static constexpr float SHOT_FILTER_CATCHUP_ALPHA = 0.32f;
+static constexpr float SHOT_FILTER_CATCHUP_DELTA_G = 4.0f;
+
+static bool oldBleStartedDisplayed = false;
+static bool oldBleAdvertisingDisplayed = false;
+static bool oldBleConnectedDisplayed = false;
+static bool bleHeaderStatusInitialised = false;
+
+static uint32_t oldShotDisplayTenths = UINT32_MAX;
+static int32_t oldShotDisplayWeightTenths = INT32_MIN;
+static int32_t oldShotDisplayFlowTenths = INT32_MIN;
+static CoffeeShotSessionState oldShotDisplayState = CoffeeShotSessionState::Idle;
+static bool oldShotDisplayArmed = false;
+static bool oldShotDisplayRunning = false;
+static bool oldShotDisplayCompleted = false;
+static bool shotDisplayInitialised = false;
 
 #ifndef BLE_SCALE_START_DELAY_MS
 #define BLE_SCALE_START_DELAY_MS 5000UL
@@ -746,16 +772,52 @@ static const char* wifiSignalLabelFromLevel(uint8_t level)
   }
 }
 
+static void resetShotWeightFilter(float weightG = 0.0f)
+{
+  shotWeightFiltered = isfinite(weightG) ? weightG : 0.0f;
+  shotWeightFilterInitialized = true;
+}
+
+static float updateShotWeightFilter(float weightG)
+{
+  const float input = isfinite(weightG) ? weightG : 0.0f;
+  if (!shotWeightFilterInitialized) {
+    resetShotWeightFilter(input);
+    return shotWeightFiltered;
+  }
+
+  const float delta = fabsf(input - shotWeightFiltered);
+  const float alpha = delta >= SHOT_FILTER_CATCHUP_DELTA_G
+                        ? SHOT_FILTER_CATCHUP_ALPHA
+                        : SHOT_FILTER_ALPHA;
+  shotWeightFiltered += (input - shotWeightFiltered) * alpha;
+  if (shotWeightFiltered > -0.05f && shotWeightFiltered < 0.05f) {
+    shotWeightFiltered = 0.0f;
+  }
+  return shotWeightFiltered;
+}
+
+static float currentScaleDisplayWeight()
+{
+  const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+  return (scaleUiMode == SCALE_UI_MODE_SHOT || shot.running)
+           ? shotWeightFiltered
+           : actualWeight;
+}
+
 static void updateCoffeeAppStateFromGlobals()
 {
-  appState.weight.actual_g = actualWeight;
+  const uint32_t nowMs = millis();
+  const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(nowMs);
+
+  appState.weight.actual_g = currentScaleDisplayWeight();
   appState.weight.set_g = setWeightST[selectedST];
   appState.weight.stable = true; // TODO: later map from real scale stability detection
 
   appState.status.save_ready = statusReadyToSave;
   if (statusReadyToSave) {
     appState.status.mode = APP_STATUS_SAVE_READY;
-  } else if (stopWatchRunning) {
+  } else if (shot.running) {
     appState.status.mode = APP_STATUS_MEASURING;
   } else if (appState.weight.stable) {
     appState.status.mode = APP_STATUS_STABLE;
@@ -763,13 +825,23 @@ static void updateCoffeeAppStateFromGlobals()
     appState.status.mode = APP_STATUS_IDLE;
   }
 
-  if (stopWatchRunning) {
-    elapsedTimeStopWatch = millis() - startTimeStopWatch + oldElapsedTimeStopWatch;
-  } else {
-    elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
-  }
-  appState.stopwatch.ms = elapsedTimeStopWatch;
-  appState.stopwatch.running = stopWatchRunning;
+  // Die alte Stopwatch-Struktur bleibt vorerst als kompatibler Alias erhalten.
+  // Inhaltlich stammt sie jetzt aus der automatischen Shot-Session.
+  appState.stopwatch.ms = shot.elapsed_ms;
+  appState.stopwatch.running = shot.running;
+
+  appState.shot.session_id = shot.session_id;
+  appState.shot.state = coffeeShotSessionStateName(shot.state);
+  appState.shot.armed = shot.armed;
+  appState.shot.running = shot.running;
+  appState.shot.completed = shot.completed;
+  appState.shot.elapsed_ms = shot.elapsed_ms;
+  appState.shot.current_weight_g = shot.current_weight_g;
+  appState.shot.peak_weight_g = shot.peak_weight_g;
+  appState.shot.final_weight_g = shot.final_weight_g;
+  appState.shot.current_flow_g_s = shot.current_flow_g_s;
+  appState.shot.sample_count = shot.sample_count;
+  appState.shot.sample_buffer_full = shot.sample_buffer_full;
 
   appState.selection.siebtraeger = selectedST;
   for (byte i = 0; i < SIEBTRAEGER_COUNT; ++i) {
@@ -863,6 +935,9 @@ void RedrawTFTWarnungen();
 void RefreshTFTCursor();
 void RefreshTFTTaraWait();
 void RefreshTFTTaraFinished();
+void RedrawTFTShotPage();
+void RefreshTFTShotPage();
+void RefreshTFTBluetoothStatus();
 void DisplayOnOff();
 void doTara();
 void stringifySetWeight();
@@ -1065,6 +1140,66 @@ static void broadcastWebStateFromGlobals()
 {
   updateCoffeeAppStateFromGlobals();
   coffeeWebBroadcastState(appState);
+}
+
+static void appendShotLog(const char* format, ...)
+{
+  char message[96];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(message, sizeof(message), format, args);
+  va_end(args);
+  coffeeBleScaleAppendLog(message);
+}
+
+static void armShotSessionAfterTare()
+{
+  resetShotWeightFilter(0.0f);
+  coffeeShotSessionArm(millis(), 0.0f);
+  shotDisplayInitialised = false;
+  appendShotLog("Shot bereit - warte auf ersten Tropfen");
+  if (displayOff == 0 && pageID == 3) {
+    RedrawTFTShotPage();
+  }
+}
+
+static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t nowMs, float weightG)
+{
+  if (event == CoffeeShotSessionEvent::None) {
+    return;
+  }
+
+  shotDisplayInitialised = false;
+  if (event == CoffeeShotSessionEvent::Started) {
+    appendShotLog("Shot gestartet bei %.1f g", static_cast<double>(weightG));
+  } else if (event == CoffeeShotSessionEvent::Stopped) {
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(nowMs);
+    appendShotLog("Shot beendet: %.1f g in %.1f s",
+                  static_cast<double>(shot.final_weight_g),
+                  static_cast<double>(shot.elapsed_ms) / 1000.0);
+  }
+
+  if (displayOff == 0 && pageID == 3) {
+    RedrawTFTShotPage();
+  }
+  broadcastWebStateFromGlobals();
+}
+
+static void tickShotSession(uint32_t nowMs)
+{
+  const CoffeeShotSessionStatus before = coffeeShotSessionStatus(nowMs);
+  if (scaleUiMode != SCALE_UI_MODE_SHOT && !before.armed && !before.running) {
+    return;
+  }
+
+  const CoffeeShotSessionEvent event = coffeeShotSessionTick(nowMs, shotWeightFiltered);
+  handleShotSessionEvent(event, nowMs, shotWeightFiltered);
+
+  const CoffeeShotSessionStatus after = coffeeShotSessionStatus(nowMs);
+  if (before.armed && !after.armed && event == CoffeeShotSessionEvent::None) {
+    appendShotLog("Shot-Bereitschaft beendet");
+    shotDisplayInitialised = false;
+  }
 }
 
 static bool selectSiebtraegerFromWeb(byte index)
@@ -1364,10 +1499,10 @@ static bool cmdStartsWith(const char* cmd, const char* prefix)
 
 static constexpr const char* CMD_SAVE_DOSE = "save_dose";
 static constexpr const char* CMD_TARE = "tare";
-static constexpr const char* CMD_STOPWATCH_START_STOP = "stopwatch_start_stop";
-static constexpr const char* CMD_STOPWATCH_RESET = "stopwatch_reset";
 static constexpr const char* CMD_MODE_SINGLE_DOSE = "mode_single_dose";
 static constexpr const char* CMD_MODE_SHOT = "mode_shot";
+static constexpr const char* CMD_MODE_DATA = "mode_data";
+static constexpr const char* CMD_MODE_SETTINGS = "mode_settings";
 static constexpr const char* CMD_AUTODETECT_ON = "autodetect_on";
 static constexpr const char* CMD_AUTODETECT_OFF = "autodetect_off";
 static constexpr const char* CMD_WEB_WIZARD_BEGIN = "web_wizard_begin";
@@ -1453,18 +1588,32 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
     beginWebWizardCore();
   }
   if (displayOff == 0) {
-    RefreshTFTTaraWait();
+    if (pageID == 3) {
+      tft.fillRect(92, 28, 208, 20, TFT_BLACK);
+      tft.setTextDatum(TR_DATUM);
+      tft.setFreeFont(FSS9);
+      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+      tft.drawString("Tarieren...", 300, 32, GFXFF);
+    } else {
+      RefreshTFTTaraWait();
+    }
   }
 
   doTara();
 
-  if (!webWizardTare && autoDetect == 0 && scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE) {
+  if (!webWizardTare && scaleUiMode == SCALE_UI_MODE_SHOT) {
+    armShotSessionAfterTare();
+  } else if (!webWizardTare && autoDetect == 0 && scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE) {
     scheduleAutoDetectPostTara(true, false);
   }
 
   if (displayOff == 0) {
-    RefreshTFTTaraFinished();
-    RefreshFooter();
+    if (pageID == 3) {
+      RedrawTFTShotPage();
+    } else {
+      RefreshTFTTaraFinished();
+      RefreshFooter();
+    }
   }
 
   broadcastWebStateFromGlobals();
@@ -1492,20 +1641,28 @@ static void handleBleCommands()
       case CoffeeBleScaleCommand::Tare:
         handleWebTareCommand(CMD_TARE, handled);
         break;
-      case CoffeeBleScaleCommand::TimerStart:
-        if (!stopWatchRunning) {
-          toggleStopwatchCore();
-        }
+      case CoffeeBleScaleCommand::TimerStart: {
+        const uint32_t nowMs = millis();
+        handleShotSessionEvent(
+          coffeeShotSessionExternalStart(nowMs, shotWeightFiltered),
+          nowMs,
+          shotWeightFiltered);
         handled = true;
         break;
-      case CoffeeBleScaleCommand::TimerStop:
-        if (stopWatchRunning) {
-          toggleStopwatchCore();
-        }
+      }
+      case CoffeeBleScaleCommand::TimerStop: {
+        const uint32_t nowMs = millis();
+        handleShotSessionEvent(
+          coffeeShotSessionExternalStop(nowMs, shotWeightFiltered),
+          nowMs,
+          shotWeightFiltered);
         handled = true;
         break;
+      }
       case CoffeeBleScaleCommand::TimerReset:
-        resetStopwatchCore();
+        coffeeShotSessionArm(millis(), shotWeightFiltered);
+        appendShotLog("Shot bereit per BLE-RESET");
+        shotDisplayInitialised = false;
         handled = true;
         break;
       case CoffeeBleScaleCommand::None:
@@ -1528,7 +1685,7 @@ static void tickBleScale(uint32_t nowMs)
     coffeeBleScaleBegin("WeighMyBru");
   }
 
-  coffeeBleScaleTick(nowMs, actualWeight, true);
+  coffeeBleScaleTick(nowMs, currentScaleDisplayWeight(), true);
   handleBleCommands();
 #else
   (void)nowMs;
@@ -1787,10 +1944,21 @@ static bool setDisplayTimeoutFromWeb(uint16_t minutes)
   return true;
 }
 
-static bool setScaleUiModeFromWeb(ScaleUiMode mode)
+static bool setScaleUiModeAndHmiPageFromWeb(ScaleUiMode mode, byte targetPage)
 {
+  if (mode == SCALE_UI_MODE_SINGLE_DOSE) {
+    const uint32_t nowMs = millis();
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(nowMs);
+    if (shot.running) {
+      handleShotSessionEvent(
+        coffeeShotSessionExternalStop(nowMs, shotWeightFiltered),
+        nowMs,
+        shotWeightFiltered);
+    }
+    coffeeShotSessionCancelArm();
+  }
   scaleUiMode = mode;
-  const byte targetPage = mode == SCALE_UI_MODE_SHOT ? 3 : 0;
+  shotDisplayInitialised = false;
 
   if (pageID != targetPage) {
     pageID = targetPage;
@@ -1810,6 +1978,12 @@ static bool setScaleUiModeFromWeb(ScaleUiMode mode)
   return true;
 }
 
+static bool setScaleUiModeFromWeb(ScaleUiMode mode)
+{
+  const byte targetPage = mode == SCALE_UI_MODE_SHOT ? 3 : 0;
+  return setScaleUiModeAndHmiPageFromWeb(mode, targetPage);
+}
+
 static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
 {
   handled = true;
@@ -1822,16 +1996,16 @@ static bool handleWebRuntimeCommand(const char* cmd, bool& handled)
     return setScaleUiModeFromWeb(SCALE_UI_MODE_SHOT);
   }
 
-  if (cmdEquals(cmd, CMD_STOPWATCH_START_STOP)) {
-    toggleStopwatchCore();
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, CMD_MODE_DATA)) {
+    // WebUI-Daten verlassen den Shot-Modus und zeigen im HMI nur die
+    // Daten-Uebersicht. Unterseiten werden weiterhin lokal bedient.
+    return setScaleUiModeAndHmiPageFromWeb(SCALE_UI_MODE_SINGLE_DOSE, 14);
   }
 
-  if (cmdEquals(cmd, CMD_STOPWATCH_RESET)) {
-    resetStopwatchCore();
-    broadcastWebStateFromGlobals();
-    return true;
+  if (cmdEquals(cmd, CMD_MODE_SETTINGS)) {
+    // WebUI-Einstellungen verlassen den Shot-Modus und oeffnen im HMI nur
+    // die Einstellungs-Startseite. Die WebUI-Untertabs steuern das HMI nicht.
+    return setScaleUiModeAndHmiPageFromWeb(SCALE_UI_MODE_SINGLE_DOSE, 1);
   }
 
   if (cmdEquals(cmd, CMD_AUTODETECT_ON)) {
@@ -2097,6 +2271,135 @@ void EraseTFTStopWatch(){
     tft.drawString("                         ",170,72,GFXFF);
 }
 
+static int32_t roundedTenths(float value)
+{
+  return static_cast<int32_t>(lroundf((isfinite(value) ? value : 0.0f) * 10.0f));
+}
+
+static void formatShotElapsed(uint32_t elapsedMs, char* destination, size_t destinationSize)
+{
+  const uint32_t totalTenths = elapsedMs / 100UL;
+  const uint32_t tenths = totalTenths % 10UL;
+  const uint32_t totalSeconds = totalTenths / 10UL;
+  const uint32_t seconds = totalSeconds % 60UL;
+  const uint32_t totalMinutes = totalSeconds / 60UL;
+  const uint32_t minutes = totalMinutes % 60UL;
+  const uint32_t hours = totalMinutes / 60UL;
+
+  if (hours > 0) {
+    snprintf(destination, destinationSize, "%02lu:%02lu:%02lu.%lu",
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes),
+             static_cast<unsigned long>(seconds),
+             static_cast<unsigned long>(tenths));
+  } else {
+    snprintf(destination, destinationSize, "%02lu:%02lu.%lu",
+             static_cast<unsigned long>(minutes),
+             static_cast<unsigned long>(seconds),
+             static_cast<unsigned long>(tenths));
+  }
+}
+
+static const char* shotStatusText(const CoffeeShotSessionStatus& shot)
+{
+  if (shot.running) return "Shot laeuft";
+  if (shot.armed) return "Warte auf Tropfen";
+  if (shot.completed) return "Shot fertig";
+  return "Tara druecken";
+}
+
+static uint16_t shotStatusColor(const CoffeeShotSessionStatus& shot)
+{
+  if (shot.running) return TFT_GREEN;
+  if (shot.armed) return TFT_CYAN;
+  if (shot.completed) return TFT_WHITE;
+  return 0x7BEF;
+}
+
+void RedrawTFTShotPage()
+{
+  if (pageID != 3) {
+    return;
+  }
+
+  tft.fillRect(0, 25, 320, 109, TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  tft.setFreeFont(FSS9);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Status:", 24, 32, GFXFF);
+  tft.drawString("Zeit:", 24, 56, GFXFF);
+  tft.drawString("Gewicht:", 24, 84, GFXFF);
+  tft.drawString("Flow:", 24, 108, GFXFF);
+
+  shotDisplayInitialised = false;
+  RefreshTFTShotPage();
+}
+
+void RefreshTFTShotPage()
+{
+  if (pageID != 3 || displayOff != 0) {
+    return;
+  }
+
+  const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+  const uint32_t displayTenths = shot.elapsed_ms / 100UL;
+  const int32_t weightTenths = roundedTenths(shotWeightFiltered);
+  const int32_t flowTenths = roundedTenths(shot.current_flow_g_s);
+  const bool stateChanged = !shotDisplayInitialised ||
+                            oldShotDisplayState != shot.state ||
+                            oldShotDisplayArmed != shot.armed ||
+                            oldShotDisplayRunning != shot.running ||
+                            oldShotDisplayCompleted != shot.completed;
+
+  if (stateChanged) {
+    tft.fillRect(90, 28, 210, 20, TFT_BLACK);
+    tft.setTextDatum(TR_DATUM);
+    tft.setFreeFont(FSS9);
+    tft.setTextColor(shotStatusColor(shot), TFT_BLACK);
+    tft.drawString(shotStatusText(shot), 300, 32, GFXFF);
+    oldShotDisplayState = shot.state;
+    oldShotDisplayArmed = shot.armed;
+    oldShotDisplayRunning = shot.running;
+    oldShotDisplayCompleted = shot.completed;
+  }
+
+  if (!shotDisplayInitialised || oldShotDisplayTenths != displayTenths) {
+    char timeText[20];
+    formatShotElapsed(shot.elapsed_ms, timeText, sizeof(timeText));
+    tft.fillRect(92, 49, 208, 28, TFT_BLACK);
+    tft.setTextDatum(TR_DATUM);
+    tft.setFreeFont(FSS12);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(timeText, 300, 52, GFXFF);
+    oldShotDisplayTenths = displayTenths;
+  }
+
+  if (!shotDisplayInitialised || oldShotDisplayWeightTenths != weightTenths) {
+    char weightText[24];
+    snprintf(weightText, sizeof(weightText), "%.1f g",
+             static_cast<double>(weightTenths) / 10.0);
+    tft.fillRect(112, 80, 188, 22, TFT_BLACK);
+    tft.setTextDatum(TR_DATUM);
+    tft.setFreeFont(FSS9);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(weightText, 300, 84, GFXFF);
+    oldShotDisplayWeightTenths = weightTenths;
+  }
+
+  if (!shotDisplayInitialised || oldShotDisplayFlowTenths != flowTenths) {
+    char flowText[24];
+    snprintf(flowText, sizeof(flowText), "%.1f g/s",
+             static_cast<double>(flowTenths) / 10.0);
+    tft.fillRect(112, 104, 188, 22, TFT_BLACK);
+    tft.setTextDatum(TR_DATUM);
+    tft.setFreeFont(FSS9);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.drawString(flowText, 300, 108, GFXFF);
+    oldShotDisplayFlowTenths = flowTenths;
+  }
+
+  shotDisplayInitialised = true;
+}
 
 
 //############################################################################################
@@ -2787,6 +3090,10 @@ void EraseTFTShotsIPMahlgew()
 
 void RedrawTFTWarnungen()
 {
+  if (warnungenDisplayed[pageID] == 0) {
+    return;
+  }
+
   tft.setFreeFont(FSS9);                 // Select the font MonoSpace 9pt
   tft.setTextColor(TFT_RED, TFT_BLACK);
   if (warnungenDisplayed[pageID] == 1)
@@ -2860,13 +3167,42 @@ void RedrawTFTWarnungen()
   
   
   }
-  if (warnungenDisplayed[pageID] == 0)
-  {
-    tft.setTextDatum(TR_DATUM); // Set datum to Top Right
-    tft.drawString(String("                           "),300,72,GFXFF);
-    tft.drawString(String("                             "),300,92,GFXFF);
-    tft.drawString(String("                             "),300,112,GFXFF);
+}
+
+static void drawTFTBluetoothRune(uint16_t color, bool crossedOut)
+{
+  const int x = 264;
+  const int y = 0;
+  tft.fillRect(x, y, 16, 16, TFT_BLACK);
+
+  tft.drawLine(x + 7, y + 2, x + 7, y + 14, color);
+  tft.drawLine(x + 7, y + 2, x + 12, y + 6, color);
+  tft.drawLine(x + 12, y + 6, x + 7, y + 8, color);
+  tft.drawLine(x + 7, y + 8, x + 12, y + 11, color);
+  tft.drawLine(x + 12, y + 11, x + 7, y + 14, color);
+  tft.drawLine(x + 7, y + 8, x + 3, y + 5, color);
+  tft.drawLine(x + 7, y + 8, x + 3, y + 12, color);
+
+  if (crossedOut) {
+    tft.drawLine(x + 2, y + 14, x + 14, y + 2, color);
   }
+}
+
+void RefreshTFTBluetoothStatus()
+{
+  const CoffeeBleScaleStatus ble = coffeeBleScaleStatus();
+  if (ble.connected) {
+    drawTFTBluetoothRune(TFT_GREEN, false);
+  } else if (ble.started || ble.advertising) {
+    drawTFTBluetoothRune(TFT_BLUE, false);
+  } else {
+    drawTFTBluetoothRune(0x7BEF, true);
+  }
+
+  oldBleStartedDisplayed = ble.started;
+  oldBleAdvertisingDisplayed = ble.advertising;
+  oldBleConnectedDisplayed = ble.connected;
+  bleHeaderStatusInitialised = true;
 }
 
 void RefreshTFTWLANConnected(uint8_t signalLevel)
@@ -3056,6 +3392,27 @@ void RefreshFooter()
     u8f.setForegroundColor(TFT_WHITE);
     u8f.drawGlyph(258,166,0x25bc);
   }
+  if (footerOfPageID[pageID] == 3)
+  {
+    // Clear the complete footer text row before drawing the shorter Shot labels.
+    // Otherwise remnants of the former Start/Stop/Reset labels stay visible.
+    tft.fillRect(0, 135, 320, 25, TFT_BLACK);
+    tft.drawLine(1, 134, 319, 134, TFT_GREEN);
+    tft.setTextDatum(TC_DATUM);
+    tft.drawString("Tara",168,140,GFXFF);
+    tft.drawString("Home",258,140,GFXFF);
+    tft.setTextDatum(TL_DATUM);
+
+    u8f.setFontDirection(0);
+    u8f.setBackgroundColor(TFT_BLACK);
+    u8f.setFont(u8g2_font_unifont_t_symbols);
+    u8f.setFontMode(0);
+    u8f.setForegroundColor(TFT_BLACK);
+    u8f.drawGlyph(48,166,0x25bc);
+    u8f.setForegroundColor(TFT_WHITE);
+    u8f.drawGlyph(166,166,0x25bc);
+    u8f.drawGlyph(258,166,0x25bc);
+  }
 }
 
 void RefreshTFTAutodetect()  // nur auf pageID == 0 und nur wenn autodetect == 1
@@ -3155,13 +3512,14 @@ void RefreshTFTDisplay()
   if (autoDetect == 1)
   {
     tft.setTextDatum(TR_DATUM); // Set datum to Top Right
-    tft.drawString(String("Auto"),280,2,GFXFF);
+    tft.drawString(String("Auto"),258,2,GFXFF);
   }
   if (autoDetect == 0)
   {
     tft.setTextDatum(TR_DATUM); // Set datum to Top Right
-    tft.drawString(String("         "),280,2,GFXFF);
+    tft.drawString(String("         "),258,2,GFXFF);
   }
+  RefreshTFTBluetoothStatus();
   tft.drawLine(1, 24, 319, 24, TFT_GREEN);
 
   // MenuEntries der Seite
@@ -3257,6 +3615,10 @@ void RefreshTFTDisplay()
   if (pageID == 21)
   {
     RefreshTFTShots();
+  }
+  if (pageID == 3)
+  {
+    RedrawTFTShotPage();
   }
 
   // Footer
@@ -3655,6 +4017,10 @@ static bool isHmiScaleAutomationBlocked()
 static void updateScaleUiModeFromHmiPage()
 {
   if (pageID == 0) {
+    if (scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE) {
+      coffeeShotSessionCancelArm();
+      shotDisplayInitialised = false;
+    }
     scaleUiMode = SCALE_UI_MODE_SINGLE_DOSE;
   } else if (pageID == 3) {
     scaleUiMode = SCALE_UI_MODE_SHOT;
@@ -3775,7 +4141,6 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
           menuItemPos = encoderPos;
           RefreshTFTDisplay();
           RefreshTFTCursor();
-          RedrawTFTStopWatch();
           pageEntered = false;
   
         }
@@ -3891,22 +4256,11 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
       
       if (callOfFunctionTerminated == 1){
        if (pageID == 3){
+        // Auf der Shot-Waage gibt es keine manuelle Start/Stop-Bedienung mehr.
+        // Der Timer startet automatisch beim ersten sicher erkannten Tropfen.
         buttonPressedRotarySW = 0;
         callOfFunctionTerminated = 0;
-        pageEntered = true;
-                
-        callOfFunctionTerminated = 0;
-        stopWatchRunning = !stopWatchRunning;
-        
-        if (stopWatchRunning == 1){
-          startTimeStopWatch = millis();
-          oldElapsedTimeStopWatch = elapsedTimeStopWatch;
-        }
-        if (stopWatchRunning == 0){
-          stopTimeStopWatch = millis();
-          elapsedTimeStopWatch = stopTimeStopWatch - startTimeStopWatch + oldElapsedTimeStopWatch;
-        }
-        //RefreshTFTStopWatch();
+        pageEntered = false;
         }
        
        if (pageID != 3) 
@@ -3999,12 +4353,17 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
         }
     
     if (pageID == 3){
-           //stopWatchRunning = 0;
-           stopTimeStopWatch = millis();
-           startTimeStopWatch = stopTimeStopWatch;
-           oldElapsedTimeStopWatch = 0;
-           elapsedTimeStopWatch = 0;
-           RedrawTFTStopWatch();
+           taraRequest = true;
+           tft.fillRect(90, 28, 210, 20, TFT_BLACK);
+           tft.setTextDatum(TR_DATUM);
+           tft.setFreeFont(FSS9);
+           tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+           tft.drawString("Tarieren...", 300, 32, GFXFF);
+           doTara();
+           if (taraRequest == false) {
+             armShotSessionAfterTare();
+           }
+           RedrawTFTShotPage();
      }
     //#######################################
     // zurück-Button    
@@ -4086,9 +4445,6 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
    {  
     lastActionAgainstDisplayOff = millis();   
     if (pageID >= 1){                       // Wenn nicht auf der Root-Seite  
-      if(pageID == 3){
-        EraseTFTStopWatch();
-      }               
       highlightedMenuItemWhenEnteringPage[pageID] = menuItemPos;    //zum Merken des zuletzt gewählten Menu-Eintrags. Wird bei Neustart der Mühle wieder zurückgesetzt
       debugln("Home");
       newPageID = 0;
@@ -4172,7 +4528,6 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
 
   if (callFunctionOfPage[3] == 1){
     callFunctionOfPage[3] = 0;
-    RedrawTFTStopWatch();
     callOfFunctionTerminated = 1;
   }
 
@@ -4545,6 +4900,8 @@ void setup()
   LoadCell.start(2000, true);                      // true: Wird am Anfang tariert.   
   LoadCell.setCalFactor(calFactor);
   loadCellInitializing = false;
+  coffeeShotSessionReset();
+  resetShotWeightFilter(0.0f);
 
   WiFi.disconnect(true, true);
   WiFi.onEvent(WiFiStationConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
@@ -4582,10 +4939,15 @@ void loop(void)
   coffeeOtaLoop();
   //ws.cleanupClients();
   rotaryMenu();
-  LoadCell.update();
+  const bool newLoadCellData = LoadCell.update();
   actualWeight = LoadCell.getData();
+  if (newLoadCellData) {
+    updateShotWeightFilter(actualWeight);
+  }
   updateScaleUiModeFromHmiPage();
-  tickBleScale(millis());
+  const uint32_t nowLoopMs = millis();
+  tickShotSession(nowLoopMs);
+  tickBleScale(nowLoopMs);
   updateCoffeeAppStateFromGlobals();
   checkHmiWifiSetupSaved();
   const unsigned long nowWebMs = millis();
@@ -4593,9 +4955,14 @@ void loop(void)
   const bool webWeightChanged = !hasWebBroadcastWeight ||
     webWeightDelta > WEB_STATE_WEIGHT_BROADCAST_DELTA_G ||
     webWeightDelta < -WEB_STATE_WEIGHT_BROADCAST_DELTA_G;
+  const bool shotTelemetryActive = appState.system.shot_mode &&
+    (appState.shot.armed || appState.shot.running);
+  const bool shotTelemetryDue = shotTelemetryActive &&
+    (nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_SHOT_BROADCAST_INTERVAL_MS);
 
   if (coffeeWebHasClients() &&
       ((nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_FULL_BROADCAST_INTERVAL_MS) ||
+       shotTelemetryDue ||
        (webWeightChanged && nowWebMs - lastWebWeightBroadcastMs >= WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS)))
   {
     lastWebStateBroadcastMs = nowWebMs;
@@ -4629,10 +4996,10 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   }
   saveGrindResult();
   //################################
-// Stoppuhr
-//#########################################
+  // Shot-Waage
+  //#########################################
   if (pageID == 3 ){
-    RefreshTFTStopWatch();
+    RefreshTFTShotPage();
   }
   if (pageID == 11 || pageID == 17){
     RefreshTFTTimeToCleanMuehle();
@@ -4672,6 +5039,18 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   oldstatuswlanSignalLevel = 255;
  }
 
+ if (displayOff == 0)
+ {
+  const CoffeeBleScaleStatus bleHeader = coffeeBleScaleStatus();
+  if (!bleHeaderStatusInitialised ||
+      bleHeader.started != oldBleStartedDisplayed ||
+      bleHeader.advertising != oldBleAdvertisingDisplayed ||
+      bleHeader.connected != oldBleConnectedDisplayed)
+  {
+    RefreshTFTBluetoothStatus();
+  }
+ }
+
 //##############################################
 // Warnungen
 //##############################################
@@ -4691,7 +5070,7 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   if (displayKaffeemReinigen == 1) anzahlWarnungen++;
   if (displayFilterwechseln == 1) anzahlWarnungen++;
 
-  if (anzahlWarnungen != oldanzahlWarnungenDisplayed)
+  if (warnungenDisplayed[pageID] == 1 && anzahlWarnungen != oldanzahlWarnungenDisplayed)
   {
     RedrawTFTWarnungen();
     oldanzahlWarnungenDisplayed = anzahlWarnungen;
@@ -4719,14 +5098,10 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
     olddisplayKaffeemReinigen = 1;
     olddisplayFilterwechseln = 1;
   }
-  
-  if (warnungenDisplayed[pageID] == 0)
-  {
-    RedrawTFTWarnungen();
-    olddisplayMuehleReinigen = 1;
-    olddisplayKaffeemReinigen = 1;
-    olddisplayFilterwechseln = 1;
-  }
+
+  // Pages without warning rows are cleared when the page is drawn. Do not
+  // repeatedly erase these coordinates here because page 3 uses them for
+  // live Shot weight and flow values.
 
   // Display off and on
 

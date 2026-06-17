@@ -24,6 +24,21 @@ struct StopwatchState {
   bool running = false;
 };
 
+struct ShotSessionState {
+  uint32_t session_id = 0;
+  String state = "idle";
+  bool armed = false;
+  bool running = false;
+  bool completed = false;
+  uint32_t elapsed_ms = 0;
+  float current_weight_g = 0.0f;
+  float peak_weight_g = 0.0f;
+  float final_weight_g = 0.0f;
+  float current_flow_g_s = 0.0f;
+  uint16_t sample_count = 0;
+  bool sample_buffer_full = false;
+};
+
 struct SelectionState {
   int siebtraeger = 0;
   String siebtraeger_names[4];
@@ -120,6 +135,7 @@ struct StatusState {
 struct AppState {
   WeightState weight;
   StopwatchState stopwatch;
+  ShotSessionState shot;
   SelectionState selection;
   CalibrationState calibration;
   GefaessState gefaesse;

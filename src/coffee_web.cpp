@@ -3,6 +3,7 @@
 #include <SPIFFS.h>
 
 #include "coffee_wifi.h"
+#include "shot_session.h"
 
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
@@ -27,7 +28,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=legacy-ble-20260616a">
+  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260617a">
 </head>
 <body>
 <main>
@@ -95,13 +96,31 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   </div>
 
   <div id="timerPage" class="page hidden">
-  <section class="card">
+  <section class="card shot-card">
     <div class="label">Shot-Waage</div>
-    <div class="value stopwatch-value" id="stopwatch">00:00:00:0</div>
-    <div class="grid" style="margin-top: 12px;">
-      <button id="swToggle" class="secondary" disabled>Start / Stop</button>
-      <button id="swReset" class="secondary" disabled>Reset</button>
+    <div class="shot-time" id="shotTime">00:00.0</div>
+    <div class="shot-metrics">
+      <div class="shot-metric"><span>Gewicht</span><strong><span id="shotWeight" class="shot-metric-value">0.0</span><span class="shot-metric-unit">g</span></strong></div>
+      <div class="shot-metric"><span>Flow</span><strong class="shot-flow"><span id="shotFlow" class="shot-metric-value">0.0</span><span class="shot-metric-unit">g/s</span></strong></div>
     </div>
+    <div id="shotSessionStatus" class="shot-session-status">Tara drücken, um die Shot-Erkennung vorzubereiten.</div>
+    <div class="shot-chart-panel">
+      <div class="shot-chart-header">
+        <span class="label">Shot-Verlauf</span>
+        <div class="shot-chart-legend" aria-hidden="true">
+          <span><i class="shot-legend-dot weight"></i>Gewicht</span>
+          <span><i class="shot-legend-dot flow"></i>Flow</span>
+        </div>
+      </div>
+      <div id="shotChartWrap" class="shot-chart-wrap">
+        <canvas id="shotChart" class="shot-chart" role="img" aria-label="Verlauf von Gewicht und Flow während des Shots"></canvas>
+        <div id="shotChartEmpty" class="shot-chart-empty">Noch kein Shot-Verlauf vorhanden.</div>
+      </div>
+    </div>
+    <div class="button-row" style="margin-top: 14px;">
+      <button id="shotTare" class="compact secondary">Tara</button>
+    </div>
+    <div class="small shot-hint">Der Timer startet automatisch beim ersten sicher erkannten Tropfen.</div>
   </section>
   </div>
 
@@ -333,9 +352,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=legacy-ble-20260616a"></script>
-<script src="/coffee_render.js?v=legacy-ble-20260616a"></script>
-<script src="/coffee_events.js?v=legacy-ble-20260616a"></script>
+<script src="/coffee_core.js?v=legacy-shot-20260617a"></script>
+<script src="/coffee_render.js?v=legacy-shot-20260617a"></script>
+<script src="/coffee_events.js?v=legacy-shot-20260617a"></script>
 </body>
 </html>)rawliteral";
 
@@ -497,6 +516,44 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       color: #f8fafc;
       text-shadow: 0 10px 28px rgba(0,0,0,.36);
     }
+    .shot-card { overflow: hidden; }
+    .shot-time {
+      margin: 10px 0 14px; text-align: right; font-size: 3rem; line-height: 1;
+      font-weight: 800; letter-spacing: -0.05em; font-variant-numeric: tabular-nums;
+      color: #f8fafc; text-shadow: 0 10px 28px rgba(0,0,0,.36);
+    }
+    .shot-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .shot-metric { padding: 12px; border-radius: 14px; border: 1px solid rgba(148,163,184,.18); background: #0b1520; }
+    .shot-metric > span:first-child { display: block; color: var(--muted); font-size: .84rem; margin-bottom: 5px; }
+    .shot-metric strong {
+      display: flex; justify-content: flex-end; align-items: baseline; gap: .35rem;
+      text-align: right; font-variant-numeric: tabular-nums;
+    }
+    .shot-metric-value { font-size: 2.35rem; line-height: 1; font-weight: 800; letter-spacing: -.03em; }
+    .shot-metric-unit { font-size: 1.15rem; line-height: 1; font-weight: 700; }
+    .shot-flow { color: #93c5fd; }
+    .shot-session-status { margin-top: 12px; min-height: 1.4em; color: var(--muted-2); }
+    .shot-session-status.running { color: #86efac; }
+    .shot-session-status.armed { color: #93c5fd; }
+    .shot-session-status.completed { color: #f8fafc; }
+    .shot-chart-panel {
+      margin-top: 14px; padding: 12px; border-radius: 14px;
+      border: 1px solid rgba(148,163,184,.18); background: #0b1520;
+    }
+    .shot-chart-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .shot-chart-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; color: var(--muted); font-size: .78rem; }
+    .shot-chart-legend span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .shot-legend-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; }
+    .shot-legend-dot.weight { background: #86efac; }
+    .shot-legend-dot.flow { background: #93c5fd; }
+    .shot-chart-wrap { position: relative; width: 100%; height: 280px; min-height: 220px; }
+    .shot-chart { display: block; width: 100%; height: 100%; }
+    .shot-chart-empty {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 24px; text-align: center; color: var(--muted); font-size: .9rem; pointer-events: none;
+    }
+    .shot-chart-empty.is-hidden { display: none; }
+    .shot-hint { margin-top: 10px; }
     button {
       width: 100%;
       border: 1px solid rgba(85,195,66,.36);
@@ -713,8 +770,12 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .danger { background: linear-gradient(180deg, #ef4444, #b91c1c); border-color: rgba(248,113,113,.45); }
     @media (max-width: 640px) {
       body { padding: 14px 14px calc(96px + env(safe-area-inset-bottom)); }
-      .grid, .stats-grid { grid-template-columns: 1fr; }
-      .weight, .stopwatch-value { font-size: 2.55rem; }
+      .grid, .stats-grid, .shot-metrics { grid-template-columns: 1fr; }
+      .weight, .stopwatch-value, .shot-time { font-size: 2.55rem; }
+      .shot-metric-value { font-size: 2.65rem; }
+      .shot-metric-unit { font-size: 1.2rem; }
+      .shot-chart-wrap { height: 245px; min-height: 210px; }
+      .shot-chart-header { align-items: flex-start; }
       .weight-row { flex-direction: column; align-items: stretch; }
       .maintenance-jump-button { width: 100%; justify-content: center; }
       .maintenance-settings-row { grid-template-columns: 1fr; }
@@ -730,9 +791,9 @@ static const char COFFEE_CORE_JS[] PROGMEM = R"rawliteral(// ===== WebSocket / g
 let ws;
 let lastState = null;
 let maintenanceDueAtMs = { machine: 0, grinder: 0, filter: 0 };
-let stopwatchBaseClientMs = 0;
-let stopwatchBaseMs = 0;
-let stopwatchRunning = false;
+let shotTimerBaseClientMs = 0;
+let shotTimerBaseMs = 0;
+let shotTimerRunning = false;
 let targetWeightDirty = false;
 let pendingConfirm = null;
 let wizard = { type: null, step: 0, calibrationWeight: null };
@@ -740,6 +801,12 @@ let wizardEndSent = true;
 let currentMainTab = 'scalePage';
 let initialScaleModeSyncDone = false;
 let lastShotMode = null;
+let shotChartSessionId = null;
+let shotChartSamples = [];
+let shotChartLoading = false;
+let shotChartGeneration = 0;
+let shotChartFetchErrorLogged = false;
+let shotChartResizeObserver = null;
 const el = id => document.getElementById(id);
 const setText = (id, value) => { el(id).textContent = value; };
 const GEFAESS_COUNT = 4;
@@ -748,8 +815,6 @@ const GEFAESS_NAMES = ['Gefäß 1', 'Gefäß 2', 'Gefäß 3', 'Gefäß 4'];
 const CMD = Object.freeze({
   saveDose: 'save_dose',
   tare: 'tare',
-  stopwatchStartStop: 'stopwatch_start_stop',
-  stopwatchReset: 'stopwatch_reset',
   autodetectOn: 'autodetect_on',
   autodetectOff: 'autodetect_off',
   wizardEnd: 'web_wizard_end',
@@ -765,7 +830,9 @@ const CMD = Object.freeze({
   setStatsTotalsPrefix: 'set_stats_totals_',
   setDisplayTimeoutPrefix: 'set_display_timeout_',
   modeSingleDose: 'mode_single_dose',
-  modeShot: 'mode_shot'
+  modeShot: 'mode_shot',
+  modeData: 'mode_data',
+  modeSettings: 'mode_settings'
 });
 const fmtG = v => {
   let n = Number(v || 0);
@@ -787,6 +854,16 @@ const fmtStopwatchTime = ms => {
   if (days === 1) return `1 Tag, ${clock}`;
   if (days > 1) return `${days} Tage, ${clock}`;
   return clock;
+};
+const fmtShotTime = ms => {
+  ms = Math.max(0, Number(ms || 0));
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const tenths = Math.floor((ms % 1000) / 100);
+  if (hours > 0) return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}.${tenths}`;
+  return `${pad2(minutes)}:${pad2(seconds)}.${tenths}`;
 };
 const fmtDayClockDuration = seconds => {
   const total = Math.max(0, Math.floor(Math.abs(Number(seconds) || 0)));
@@ -844,6 +921,10 @@ function showTab(targetPageId) {
   // Beim Seitenwechsel immer oben starten.
   // Sonst bleibt die Scrollposition der vorherigen Seite erhalten.
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+
+  if (targetPageId === 'timerPage') {
+    requestAnimationFrame(drawShotGraph);
+  }
 }
 
 function showSettingsTab(targetPanelId) {
@@ -882,11 +963,15 @@ function handleMainTabClick(targetPageId) {
     sendCommand(CMD.modeSingleDose, 'Modus Single-Dose gesendet …');
   } else if (targetPageId === 'timerPage') {
     sendCommand(CMD.modeShot, 'Modus Shot-Waage gesendet …');
+  } else if (targetPageId === 'statsPage') {
+    sendCommand(CMD.modeData, 'Shot-Modus beendet, HMI auf Daten …');
+  } else if (targetPageId === 'settingsPage') {
+    sendCommand(CMD.modeSettings, 'Shot-Modus beendet, HMI auf Einstellungen …');
   }
 }
 
 function openMaintenanceSettings() {
-  showTab('settingsPage');
+  handleMainTabClick('settingsPage');
   showSettingsTab('settingsMaintenancePanel');
 }
 
@@ -1389,31 +1474,232 @@ function renderMaintenanceIntervalSettings(m) {
   }).join('');
 }
 
-// ===== Stoppuhr =====
-function syncStopwatchTimer(sw) {
-  const newMs = Math.max(0, Number(sw?.ms || 0));
-  const newRunning = !!sw?.running;
-  const nowMs = Date.now();
+// ===== Automatische Shot-Session =====
+function resetShotChart(sessionId) {
+  shotChartSessionId = Number(sessionId || 0);
+  shotChartSamples = [];
+  shotChartLoading = false;
+  shotChartGeneration += 1;
+  shotChartFetchErrorLogged = false;
+  drawShotGraph();
+}
 
-  const currentMs = stopwatchRunning
-    ? stopwatchBaseMs + Math.max(0, nowMs - stopwatchBaseClientMs)
-    : stopwatchBaseMs;
+function niceAxisMaximum(value, minimum, preferredSteps) {
+  const safeValue = Math.max(Number(value) || 0, minimum);
+  const roughStep = safeValue / Math.max(1, preferredSteps);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(roughStep, 0.0001))));
+  const normalized = roughStep / magnitude;
+  const niceNormalized = normalized <= 1 ? 1 : (normalized <= 2 ? 2 : (normalized <= 5 ? 5 : 10));
+  const step = niceNormalized * magnitude;
+  return Math.ceil(safeValue / step) * step;
+}
 
-  if (newRunning !== stopwatchRunning || !stopwatchBaseClientMs || Math.abs(newMs - currentMs) > 1000 || !newRunning) {
-    stopwatchBaseClientMs = nowMs;
-    stopwatchBaseMs = newMs;
-    stopwatchRunning = newRunning;
+function drawShotGraph() {
+  const canvas = el('shotChart');
+  const wrap = el('shotChartWrap');
+  const empty = el('shotChartEmpty');
+  if (!canvas || !wrap || !empty) return;
+
+  const rect = wrap.getBoundingClientRect();
+  if (rect.width < 40 || rect.height < 40) return;
+
+  const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  const width = Math.round(rect.width);
+  const height = Math.round(rect.height);
+  const pixelWidth = Math.round(width * dpr);
+  const pixelHeight = Math.round(height * dpr);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  if (shotChartSamples.length === 0) {
+    empty.classList.remove('is-hidden');
+    return;
+  }
+  empty.classList.add('is-hidden');
+
+  const margin = { left: 46, right: 44, top: 14, bottom: 30 };
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const plotHeight = Math.max(1, height - margin.top - margin.bottom);
+  const lastSample = shotChartSamples[shotChartSamples.length - 1];
+  const durationSeconds = Math.max(0, Number(lastSample[0]) / 1000);
+  const timeMax = Math.max(10, Math.ceil(durationSeconds / 5) * 5);
+  const maximumWeight = Math.max(...shotChartSamples.map(sample => Math.max(0, Number(sample[1]) || 0)));
+  const maximumFlow = Math.max(...shotChartSamples.map(sample => Math.max(0, Number(sample[2]) || 0)));
+  const weightMax = niceAxisMaximum(maximumWeight * 1.08, 10, 5);
+  const flowMax = niceAxisMaximum(maximumFlow * 1.12, 4, 4);
+  const xAt = timeMs => margin.left + (Math.max(0, Number(timeMs) || 0) / 1000) / timeMax * plotWidth;
+  const yWeight = value => margin.top + plotHeight - Math.max(0, Number(value) || 0) / weightMax * plotHeight;
+  const yFlow = value => margin.top + plotHeight - Math.max(0, Number(value) || 0) / flowMax * plotHeight;
+
+  ctx.font = '11px system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 1;
+
+  const horizontalSteps = 4;
+  for (let i = 0; i <= horizontalSteps; i += 1) {
+    const ratio = i / horizontalSteps;
+    const y = margin.top + plotHeight - ratio * plotHeight;
+    ctx.strokeStyle = 'rgba(148,163,184,.16)';
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(margin.left + plotWidth, y);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(203,213,225,.78)';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.round(weightMax * ratio)} g`, margin.left - 7, y);
+    ctx.textAlign = 'left';
+    const flowLabel = flowMax * ratio;
+    ctx.fillText(`${flowLabel < 10 ? flowLabel.toFixed(1) : Math.round(flowLabel)} g/s`, margin.left + plotWidth + 7, y);
+  }
+
+  const verticalSteps = Math.max(2, Math.min(6, Math.round(plotWidth / 85)));
+  ctx.textBaseline = 'top';
+  for (let i = 0; i <= verticalSteps; i += 1) {
+    const ratio = i / verticalSteps;
+    const x = margin.left + ratio * plotWidth;
+    ctx.strokeStyle = 'rgba(148,163,184,.10)';
+    ctx.beginPath();
+    ctx.moveTo(x, margin.top);
+    ctx.lineTo(x, margin.top + plotHeight);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(203,213,225,.70)';
+    ctx.textAlign = i === 0 ? 'left' : (i === verticalSteps ? 'right' : 'center');
+    ctx.fillText(`${Math.round(timeMax * ratio)} s`, x, margin.top + plotHeight + 7);
+  }
+
+  function drawSeries(valueIndex, yForValue, strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = 2.25;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    shotChartSamples.forEach((sample, index) => {
+      const x = xAt(sample[0]);
+      const y = yForValue(sample[valueIndex]);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  drawSeries(1, yWeight, '#86efac');
+  drawSeries(2, yFlow, '#93c5fd');
+}
+
+async function loadMissingShotSamples() {
+  if (shotChartLoading || shotChartSessionId === null) return;
+
+  const currentShot = lastState?.shot || {};
+  const expectedSessionId = Number(currentShot.session_id || 0);
+  const expectedCount = Math.max(0, Number(currentShot.sample_count || 0));
+  if (expectedSessionId !== shotChartSessionId || shotChartSamples.length >= expectedCount) return;
+
+  const from = shotChartSamples.length;
+  const generation = shotChartGeneration;
+  shotChartLoading = true;
+
+  try {
+    const response = await fetch(`/api/shot/samples?session=${encodeURIComponent(shotChartSessionId)}&from=${from}`, {
+      cache: 'no-store'
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (generation !== shotChartGeneration) return;
+
+    const responseSessionId = Number(data.session_id || 0);
+    const responseEndSessionId = Number(data.end_session_id ?? responseSessionId);
+    const responseFrom = Math.max(0, Number(data.from || 0));
+    if (responseEndSessionId !== responseSessionId || responseSessionId !== shotChartSessionId || responseFrom !== shotChartSamples.length) {
+      resetShotChart(responseEndSessionId);
+      return;
+    }
+
+    const samples = Array.isArray(data.samples) ? data.samples : [];
+    samples.forEach(sample => {
+      if (!Array.isArray(sample) || sample.length < 3) return;
+      const timeMs = Math.max(0, Number(sample[0]) || 0);
+      const weightG = Number(sample[1]) || 0;
+      const flowGs = Number(sample[2]) || 0;
+      shotChartSamples.push([timeMs, weightG, flowGs]);
+    });
+    shotChartFetchErrorLogged = false;
+    drawShotGraph();
+  } catch (err) {
+    if (!shotChartFetchErrorLogged) {
+      addLog('Shot-Verlauf konnte nicht geladen werden');
+      shotChartFetchErrorLogged = true;
+    }
+  } finally {
+    if (generation === shotChartGeneration) {
+      shotChartLoading = false;
+      const latestShot = lastState?.shot || {};
+      const latestExpectedCount = Math.max(0, Number(latestShot.sample_count || 0));
+      if (Number(latestShot.session_id || 0) === shotChartSessionId && shotChartSamples.length < latestExpectedCount) {
+        setTimeout(loadMissingShotSamples, 0);
+      }
+    }
   }
 }
 
-function currentStopwatchMs() {
-  if (!stopwatchRunning) return stopwatchBaseMs;
-  return stopwatchBaseMs + Math.max(0, Date.now() - stopwatchBaseClientMs);
+function syncShotChart(shot) {
+  const sessionId = Number(shot?.session_id || 0);
+  const sampleCount = Math.max(0, Number(shot?.sample_count || 0));
+  if (shotChartSessionId === null || sessionId !== shotChartSessionId || sampleCount < shotChartSamples.length) {
+    resetShotChart(sessionId);
+  } else {
+    drawShotGraph();
+  }
+
+  if (sampleCount > shotChartSamples.length) {
+    loadMissingShotSamples();
+  }
 }
 
-function renderStopwatch() {
-  el('stopwatch').textContent = fmtStopwatchTime(currentStopwatchMs());
-  el('swToggle').textContent = stopwatchRunning ? 'Stop' : 'Start';
+function syncShotTimer(shot) {
+  shotTimerBaseClientMs = Date.now();
+  shotTimerBaseMs = Math.max(0, Number(shot?.elapsed_ms || 0));
+  shotTimerRunning = !!shot?.running;
+}
+
+function currentShotTimerMs() {
+  if (!shotTimerRunning) return shotTimerBaseMs;
+  return shotTimerBaseMs + Math.max(0, Date.now() - shotTimerBaseClientMs);
+}
+
+function renderShotTimer() {
+  setText('shotTime', fmtShotTime(currentShotTimerMs()));
+}
+
+function renderShotSession(s) {
+  const shot = s?.shot || {};
+  syncShotTimer(shot);
+  syncShotChart(shot);
+  renderShotTimer();
+  setText('shotWeight', fmtG(shot.current_weight_g ?? s?.weight?.actual_g ?? 0));
+  setText('shotFlow', fmtG(shot.current_flow_g_s || 0));
+
+  const status = el('shotSessionStatus');
+  status.classList.remove('running', 'armed', 'completed');
+  let text = 'Tara drücken, um die Shot-Erkennung vorzubereiten.';
+  if (shot.running) {
+    text = 'Shot läuft – Zeitmessung ab erstem Tropfen.';
+    status.classList.add('running');
+  } else if (shot.armed) {
+    text = 'Bereit – warte auf den ersten sicher erkannten Tropfen.';
+    status.classList.add('armed');
+  } else if (shot.completed) {
+    text = `Shot fertig: ${fmtG(shot.final_weight_g || 0)} g in ${fmtShotTime(shot.elapsed_ms || 0)}.`;
+    status.classList.add('completed');
+  }
+  status.textContent = text;
 }
 
 // ===== Settings / Siebtraeger / Gefaesse =====
@@ -1625,8 +1911,6 @@ function renderStatsAndSystem(s) {
 
 function renderActionAvailability(s) {
   el('save').disabled = !s.status?.save_ready;
-  el('swToggle').disabled = false;
-  el('swReset').disabled = false;
 }
 
 function render(s) {
@@ -1636,8 +1920,7 @@ function render(s) {
   renderWeightAndSelection(s);
   syncScaleModeNavigation(s);
   renderAutodetect(s);
-  syncStopwatchTimer(s.stopwatch);
-  renderStopwatch();
+  renderShotSession(s);
   renderStatsAndSystem(s);
   renderActionAvailability(s);
   renderMaintenance(s.maintenance);
@@ -1661,15 +1944,11 @@ function connect() {
   ws.onopen = () => {
     el('ws').textContent = 'Verbunden';
     el('ws').classList.add('ok');
-    el('swToggle').disabled = false;
-    el('swReset').disabled = false;
     addLog('WebSocket verbunden');
   };
   ws.onclose = () => {
     el('ws').textContent = 'Getrennt';
     el('ws').classList.remove('ok');
-    el('swToggle').disabled = true;
-    el('swReset').disabled = true;
     addLog('WebSocket getrennt, reconnect läuft …');
     setTimeout(connect, 1500);
   };
@@ -1844,10 +2123,6 @@ function handleSaveClick() {
   }
 }
 
-function handleStopwatchToggleClick() {
-  sendCommand(CMD.stopwatchStartStop, stopwatchRunning ? 'Stoppuhr Stop gesendet …' : 'Stoppuhr Start gesendet …');
-}
-
 function handleSiebtraegerChange() {
   const idx = Number(el('siebtraegerSelect').value);
   sendCommand(`select_siebtraeger_${idx}`, `Siebträger-Auswahl gesendet: ${idx}`);
@@ -1965,8 +2240,7 @@ function handleTargetWeightKeyDown(e) {
 function bindDashboardHandlers() {
   el('save').addEventListener('click', handleSaveClick);
   el('tare').addEventListener('click', () => sendCommand(CMD.tare, 'Tara gesendet …'));
-  el('swToggle').addEventListener('click', handleStopwatchToggleClick);
-  el('swReset').addEventListener('click', () => sendCommand(CMD.stopwatchReset, 'Stoppuhr Reset gesendet …'));
+  el('shotTare').addEventListener('click', () => sendCommand(CMD.tare, 'Shot-Tara gesendet …'));
   el('siebtraegerSelect').addEventListener('change', handleSiebtraegerChange);
   el('targetSave').addEventListener('click', sendTargetWeight);
   el('targetWeight').addEventListener('input', () => { targetWeightDirty = true; });
@@ -2061,8 +2335,8 @@ function startClientTimers() {
     renderMaintenance(lastState.maintenance);
   }, 1000);
 
-  setInterval(function stopwatchClientTick() {
-    renderStopwatch();
+  setInterval(function shotClientTick() {
+    if (lastState) renderShotTimer();
   }, 100);
 }
 
@@ -2071,6 +2345,15 @@ function initWebUi() {
   bindNavigationHandlers();
   bindSettingsHandlers();
   bindOverlayHandlers();
+
+  const shotChartWrap = el('shotChartWrap');
+  if ('ResizeObserver' in window && shotChartWrap) {
+    shotChartResizeObserver = new ResizeObserver(() => drawShotGraph());
+    shotChartResizeObserver.observe(shotChartWrap);
+  } else {
+    window.addEventListener('resize', drawShotGraph);
+  }
+
   startClientTimers();
   connect();
 }
@@ -2380,6 +2663,71 @@ void coffeeWebBegin(AsyncWebServer& server)
     sendProgmemChunked(request, COFFEE_EVENTS_JS, "application/javascript", "public, max-age=31536000, immutable");
   });
 
+  server.on("/api/shot/samples", HTTP_GET, [](AsyncWebServerRequest* request) {
+    constexpr size_t kMaximumSamplesPerResponse = 160;
+
+    const CoffeeShotSessionStatus status = coffeeShotSessionStatus(millis());
+    size_t from = 0;
+    uint32_t requestedSessionId = status.session_id;
+
+    if (request->hasParam("from")) {
+      const long requestedFrom = request->getParam("from")->value().toInt();
+      if (requestedFrom > 0) {
+        from = static_cast<size_t>(requestedFrom);
+      }
+    }
+    if (request->hasParam("session")) {
+      requestedSessionId = static_cast<uint32_t>(request->getParam("session")->value().toInt());
+    }
+
+    const size_t total = coffeeShotSessionSampleCount();
+    if (requestedSessionId != status.session_id || from > total) {
+      from = 0;
+    }
+    const size_t end = (total - from) > kMaximumSamplesPerResponse
+                         ? from + kMaximumSamplesPerResponse
+                         : total;
+
+    AsyncResponseStream* response = request->beginResponseStream("application/json");
+    response->addHeader("Cache-Control", "no-store");
+    response->print("{\"session_id\":");
+    response->print(status.session_id);
+    response->print(",\"from\":");
+    response->print(from);
+    response->print(",\"total\":");
+    response->print(total);
+    response->print(",\"running\":");
+    response->print(status.running ? "true" : "false");
+    response->print(",\"completed\":");
+    response->print(status.completed ? "true" : "false");
+    response->print(",\"samples\":[");
+
+    bool first = true;
+    for (size_t index = from; index < end; ++index) {
+      CoffeeShotSample sample;
+      if (!coffeeShotSessionGetSample(index, sample)) {
+        break;
+      }
+      if (!first) {
+        response->print(',');
+      }
+      first = false;
+      response->print('[');
+      response->print(sample.time_ms);
+      response->print(',');
+      response->print(sample.weight_g, 3);
+      response->print(',');
+      response->print(sample.flow_g_s, 3);
+      response->print(']');
+    }
+
+    const CoffeeShotSessionStatus endStatus = coffeeShotSessionStatus(millis());
+    response->print("],\"end_session_id\":");
+    response->print(endStatus.session_id);
+    response->print('}');
+    request->send(response);
+  });
+
   server.on("/api/wifi/setup-ap/start", HTTP_POST, [](AsyncWebServerRequest* request) {
     const bool ok = coffeeWifiStartSetupAp();
     StaticJsonDocument<192> doc;
@@ -2613,6 +2961,19 @@ static String buildStateJson(const AppState& s)
 
   doc["stopwatch"]["ms"] = s.stopwatch.ms;
   doc["stopwatch"]["running"] = s.stopwatch.running;
+
+  doc["shot"]["session_id"] = s.shot.session_id;
+  doc["shot"]["state"] = s.shot.state;
+  doc["shot"]["armed"] = s.shot.armed;
+  doc["shot"]["running"] = s.shot.running;
+  doc["shot"]["completed"] = s.shot.completed;
+  doc["shot"]["elapsed_ms"] = s.shot.elapsed_ms;
+  doc["shot"]["current_weight_g"] = s.shot.current_weight_g;
+  doc["shot"]["peak_weight_g"] = s.shot.peak_weight_g;
+  doc["shot"]["final_weight_g"] = s.shot.final_weight_g;
+  doc["shot"]["current_flow_g_s"] = s.shot.current_flow_g_s;
+  doc["shot"]["sample_count"] = s.shot.sample_count;
+  doc["shot"]["sample_buffer_full"] = s.shot.sample_buffer_full;
 
   doc["selection"]["siebtraeger"] = s.selection.siebtraeger;
   JsonArray siebtraegerNames = doc["selection"]["siebtraeger_names"].to<JsonArray>();
