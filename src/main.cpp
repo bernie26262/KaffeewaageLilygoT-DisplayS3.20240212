@@ -1623,7 +1623,7 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
 static void appendBleCommandResult(CoffeeBleScaleCommand command, const char* result)
 {
   char message[80];
-  snprintf(message, sizeof(message), "Command %s: %s", coffeeBleScaleCommandName(command), result ? result : "---");
+  snprintf(message, sizeof(message), "BLE %s: %s", coffeeBleScaleCommandName(command), result ? result : "---");
   coffeeBleScaleAppendLog(message);
 }
 
@@ -1643,20 +1643,18 @@ static void handleBleCommands()
         break;
       case CoffeeBleScaleCommand::TimerStart: {
         const uint32_t nowMs = millis();
-        handleShotSessionEvent(
-          coffeeShotSessionExternalStart(nowMs, shotWeightFiltered),
-          nowMs,
-          shotWeightFiltered);
-        handled = true;
+        const CoffeeShotSessionEvent event =
+          coffeeShotSessionExternalStart(nowMs, shotWeightFiltered);
+        handleShotSessionEvent(event, nowMs, shotWeightFiltered);
+        handled = event != CoffeeShotSessionEvent::None;
         break;
       }
       case CoffeeBleScaleCommand::TimerStop: {
         const uint32_t nowMs = millis();
-        handleShotSessionEvent(
-          coffeeShotSessionExternalStop(nowMs, shotWeightFiltered),
-          nowMs,
-          shotWeightFiltered);
-        handled = true;
+        const CoffeeShotSessionEvent event =
+          coffeeShotSessionExternalStop(nowMs, shotWeightFiltered);
+        handleShotSessionEvent(event, nowMs, shotWeightFiltered);
+        handled = event != CoffeeShotSessionEvent::None;
         break;
       }
       case CoffeeBleScaleCommand::TimerReset:
@@ -1670,7 +1668,7 @@ static void handleBleCommands()
         break;
     }
 
-    appendBleCommandResult(command, handled ? "ausgeführt" : "nicht ausgeführt");
+    appendBleCommandResult(command, handled ? "ausgeführt" : "ohne Zustandsänderung");
     if (handled) {
       broadcastWebStateFromGlobals();
     }
@@ -4908,10 +4906,6 @@ void setup()
   //initWebSocket();
   initWebServer();
   debugln("Webserver initialisert");
-#if ENABLE_BLE_SCALE
-  coffeeBleScaleAppendLog("BLE-Start nach 5 Sekunden vorgesehen");
-#endif
-
   //init and get the time
   configTime(0, 0, NTP_SERVER);
   // See https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv for Timezone codes for your region

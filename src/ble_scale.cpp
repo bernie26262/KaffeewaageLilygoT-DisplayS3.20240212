@@ -29,6 +29,14 @@ constexpr size_t kLogLineLength = 96;
 #define BLE_SCALE_LOW_POWER 1
 #endif
 
+#if BLE_SCALE_VERBOSE_LOGS
+#define BLE_VERBOSE_PRINTF(...) Serial.printf(__VA_ARGS__)
+#define BLE_VERBOSE_PRINTLN(message) Serial.println(message)
+#else
+#define BLE_VERBOSE_PRINTF(...) do {} while (0)
+#define BLE_VERBOSE_PRINTLN(message) do {} while (0)
+#endif
+
 BLEServer* g_server = nullptr;
 BLECharacteristic* g_weightCharacteristic = nullptr;
 BLECharacteristic* g_beanConquerorWeightCharacteristic = nullptr;
@@ -134,8 +142,7 @@ void queueCommand(CoffeeBleScaleCommand command)
 
   ++g_commandsReceived;
   strlcpy(g_lastCommand, coffeeBleScaleCommandName(command), sizeof(g_lastCommand));
-  appendLogFormatted("Command empfangen: %s", g_lastCommand);
-  Serial.printf("[BLE] command received: %s\n", g_lastCommand);
+  BLE_VERBOSE_PRINTF("[BLE] command received: %s\n", g_lastCommand);
 }
 
 class ServerCallbacks : public BLEServerCallbacks {
@@ -146,7 +153,7 @@ class ServerCallbacks : public BLEServerCallbacks {
     g_advertising = false;
     if (!wasConnected) {
       appendLogFormatted("Maschine verbunden");
-      Serial.println("[BLE] client connected");
+      BLE_VERBOSE_PRINTLN("[BLE] client connected");
     }
   }
 
@@ -157,7 +164,7 @@ class ServerCallbacks : public BLEServerCallbacks {
     g_lastNotifyMs = 0;
     if (wasConnected) {
       appendLogFormatted("Verbindung getrennt - Advertising neu");
-      Serial.println("[BLE] client disconnected, restart advertising");
+      BLE_VERBOSE_PRINTLN("[BLE] client disconnected, restart advertising");
     }
     delay(50);
     server->startAdvertising();
@@ -238,12 +245,11 @@ void coffeeBleScaleCopyLog(char* destination, size_t destinationSize)
 void coffeeBleScaleBegin(const char* deviceName)
 {
   if (g_started) {
-    appendLogFormatted("BLE-Start übersprungen: bereits aktiv");
+    BLE_VERBOSE_PRINTLN("[BLE] start skipped: already active");
     return;
   }
 
   const char* name = (deviceName && deviceName[0]) ? deviceName : "WeighMyBru";
-  appendLogFormatted("BLE wird initialisiert");
 
   // Wichtig fuer ESP32-S3: WiFi/BLE coexistence vor BLEDevice::init beruhigen.
   WiFi.setSleep(true);
@@ -289,7 +295,7 @@ void coffeeBleScaleBegin(const char* deviceName)
   g_advertising = true;
   g_rateWindowStartMs = millis();
   appendLogFormatted("%s aktiv - Advertising läuft", name);
-  Serial.printf("[BLE] %s started as '%s'\n", kModeName, name);
+  BLE_VERBOSE_PRINTF("[BLE] %s started as '%s'\n", kModeName, name);
 }
 
 void coffeeBleScaleTick(uint32_t nowMs, float weightG, bool stable)
