@@ -32,6 +32,68 @@ Pruefen:
 - Buttons reagieren
 - Log zeigt keine unerwarteten Fehler
 
+## BLE-/Gaggiuino-Test
+
+Voraussetzung: WebUI auf Shot-Waage umschalten und Gaggiuino mit `WeighMyBru` verbinden.
+
+Pruefen:
+
+- BLE startet nach ca. 5 Sekunden und Advertising ist aktiv
+- WebUI und HMI zeigen den Bluetooth-Status korrekt
+- Verbindung und Trennung erscheinen einmalig im RAM-Log
+- Gewicht wird mit ungefaehr 5 Hz an die Maschine gemeldet
+- TARE der Maschine tariert die Waage und bereitet die Shot-Erkennung vor
+- Kommandos im Single-Dose-Modus werden ignoriert und entsprechend protokolliert
+- redundante START-/STOP-Kommandos werden als `ohne Zustandsaenderung` protokolliert
+- Gewichtspakete erzeugen keine laufenden Logzeilen
+
+GaggiMate bleibt mangels verfuegbarer Testmaschine ausdruecklich ungetestet. Keine GaggiMate-spezifische Aenderung ohne spaeteren Praxistest freigeben.
+
+## Shot-Session- und Graph-Test
+
+- Tara auf der Shot-Seite zeigt `warte auf ersten Tropfen`
+- ohne Tropfen endet die Bereitschaft nach 45 Sekunden
+- erster sicher erkannter Tropfen startet Zeit und Graph automatisch
+- Gewicht und Flow werden waehrend des Bezugs aktualisiert
+- WebUI laedt neue Punkte inkrementell nach
+- Shot endet nach dem relevanten Gewichtszuwachs automatisch
+- finale Stillstandssekunden werden nicht an den Verlauf angehaengt
+- Endgewicht, Zeit und Graph bleiben nach Shot-Ende sichtbar
+- Wechsel auf andere WebUI-Seite und zurueck erhaelt den letzten Shot
+- Browser-Neuladen erhaelt den letzten Shot aus dem RAM
+- ein neuer Graph ersetzt den alten erst beim tatsaechlichen Shot-Start
+- nach ESP-Neustart ist kein alter Shot-Verlauf mehr vorhanden
+
+Direkter API-Test:
+
+```text
+http://<ip>/api/shot/samples?session=<session-id>&from=0
+```
+
+Erwartung: gueltiges JSON, maximal 160 Punkte pro Antwort und `Cache-Control: no-store`.
+
+## Modus-, HMI- und Backlight-Test
+
+Bei eingeschaltetem Display:
+
+- WebUI Waage -> lokale Single-Dose-Seite vorbereitet
+- WebUI Shot-Waage -> lokale Shot-Seite vorbereitet
+- WebUI Daten -> Shot-Modus beendet und Daten-Uebersicht vorbereitet
+- WebUI Einstellungen -> Shot-Modus beendet und nur Einstellungs-Uebersicht vorbereitet
+- tiefere WebUI-Untertabs wechseln keine lokalen HMI-Unterseiten
+- laufender Shot wird beim Verlassen sauber beendet
+- wartende Shot-Erkennung wird beim Verlassen verworfen
+
+Bei ausgeschaltetem Display:
+
+- WebUI oeffnen/aktualisieren -> Display bleibt aus
+- Hauptseite oder Einstellung ueber WebUI wechseln -> Display bleibt aus
+- Tara und andere WebUI-Aktionen -> Display bleibt aus
+- Display-Timeout ueber WebUI aendern -> Display bleibt aus und laufender Timeout wird nicht verlaengert
+- BLE-Kommando -> Display bleibt aus
+- Encoder/Taster lokal bedienen -> Display wacht auf
+- Gewicht um mindestens 30 g aendern -> Display wacht auf
+
 ## PWA-/Icon-Test
 
 Direkte URLs pruefen:

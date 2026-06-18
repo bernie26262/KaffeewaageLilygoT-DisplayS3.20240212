@@ -19,7 +19,7 @@ Die WebUI soll deshalb nicht wie eine klassische Webseite aufgebaut sein, sonder
 Die Hauptnavigation besteht aus vier Bereichen:
 
 ```text
-Waage | Stoppuhr | Daten | Einstellungen
+Waage | Shot-Waage | Daten | Einstellungen
 ```
 
 Diese Bereiche sind in der WebUI aktuell Tabs innerhalb der Hauptseite `/`. Sie sind keine eigenen URLs.
@@ -28,7 +28,7 @@ Fuer das spaetere HMI sollen diese Bereiche als echte Screens umgesetzt werden:
 
 ```text
 ScaleScreen
-TimerScreen
+ShotScreen
 DataScreen
 SettingsScreen
 ```
@@ -56,17 +56,22 @@ Nicht auf die Hauptseite gehoeren:
 
 Diese Informationen liegen in Daten oder Einstellungen.
 
-## Stoppuhr
+## Shot-Waage
 
-Die Stoppuhr soll ebenfalls ohne Scrollen bedienbar sein.
+Die fruehere manuelle Stoppuhr ist durch eine maschinengesteuerte Shot-Waage ersetzt.
 
 Inhalte:
 
-- grosse Zeitanzeige
-- Start/Stopp
-- Reset
+- grosse Shot-Zeitanzeige
+- aktuelles Gewicht
+- geglaettete Flowrate in g/s
+- Bluetooth-/Maschinenstatus
+- Tara als einzige manuelle Shot-Aktion
+- WebUI zusaetzlich mit Live-Graph fuer Gewicht und Flow
 
-Die Button-Optik soll dem restlichen HMI folgen: dunkle Buttons mit gruenem Rand. Vollton- oder Warnfarben bleiben Sonderaktionen vorbehalten.
+Nach Tara wartet die Shot-Session auf den ersten sicher erkannten Tropfen. Start und Ende werden automatisch aus der Gewichtsentwicklung bestimmt. Manuelle Start-/Stop-/Reset-Buttons werden im normalen Bedienkonzept nicht angezeigt.
+
+Der letzte abgeschlossene Shot bleibt bis zum Start eines neuen Shots sichtbar, liegt aber nur im RAM.
 
 ## Daten
 
@@ -115,7 +120,7 @@ Scrollen soll auf dem HMI moeglich, aber nicht die Standardbedienung sein.
 Empfohlene Regeln:
 
 - Waage: kein Scrollen
-- Stoppuhr: kein Scrollen
+- Shot-Waage: kein Scrollen auf dem lokalen HMI; WebUI-Graph darf den Inhaltsbereich erweitern
 - Daten: Scrollen erlaubt
 - Einstellungen: besser Unterseiten statt langer Scrollseite
 - Bottom-Navigation bleibt sichtbar
@@ -129,10 +134,11 @@ Wenn innerhalb eines Einstellungsbereichs gescrollt werden muss, soll nur der In
 
 Der Header soll kompakt bleiben, damit auf kleinen Displays kein Platz verloren geht.
 
-Aktueller Zieltext:
+Der Titel folgt dem aktiven Modus:
 
 ```text
 Single-Dose-Waage
+Shot-Waage
 ```
 
 Der WebSocket-Status soll kurz bleiben:
@@ -143,7 +149,29 @@ Verbunden
 Getrennt
 ```
 
-Log-Ausgaben gehoeren nicht global auf alle Seiten, sondern in den Bereich System / OTA bzw. spaeter in System / Diagnose.
+Log-Ausgaben gehoeren nicht global auf alle Seiten. Das BLE-/Shot-RAM-Log liegt in der WebUI im System-/Diagnosebereich.
+
+## Synchronisierung von WebUI und lokalem HMI
+
+Die vier Hauptbereiche der WebUI bereiten die passende lokale HMI-Seite vor:
+
+- Waage -> Single-Dose-Seite
+- Shot-Waage -> Shot-Seite
+- Daten -> Daten-Uebersicht
+- Einstellungen -> Einstellungs-Uebersicht
+
+Beim Verlassen der Shot-Waage wird eine wartende Erkennung abgebrochen. Ein laufender Shot wird sauber beendet; sein Ergebnis bleibt sichtbar. Tiefere WebUI-Einstellungsunterseiten steuern keine lokalen HMI-Unterseiten.
+
+## Display-Wakeup
+
+Fernbedienung ist keine lokale Aktivitaet:
+
+- WebUI oeffnen, aktualisieren oder bedienen weckt das HMI nicht.
+- WebUI-Kommandos verlaengern den lokalen Display-Timeout nicht.
+- Auch BLE-Kommandos wecken das Display nicht direkt.
+- Lokale Encoder-/Tasterbedienung sowie eine Gewichtsveraenderung ab 30 g wecken es weiterhin.
+
+Damit kann der Zustand aus der Ferne geprueft oder geaendert werden, ohne das Backlight unnoetig einzuschalten.
 
 ## Unterschiede zwischen WebUI und HMI
 

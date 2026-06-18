@@ -11,6 +11,8 @@ Das Projekt kombiniert:
 - OTA-Update fuer Firmware und SPIFFS-Dateisystem
 - persistente Einstellungen ueber NVS/Preferences
 - PWA-/Homescreen-Integration fuer Smartphone/Tablet
+- WeighMyBru-kompatible BLE-Waage, mit Gaggiuino praktisch getestet
+- automatische Shot-Erkennung mit Timer, Gewicht, Flow und Live-Graph
 - HMI-orientiertes Bedienkonzept als Basis fuer eine spaetere Touch-Display-Version
 
 ## Aktueller Architekturstand
@@ -23,7 +25,9 @@ Die groessten Projektbereiche sind inzwischen aus `main.cpp` herausgeloest:
 | WebUI/WebSocket | `src/coffee_web.h`, `src/coffee_web.cpp` | Eingebettete WebUI, WebSocket-Kommandos, PWA-Manifest/Icon-Routen |
 | OTA | `src/coffee_ota.h`, `src/coffee_ota.cpp` | `/update`-Seite fuer Firmware- und SPIFFS-Upload |
 | Storage | `src/coffee_storage.h`, `src/coffee_storage.cpp` | NVS/Preferences lesen/schreiben |
-| Hardware/UI-Hauptlogik | `src/main.cpp` | Waage, TFT, Taster/Encoder, Ablaufsteuerung |
+| BLE-Waage | `src/ble_scale.h`, `src/ble_scale.cpp` | WeighMyBru-GATT-Service, Gewichtsmeldungen, Maschinenkommandos und RAM-Diagnoselog |
+| Shot-Session | `src/shot_session.h`, `src/shot_session.cpp` | automatische Shot-Erkennung, Zeit, Messpunkte und geglaettete Flowrate |
+| Hardware/UI-Hauptlogik | `src/main.cpp` | Waage, TFT, Taster/Encoder, Modus- und Ablaufsteuerung |
 | Pins | `src/pin_config.h` | Pinbelegung |
 | WebUI-Dateien im SPIFFS | `data/` | PWA-/Homescreen-Icons |
 
@@ -76,6 +80,7 @@ Wichtige Routen:
 |---|---|
 | `/` | Haupt-WebUI |
 | `/ws` | WebSocket fuer Live-State und Kommandos |
+| `/api/shot/samples` | inkrementeller RAM-Verlauf des laufenden oder letzten Shots |
 | `/update` | OTA-Update-Seite |
 | `/manifest.json` | PWA-Manifest aus Firmware |
 | `/icon-192.png` | 192x192 Homescreen-Icon aus SPIFFS |
@@ -87,6 +92,7 @@ Wichtige Routen:
 Details stehen im Ordner `docs/`:
 
 - `docs/architecture.md`
+- `docs/ble-shot-scale.md`
 - `docs/hmi-ui-concept.md`
 - `docs/webui-pwa-ota.md`
 - `docs/wifi-provisioning.md`

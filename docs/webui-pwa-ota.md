@@ -48,6 +48,43 @@ http://<ip>/coffee_events.js?v=test
 ```
 
 Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
+
+## Shot-Waage und Live-Graph
+
+Die zweite Hauptseite ist keine manuelle Stoppuhr mehr, sondern die Shot-Waage. Der kompakte aktuelle Zustand kommt ueber `/ws` und enthaelt unter anderem:
+
+- Session-ID und Zustand (`idle`, `armed`, `running`, `completed`)
+- Shot-Zeit
+- aktuelles, Spitzen- und Endgewicht
+- aktuelle Flowrate
+- Messpunktanzahl und Buffer-Vollstatus
+
+Die Messreihe selbst wird nicht in jedes WebSocket-Paket eingebettet. Der Browser laedt sie inkrementell ueber:
+
+```text
+GET /api/shot/samples?session=<id>&from=<index>
+```
+
+Eine Antwort liefert maximal 160 neue Punkte. Jeder Punkt hat die kompakte Form:
+
+```json
+[zeit_ms, gewicht_g, flow_g_s]
+```
+
+Die Antwort ist mit `Cache-Control: no-store` markiert und enthaelt zusaetzlich Session-ID, Startindex, Gesamtanzahl sowie Running-/Completed-Status. Die Session-ID verhindert, dass Punkte zweier Shots vermischt werden.
+
+Der responsive Canvas-Graph zeigt:
+
+- Gewicht auf der linken Achse
+- Flow in g/s auf der rechten Achse
+- Zeit in Sekunden auf der unteren Achse
+
+Beim wirklichen Start eines neuen Shots wird der alte Verlauf ersetzt. Tara allein loescht den letzten abgeschlossenen Verlauf nicht. Nach Seitenwechsel oder Browser-Neuladen kann der laufende beziehungsweise letzte Shot erneut aus dem RAM geladen werden. Nach einem ESP-Neustart ist der Verlauf weg.
+
+## WebUI und lokales Display
+
+WebUI-Aktionen synchronisieren weiterhin Modus und vorbereitete HMI-Seite, gelten aber nicht als lokale Aktivitaet. Sie duerfen deshalb weder das Backlight einschalten noch den Inaktivitaetstimer zuruecksetzen. Die lokale HMI-Seite wird erst beim naechsten echten Wakeup sichtbar.
+
 ## PWA-/Homescreen-Integration
 
 Die WebUI enthaelt im HTML-`head` die relevanten PWA-/Mobile-Meta-Tags:
