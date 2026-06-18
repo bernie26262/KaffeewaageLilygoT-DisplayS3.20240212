@@ -1931,15 +1931,9 @@ static bool setDisplayTimeoutFromWeb(uint16_t minutes)
   displayTimeoutMinutes = normaliseDisplayTimeoutMinutes(minutes);
   delayTimeDisplayOff = static_cast<unsigned long>(displayTimeoutMinutes) * 60000UL;
   coffeeStorageSaveDisplayTimeoutMinutes(preferences, displayTimeoutMinutes);
-  lastActionAgainstDisplayOff = millis();
 
-  if (displayOff != 0) {
-    displayOff = 0;
-    DisplayOnOff();
-    RefreshTFTDisplay();
-    RefreshTFTCursor();
-  }
-
+  // Eine WebUI-Aenderung ist keine lokale Arbeit an der Waage. Deshalb weder
+  // das ausgeschaltete HMI wecken noch den laufenden Display-Timeout verlaengern.
   broadcastWebStateFromGlobals();
   return true;
 }
@@ -1967,11 +1961,10 @@ static bool setScaleUiModeAndHmiPageFromWeb(ScaleUiMode mode, byte targetPage)
     menuItemPos = encoderPos;
     pageEntered = true;
 
-    if (displayOff != 0) {
-      displayOff = 0;
-      DisplayOnOff();
-    }
-    lastActionAgainstDisplayOff = millis();
+    // Die HMI-Seite bleibt mit der WebUI synchron, aber Fernbedienung darf
+    // weder das Backlight einschalten noch den lokalen Inaktivitaetstimer
+    // zuruecksetzen. Beim naechsten lokalen Wakeup ist bereits die passende
+    // Seite vorbereitet.
   }
 
   broadcastWebStateFromGlobals();
