@@ -49,6 +49,18 @@ constexpr uint32_t COLOR_SAVE_DISABLED_TEXT = 0xB4C0D0;
 constexpr uint16_t SCREEN_W = 600;
 constexpr uint16_t SCREEN_H = 450;
 
+// Bluetooth rune drawn as three LVGL polylines. The shape follows the
+// familiar Bluetooth mark without relying on a special icon font or bitmap.
+lv_point_t HEADER_BLE_SPINE_POINTS[] = {
+    {8, 1}, {15, 6}, {8, 11}, {15, 16}, {8, 21}, {8, 1}
+};
+lv_point_t HEADER_BLE_UPPER_CROSS_POINTS[] = {
+    {2, 5}, {15, 16}
+};
+lv_point_t HEADER_BLE_LOWER_CROSS_POINTS[] = {
+    {2, 17}, {15, 6}
+};
+
 enum class Page : uint8_t {
     Waage,
     Stoppuhr,
@@ -125,7 +137,7 @@ lv_obj_t *systemDataSsidLabel = nullptr;
 lv_obj_t *systemDataIpLabel = nullptr;
 lv_obj_t *systemDataSignalLabel = nullptr;
 lv_obj_t *headerBleBadge = nullptr;
-lv_obj_t *headerBleLabel = nullptr;
+lv_obj_t *headerBleIconLines[3] = {nullptr, nullptr, nullptr};
 lv_obj_t *systemHx711RawLabel = nullptr;
 lv_obj_t *systemHx711GramsLabel = nullptr;
 lv_obj_t *headerWifiBars[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -318,7 +330,9 @@ void reset_dynamic_labels()
     systemDataIpLabel = nullptr;
     systemDataSignalLabel = nullptr;
     headerBleBadge = nullptr;
-    headerBleLabel = nullptr;
+    headerBleIconLines[0] = nullptr;
+    headerBleIconLines[1] = nullptr;
+    headerBleIconLines[2] = nullptr;
     systemHx711RawLabel = nullptr;
     systemHx711GramsLabel = nullptr;
     saveButton = nullptr;
@@ -3249,6 +3263,9 @@ void update_header_ble_display()
 {
     if (!headerBleBadge || !lv_obj_is_valid(headerBleBadge)) {
         headerBleBadge = nullptr;
+        headerBleIconLines[0] = nullptr;
+        headerBleIconLines[1] = nullptr;
+        headerBleIconLines[2] = nullptr;
         return;
     }
 
@@ -3258,8 +3275,11 @@ void update_header_ble_display()
     const bool active = enabled && (connected || ble.advertising);
     const uint32_t color = connected ? COLOR_GREEN : (active ? COLOR_BLE_ACTIVE : COLOR_BLE_OFF);
 
-    lv_obj_set_style_bg_color(headerBleBadge, lv_color_hex(color), 0);
-    lv_obj_set_style_border_color(headerBleBadge, lv_color_hex(color), 0);
+    for (lv_obj_t *line : headerBleIconLines) {
+        if (line && lv_obj_is_valid(line)) {
+            lv_obj_set_style_line_color(line, lv_color_hex(color), 0);
+        }
+    }
 }
 
 void update_wlan_page_display()
@@ -3295,18 +3315,30 @@ void create_header(lv_obj_t *screen)
     update_clock_display();
 
     headerBleBadge = lv_obj_create(screen);
-    style_plain_block(headerBleBadge, COLOR_BLE_OFF);
-    lv_obj_set_size(headerBleBadge, 30, 22);
-    lv_obj_set_style_radius(headerBleBadge, 11, 0);
-    lv_obj_set_style_border_width(headerBleBadge, 1, 0);
-    lv_obj_set_style_border_color(headerBleBadge, lv_color_hex(COLOR_BLE_OFF), 0);
-    lv_obj_align(headerBleBadge, LV_ALIGN_TOP_RIGHT, -58, 10);
+    lv_obj_clear_flag(headerBleBadge, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(headerBleBadge, 24, 24);
+    lv_obj_set_style_bg_opa(headerBleBadge, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(headerBleBadge, 0, 0);
+    lv_obj_set_style_pad_all(headerBleBadge, 0, 0);
+    lv_obj_align(headerBleBadge, LV_ALIGN_TOP_RIGHT, -62, 9);
 
-    lv_obj_t *bleText = lv_label_create(headerBleBadge);
-    lv_label_set_text(bleText, "BT");
-    style_label(bleText, COLOR_WHITE);
-    lv_obj_set_style_text_font(bleText, &lv_font_montserrat_12, 0);
-    lv_obj_center(bleText);
+    headerBleIconLines[0] = lv_line_create(headerBleBadge);
+    lv_line_set_points(headerBleIconLines[0], HEADER_BLE_SPINE_POINTS,
+                       sizeof(HEADER_BLE_SPINE_POINTS) / sizeof(HEADER_BLE_SPINE_POINTS[0]));
+
+    headerBleIconLines[1] = lv_line_create(headerBleBadge);
+    lv_line_set_points(headerBleIconLines[1], HEADER_BLE_UPPER_CROSS_POINTS,
+                       sizeof(HEADER_BLE_UPPER_CROSS_POINTS) / sizeof(HEADER_BLE_UPPER_CROSS_POINTS[0]));
+
+    headerBleIconLines[2] = lv_line_create(headerBleBadge);
+    lv_line_set_points(headerBleIconLines[2], HEADER_BLE_LOWER_CROSS_POINTS,
+                       sizeof(HEADER_BLE_LOWER_CROSS_POINTS) / sizeof(HEADER_BLE_LOWER_CROSS_POINTS[0]));
+
+    for (lv_obj_t *line : headerBleIconLines) {
+        lv_obj_set_style_line_width(line, 2, 0);
+        lv_obj_set_style_line_rounded(line, true, 0);
+        lv_obj_set_style_line_color(line, lv_color_hex(COLOR_BLE_OFF), 0);
+    }
 
     create_wifi_quality_icon(screen, 560, 10, 0, headerWifiBars);
     update_header_wifi_display();
