@@ -147,8 +147,8 @@ Steht in pin_config.h
 //#define rotary_VCC_PIN -1 /* 27 put -1 of Rotary encoder Vcc is connected directly to 3,3V; else you can use declared output pin for powering rotary encoder */
 #define rotary_STEPS 4
 
-volatile int encoderPos = 3; //this variable stores our current value of encoder position. Change to int or uin16_t instead of byte if you want to record a larger range than 0-255. Startwert nach Setup ist 2, weil dann Tara direkt markiert ist.
-volatile int oldEncPos = 3; //stores the last encoder position value so we can compare to the current reading and see if it has changed (so we know when to print to the serial monitor)
+volatile int encoderPos = 2; // Startposition auf Seite 0: Shot-Waage.
+volatile int oldEncPos = 2; // stores the previous encoder position for change detection
 volatile byte reading = 0; //somewhere to store the direct values we read from our interrupt pins before checking to see if we have moved a whole detent
 // Button reading, including debounce without delay function declarations
 byte oldButtonStateRotarySW = HIGH;  // assume switch open because of pull-up resistor
@@ -396,7 +396,7 @@ static void syncSiebtraegerMenuItems()
 const byte footerOfPageID[] =                      {0, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};                      // es gibt zwei unterschiedliche Footer, die dargestellt werden können
 const byte firstMenuItemOnPage[] =                 {0, 0, 0, 4, 3, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};                 //  bei 4 wird der Curser nicht dargestellt
 const byte lastMenuItemOnPage[] =                  {3, 3, 3, 4, 3, 3, 0, 1, 3, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};
-byte highlightedMenuItemWhenEnteringPage[] =       {3, 0, 0, 4, 3, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};      // Wenn eine Seite betreten wird, wird der Cursor neben dieses Element gesetzt
+byte highlightedMenuItemWhenEnteringPage[] =       {2, 0, 0, 4, 3, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 3, 3};      // Wenn eine Seite betreten wird, wird der Cursor neben dieses Element gesetzt
 const bool actualWeightDisplayed[] =               {1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0};            // Wird das Ist-Gewicht auf der Seite dargestellt? 0=Nein, 1=Ja
 const bool setWeightDisplayed[] =                  {1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 const bool setWeightCalibrationdisplayed[] =       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -500,7 +500,7 @@ float setWeightCalibration = 200.0;
 float oldsetWeightCalibration = 200.0;
 const float minWeightCalibration = 1.0;
 const float maxWeightCalibration = 800.0;
-int menuItemPos = 3;                                                 // startet auf Punkt Tara im Root-Menue
+int menuItemPos = 2;                                                 // startet auf Shot im Root-Menue
 bool autoDetect = 0;
 bool webWizardActive = false;
 bool webWizardAutodetectPaused = false;
@@ -4882,8 +4882,8 @@ void setup()
 
   pageID = 0;
   scaleUiMode = SCALE_UI_MODE_SINGLE_DOSE;
-  encoderPos = 3;
-  oldEncPos = 3;
+  encoderPos = 2;
+  oldEncPos = 2;
   encoderPosChanged = true;
 
   loadCellInitializing = true;
