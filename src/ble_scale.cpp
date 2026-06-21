@@ -8,6 +8,8 @@
 #include <BLE2902.h>
 #include <WiFi.h>
 #include <math.h>
+#include <stdarg.h>
+#include <string.h>
 #include <esp_gatts_api.h>
 
 namespace {
@@ -18,6 +20,8 @@ constexpr const char* kBeanConquerorWeightUuid = "6E400004-B5A3-F393-E0A9-E50E24
 constexpr const char* kCommandUuid = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 constexpr uint32_t kNotifyIntervalMs = 200UL; // 5 Hz: Stabilitaetstest gegen BLE-GATT-Congestion
 constexpr uint32_t kNotifyLogIntervalMs = 2000UL; // nur bei BLE_SCALE_VERBOSE_LOGS
+constexpr uint8_t kLogLineCount = 12;
+constexpr size_t kLogLineLength = 96;
 // Gaggiuino abonniert nur 6E400002. Notifications auf 6E400004 erzeugen ohne Subscriber
 // ESP-IDF-Fehlerlogs (esp_ble_gatts_send_notify rc=-1). Der Wert bleibt lesbar, wird aber nicht gepusht.
 #ifndef BLE_SCALE_NOTIFY_BEANCONQUEROR
@@ -50,6 +54,45 @@ char g_lastCommand[16] = "---";
 
 portMUX_TYPE g_commandMux = portMUX_INITIALIZER_UNLOCKED;
 CoffeeBleScaleCommand g_pendingCommand = CoffeeBleScaleCommand::None;
+
+portMUX_TYPE g_logMux = portMUX_INITIALIZER_UNLOCKED;
+char g_logLines[kLogLineCount][kLogLineLength] = {{0}};
+uint8_t g_logStart = 0;
+uint8_t g_logCount = 0;
+uint32_t g_logSequence = 0;
+
+void appendLogFormatted(const char* format, ...)
+{
+  if (!format) {
+    return;
+  }
+
+  char message[kLogLineLength - 16];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(message, sizeof(message), format, args);
+  va_end(args);
+
+  const uint32_t seconds = millis() / 1000UL;
+  char line[kLogLineLength];
+  snprintf(line, sizeof(line), "%02lu:%02lu  %s",
+           static_cast<unsigned long>((seconds / 60UL) % 100UL),
+           static_cast<unsigned long>(seconds % 60UL),
+           message);
+
+  portENTER_CRITICAL(&g_logMux);
+  uint8_t index;
+  if (g_logCount < kLogLineCount) {
+    index = (g_logStart + g_logCount) % kLogLineCount;
+    ++g_logCount;
+  } else {
+    index = g_logStart;
+    g_logStart = (g_logStart + 1) % kLogLineCount;
+  }
+  strlcpy(g_logLines[index], line, sizeof(g_logLines[index]));
+  ++g_logSequence;
+  portEXIT_CRITICAL(&g_logMux);
+}
 
 void printHexBytes(const uint8_t* data, size_t length, size_t maxBytes = kCommandHexLogMaxBytes)
 {
@@ -116,6 +159,7 @@ class ServerCallbacks : public BLEServerCallbacks {
     g_connected = true;
     g_advertising = false;
     if (!wasConnected) {
+      appendLogFormatted("Maschine verbunden");
       Serial.println("[BLE] client connected");
     }
   }
@@ -126,6 +170,7 @@ class ServerCallbacks : public BLEServerCallbacks {
     g_connected = false;
     g_lastNotifyMs = 0;
     if (wasConnected) {
+      appendLogFormatted("Verbindung getrennt - Advertising neu");
       Serial.println("[BLE] client disconnected, restart advertising");
     }
     delay(50);
@@ -191,6 +236,39 @@ void buildWeighMyBruWeightPacket(float weightG, uint8_t packet[20])
   packet[19] = checksum;
 }
 } // namespace
+
+void coffeeBleScaleAppendLog(const char* message)
+{
+  appendLogFormatted("%s", message ? message : "---");
+}
+
+void coffeeBleScaleCopyLog(char* destination, size_t destinationSize)
+{
+  if (!destination || destinationSize == 0) {
+    return;
+  }
+
+  destination[0] = '\0';
+  size_t used = 0;
+
+  portENTER_CRITICAL(&g_logMux);
+  for (uint8_t i = 0; i < g_logCount; ++i) {
+    const uint8_t index = (g_logStart + i) % kLogLineCount;
+    const char* line = g_logLines[index];
+    const size_t lineLength = strnlen(line, kLogLineLength);
+    const size_t required = lineLength + (i > 0 ? 1U : 0U);
+    if (used + required + 1 > destinationSize) {
+      break;
+    }
+    if (i > 0) {
+      destination[used++] = '\n';
+    }
+    memcpy(destination + used, line, lineLength);
+    used += lineLength;
+    destination[used] = '\0';
+  }
+  portEXIT_CRITICAL(&g_logMux);
+}
 
 void coffeeBleScaleBegin(const char* deviceName)
 {
@@ -292,6 +370,7 @@ void coffeeBleScaleBegin(const char* deviceName)
   g_started = true;
   g_advertising = true;
   g_rateWindowStartMs = millis();
+  appendLogFormatted("%s aktiv - Advertising läuft", name);
   Serial.printf("[BLE] %s started as '%s'\n", kModeName, name);
 #if BLE_SCALE_STARTUP_DIAGNOSTICS
   Serial.printf("[BLE] startup heap: free=%lu, min=%lu\n",
@@ -380,6 +459,7 @@ CoffeeBleScaleStatus coffeeBleScaleStatus()
 {
   CoffeeBleScaleStatus status;
   status.enabled = true;
+  status.started = g_started;
   status.advertising = g_advertising;
   status.connected = g_connected;
   status.mode = kModeName;
@@ -389,6 +469,7 @@ CoffeeBleScaleStatus coffeeBleScaleStatus()
   status.packets_sent = g_packetsSent;
   status.commands_received = g_commandsReceived;
   status.last_notify_age_ms = g_lastNotifyAgeReferenceMs > 0 ? millis() - g_lastNotifyAgeReferenceMs : 0;
+  status.log_sequence = g_logSequence;
   return status;
 }
 
@@ -426,6 +507,13 @@ const char* coffeeBleScaleCommandName(CoffeeBleScaleCommand command)
     case CoffeeBleScaleCommand::TimerReset: return "RESET";
     case CoffeeBleScaleCommand::None:
     default: return "---";
+  }
+}
+void coffeeBleScaleAppendLog(const char*) {}
+void coffeeBleScaleCopyLog(char* destination, size_t destinationSize)
+{
+  if (destination && destinationSize > 0) {
+    destination[0] = '\0';
   }
 }
 

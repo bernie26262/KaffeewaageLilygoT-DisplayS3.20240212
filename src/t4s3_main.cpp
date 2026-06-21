@@ -2,6 +2,7 @@
 #include <LilyGo_AMOLED.h>
 #include <LV_Helper.h>
 #include <math.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include <ESPAsyncWebServer.h>
@@ -169,6 +170,20 @@ static void sleepOverlayEvent(lv_event_t *event)
     }
 }
 
+static void appendBleShotLog(const char* format, ...)
+{
+    if (!format) {
+        return;
+    }
+
+    char message[96];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    coffeeBleScaleAppendLog(message);
+}
+
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 static void updateDisplayWakeByWeight();
 static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, float weightGrams);
@@ -321,7 +336,13 @@ static void tickHx711Test(uint32_t now)
     const float shotWeightGrams = g_hx711CalFactorRawPerGram > 0.0f
                                     ? g_shotWeightRaw / g_hx711CalFactorRawPerGram
                                     : 0.0f;
-    handleShotSessionEvent(coffeeShotSessionTick(now, shotWeightGrams), now, shotWeightGrams);
+    const CoffeeShotSessionStatus shotBefore = coffeeShotSessionStatus(now);
+    const CoffeeShotSessionEvent shotEvent = coffeeShotSessionTick(now, shotWeightGrams);
+    handleShotSessionEvent(shotEvent, now, shotWeightGrams);
+    const CoffeeShotSessionStatus shotAfter = coffeeShotSessionStatus(now);
+    if (shotBefore.armed && !shotAfter.armed && shotEvent == CoffeeShotSessionEvent::None) {
+        appendBleShotLog("Shot-Bereitschaft beendet");
+    }
 
     ui_t4s3_set_hx711_raw_value(static_cast<int32_t>(g_lastHx711Raw));
     ui_t4s3_set_hx711_grams_value(t4s3_scale_current_grams(), g_hx711Ready);
@@ -376,6 +397,7 @@ bool t4s3_scale_tare()
     g_weightActivityReferenceValid = false;
     if (ui_t4s3_is_shot_scale_mode()) {
         coffeeShotSessionArm(millis(), 0.0f);
+        appendBleShotLog("Shot bereit - warte auf ersten Tropfen");
         Serial.println("[T4S3][SHOT] armed by tare; waiting for first liquid");
     }
     Serial.println("[HX711] tare done");
@@ -428,6 +450,7 @@ static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, f
 
     if (event == CoffeeShotSessionEvent::Started) {
         ui_t4s3_set_shot_timer(0, true);
+        appendBleShotLog("Shot gestartet bei %.1f g", static_cast<double>(weightGrams));
         Serial.printf("[T4S3][SHOT] auto START first-liquid weight=%.2f g at %lu ms\n",
                       static_cast<double>(weightGrams),
                       static_cast<unsigned long>(now));
@@ -437,6 +460,9 @@ static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, f
     if (event == CoffeeShotSessionEvent::Stopped) {
         const CoffeeShotSessionStatus status = coffeeShotSessionStatus(now);
         ui_t4s3_set_shot_timer(status.elapsed_ms, false);
+        appendBleShotLog("Shot beendet: %.1f g in %.1f s",
+                         static_cast<double>(status.final_weight_g),
+                         static_cast<double>(status.elapsed_ms) / 1000.0);
         Serial.printf("[T4S3][SHOT] auto STOP elapsed=%lu ms final=%.2f g peak=%.2f g\n",
                       static_cast<unsigned long>(status.elapsed_ms),
                       static_cast<double>(status.final_weight_g),
@@ -600,6 +626,7 @@ static void updateBleStateInAppState()
 {
     const CoffeeBleScaleStatus ble = coffeeBleScaleStatus();
     g_webState.ble.enabled = ble.enabled;
+    g_webState.ble.started = ble.started;
     g_webState.ble.connected = ble.connected;
     g_webState.ble.advertising = ble.advertising;
     strlcpy(g_webState.ble.mode, ble.mode ? ble.mode : "aus", sizeof(g_webState.ble.mode));
@@ -609,41 +636,48 @@ static void updateBleStateInAppState()
     g_webState.ble.packets_sent = ble.packets_sent;
     g_webState.ble.commands_received = ble.commands_received;
     g_webState.ble.last_notify_age_ms = ble.last_notify_age_ms;
+    g_webState.ble.log_sequence = ble.log_sequence;
 }
 
 static void handleBleCommands()
 {
     CoffeeBleScaleCommand command = CoffeeBleScaleCommand::None;
     while (coffeeBleScalePopCommand(command)) {
-        bool handled = false;
         const bool remoteAllowed = ui_t4s3_ble_remote_control_allowed();
         if (!remoteAllowed && command != CoffeeBleScaleCommand::None) {
+            appendBleShotLog("BLE %s: ignoriert - Single Dose aktiv",
+                             coffeeBleScaleCommandName(command));
             Serial.printf("[T4S3][BLE] command %s ignored: not in Shot mode\n",
                           coffeeBleScaleCommandName(command));
             continue;
         }
+
+        bool handled = false;
         switch (command) {
             case CoffeeBleScaleCommand::Tare:
                 handled = ui_t4s3_handle_web_command("tare");
                 break;
             case CoffeeBleScaleCommand::TimerStart: {
                 const uint32_t now = millis();
-                handleShotSessionEvent(coffeeShotSessionExternalStart(now, t4s3_scale_shot_grams()),
-                                       now, t4s3_scale_shot_grams());
-                handled = true;
+                const float weight = t4s3_scale_shot_grams();
+                const CoffeeShotSessionEvent event = coffeeShotSessionExternalStart(now, weight);
+                handleShotSessionEvent(event, now, weight);
+                handled = event != CoffeeShotSessionEvent::None;
                 break;
             }
             case CoffeeBleScaleCommand::TimerStop: {
                 const uint32_t now = millis();
-                handleShotSessionEvent(coffeeShotSessionExternalStop(now, t4s3_scale_shot_grams()),
-                                       now, t4s3_scale_shot_grams());
-                handled = true;
+                const float weight = t4s3_scale_shot_grams();
+                const CoffeeShotSessionEvent event = coffeeShotSessionExternalStop(now, weight);
+                handleShotSessionEvent(event, now, weight);
+                handled = event != CoffeeShotSessionEvent::None;
                 break;
             }
             case CoffeeBleScaleCommand::TimerReset:
                 // Keep the completed result visible. RESET only prepares the
                 // next detection; the old timer is replaced on the next START.
                 coffeeShotSessionArm(millis(), t4s3_scale_shot_grams());
+                appendBleShotLog("Shot bereit per BLE-RESET");
                 handled = true;
                 break;
             case CoffeeBleScaleCommand::None:
@@ -651,6 +685,9 @@ static void handleBleCommands()
                 break;
         }
 
+        appendBleShotLog("BLE %s: %s",
+                         coffeeBleScaleCommandName(command),
+                         handled ? "ausgeführt" : "ohne Zustandsänderung");
         Serial.printf("[T4S3][BLE] command %s %s\n",
                       coffeeBleScaleCommandName(command),
                       handled ? "handled" : "not handled");

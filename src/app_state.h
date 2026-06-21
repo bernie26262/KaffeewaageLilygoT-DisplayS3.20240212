@@ -115,6 +115,7 @@ struct StatusState {
 
 struct BleScaleState {
   bool enabled = false;
+  bool started = false;
   bool connected = false;
   bool advertising = false;
   char mode[20] = "aus";
@@ -124,6 +125,7 @@ struct BleScaleState {
   uint32_t packets_sent = 0;
   uint32_t commands_received = 0;
   uint32_t last_notify_age_ms = 0;
+  uint32_t log_sequence = 0;
 };
 
 struct AppState {

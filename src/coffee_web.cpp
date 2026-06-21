@@ -3,6 +3,7 @@
 #include <SPIFFS.h>
 
 #include "coffee_wifi.h"
+#include "ble_scale.h"
 #include "shot_session.h"
 
 static AsyncWebSocket ws("/ws");
@@ -13,7 +14,7 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
-#define COFFEE_WEB_ASSET_VERSION "20260614b"
+#define COFFEE_WEB_ASSET_VERSION "20260620a"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
   "public, max-age=31536000, immutable";
@@ -361,8 +362,21 @@ R"rawliteral(">
     </section>
 
     <section class="card">
-      <div class="stats-title">Log</div>
-      <div class="small">Letzte WebUI-/Systemmeldung.</div>
+      <div class="stats-title">Bluetooth-Waage</div>
+      <div class="small">Status und Diagnose der WeighMyBru-Verbindung. Das Log liegt nur im RAM.</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>Status: <b id="bleSystemStatus">---</b></div>
+        <div>Modus: <b id="bleSystemMode">---</b></div>
+        <div>Letzter Command: <b id="bleSystemLastCommand">---</b></div>
+        <div>Notify-Rate: <b id="bleSystemNotifyRate">---</b></div>
+        <div>Pakete / Commands: <b id="bleSystemCounters">---</b></div>
+      </div>
+      <pre class="ble-log mono" id="bleLog">Noch keine BLE-Ereignisse.</pre>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">WebUI-Meldung</div>
+      <div class="small">Letzte lokale Meldung dieses Browsers.</div>
       <div class="log mono" id="log"></div>
     </section>
   </div>
@@ -688,6 +702,12 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       min-height: 1.2em;
     }
     .log:empty { display: none; }
+    .ble-log {
+      margin: 12px 0 0; padding: 12px; border-radius: 14px;
+      background: #07111b; border: 1px solid rgba(148,163,184,.24);
+      color: #cbd5e1; white-space: pre-wrap; overflow-wrap: anywhere;
+      max-height: 280px; overflow-y: auto; line-height: 1.45;
+    }
     .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
     .stats-title { font-size: 1.05rem; font-weight: 750; margin-bottom: 8px; color: var(--text); }
     .stat-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,.14); }
@@ -859,6 +879,8 @@ let shotChartTargetCount = 0;
 let shotChartFetchInFlight = false;
 let shotChartFetchGeneration = 0;
 let shotChartResizeObserver = null;
+let bleLogSequenceLoaded = -1;
+let bleLogFetchInFlight = false;
 const el = id => document.getElementById(id);
 const setText = (id, value) => {
   const node = el(id);
@@ -1711,9 +1733,10 @@ function renderWeightAndSelection(s) {
 function renderBleStatus(s) {
   const ble = s.ble || {};
   const enabled = !!ble.enabled;
+  const started = !!ble.started;
   const connected = !!ble.connected;
   const advertising = !!ble.advertising;
-  const status = !enabled ? 'aus' : (connected ? 'verbunden' : (advertising ? 'bereit' : 'aktiv'));
+  const status = !enabled ? 'aus' : (!started ? 'startet' : (connected ? 'verbunden' : (advertising ? 'bereit' : 'aktiv')));
   const hz = Number(ble.notify_hz || 0);
   const parts = [];
   if (enabled) parts.push(ble.mode || 'BLE');
@@ -1731,6 +1754,46 @@ function renderBleStatus(s) {
   });
   setText('bleStatus', status);
   setText('bleDetails', parts.length ? parts.join(' · ') : '---');
+  setText('bleSystemStatus', status);
+  setText('bleSystemMode', ble.mode || '---');
+  setText('bleSystemLastCommand', ble.last_command || '---');
+  setText('bleSystemNotifyRate', connected ? `${hz.toFixed(1)} Hz` : '---');
+  setText('bleSystemCounters', `${Number(ble.packets_sent || 0)} / ${Number(ble.commands_received || 0)}`);
+
+  syncBleLog(Number(ble.log_sequence || 0));
+}
+
+async function syncBleLog(sequence) {
+  const normalizedSequence = Math.max(0, Number(sequence) || 0);
+  if (normalizedSequence === bleLogSequenceLoaded || bleLogFetchInFlight) return;
+
+  bleLogFetchInFlight = true;
+  try {
+    const response = await fetch('/api/ble/log', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = String(await response.text()).trim();
+    const log = el('bleLog');
+    if (log) {
+      const rendered = text || 'Noch keine BLE-Ereignisse.';
+      if (log.textContent !== rendered) {
+        log.textContent = rendered;
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+    bleLogSequenceLoaded = normalizedSequence;
+  } catch (error) {
+    const log = el('bleLog');
+    if (log && bleLogSequenceLoaded < 0) {
+      log.textContent = 'BLE-Log konnte nicht geladen werden.';
+    }
+    bleLogSequenceLoaded = normalizedSequence;
+  } finally {
+    bleLogFetchInFlight = false;
+    const currentSequence = Math.max(0, Number(lastState?.ble?.log_sequence || 0));
+    if (currentSequence !== bleLogSequenceLoaded) {
+      setTimeout(() => syncBleLog(currentSequence), 0);
+    }
+  }
 }
 
 function clearShotChartSamples(sessionId = 0) {
@@ -2094,6 +2157,7 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
   ws.onopen = () => {
+    bleLogSequenceLoaded = -1;
     el('ws').textContent = 'Verbunden';
     el('ws').classList.add('ok');
     const swToggle = el('swToggle');
@@ -2877,6 +2941,15 @@ void coffeeWebBegin(AsyncWebServer& server)
     sendProgmemResponse(request, COFFEE_EVENTS_JS, "application/javascript", COFFEE_WEB_ASSET_CACHE_CONTROL);
   });
 
+  server.on("/api/ble/log", HTTP_GET, [](AsyncWebServerRequest* request) {
+    char logBuffer[1200];
+    coffeeBleScaleCopyLog(logBuffer, sizeof(logBuffer));
+
+    AsyncWebServerResponse* response = request->beginResponse(200, "text/plain; charset=utf-8", logBuffer);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+
   server.on("/api/shot/samples", HTTP_GET, [](AsyncWebServerRequest* request) {
     constexpr size_t kMaxShotBatch = 120;
     size_t from = 0;
@@ -3201,6 +3274,7 @@ static String buildStateJson(const AppState& s)
   doc["shot"]["sample_buffer_full"] = s.shot.sample_buffer_full;
 
   doc["ble"]["enabled"] = s.ble.enabled;
+  doc["ble"]["started"] = s.ble.started;
   doc["ble"]["connected"] = s.ble.connected;
   doc["ble"]["advertising"] = s.ble.advertising;
   doc["ble"]["mode"] = s.ble.mode;
@@ -3210,6 +3284,7 @@ static String buildStateJson(const AppState& s)
   doc["ble"]["packets_sent"] = s.ble.packets_sent;
   doc["ble"]["commands_received"] = s.ble.commands_received;
   doc["ble"]["last_notify_age_ms"] = s.ble.last_notify_age_ms;
+  doc["ble"]["log_sequence"] = s.ble.log_sequence;
 
   doc["selection"]["siebtraeger"] = s.selection.siebtraeger;
   doc["selection"]["gefaess"] = s.selection.gefaess;
