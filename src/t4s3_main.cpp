@@ -5,6 +5,9 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 
@@ -48,6 +51,13 @@ static uint32_t g_lastWebMaintenanceRefreshMs = 0;
 static uint32_t g_lastWebBroadcastMs = 0;
 static bool g_webUiStarted = false;
 static constexpr uint32_t kWebStartDelayMs = 5000UL;
+
+struct PendingWebCommand {
+    char text[160];
+};
+
+static constexpr UBaseType_t kWebCommandQueueDepth = 8;
+static QueueHandle_t g_webCommandQueue = nullptr;
 static uint32_t g_webMaintenanceMachineEpoch = 0;
 static uint32_t g_webMaintenanceGrinderEpoch = 0;
 static uint32_t g_webMaintenanceFilterEpoch = 0;
@@ -56,6 +66,16 @@ static constexpr uint32_t kWebMaintenanceRefreshMs = 10000UL;
 static constexpr uint32_t kWebBroadcastIntervalMs = 500UL;
 #ifndef BLE_SCALE_START_DELAY_MS
 #define BLE_SCALE_START_DELAY_MS 5000UL
+#endif
+#ifndef COFFEE_T4S3_DISABLE_CHARGING
+#define COFFEE_T4S3_DISABLE_CHARGING 0
+#endif
+#ifndef COFFEE_T4S3_DISABLE_CHARGE_LED
+#define COFFEE_T4S3_DISABLE_CHARGE_LED 0
+#endif
+
+#ifndef COFFEE_T4S3_HX711_VERBOSE_LOGS
+#define COFFEE_T4S3_HX711_VERBOSE_LOGS 0
 #endif
 static constexpr uint32_t kBleStartDelayMs = BLE_SCALE_START_DELAY_MS;
 static bool g_bleStarted = false;
@@ -118,6 +138,22 @@ static float g_hxHistory[5] = {0};
 static uint8_t g_hxHistoryIndex = 0;
 static bool g_hxHistoryFilled = false;
 #endif
+
+static void configureT4S3PowerManagement()
+{
+#if COFFEE_T4S3_DISABLE_CHARGING
+    // LilyGO recommends disabling the SY6970 charging path when VBUS is the
+    // only supply and no LiPo is connected. Otherwise VSYS may become unstable.
+    amoled.SY.disableCharge();
+    Serial.println("[T4S3][PMU] Charging disabled for VBUS-only operation");
+#endif
+
+#if COFFEE_T4S3_DISABLE_CHARGE_LED
+    // Without a battery the red charging/status LED flashes as an error signal.
+    amoled.SY.disableStatLed();
+    Serial.println("[T4S3][PMU] Charge status LED disabled");
+#endif
+}
 
 static void deleteSleepOverlay()
 {
@@ -348,6 +384,7 @@ static void tickHx711Test(uint32_t now)
     ui_t4s3_set_hx711_grams_value(t4s3_scale_current_grams(), g_hx711Ready);
     updateDisplayWakeByWeight();
 
+#if COFFEE_T4S3_HX711_VERBOSE_LOGS
     if (now - g_lastHx711LogMs >= 250UL) {
         g_lastHx711LogMs = now;
         Serial.printf("[HX711] raw=%.2f fast=%.2f stable=%.2f display=%.2f shot=%.2f grams=%.2f moving=%d stable=%d cal=%.4f\n",
@@ -361,6 +398,7 @@ static void tickHx711Test(uint32_t now)
                       g_weightStable ? 1 : 0,
                       g_hx711CalFactorRawPerGram);
     }
+#endif
 }
 
 bool t4s3_scale_is_ready()
@@ -440,6 +478,30 @@ float t4s3_scale_shot_grams()
         return 0.0f;
     }
     return g_shotWeightRaw / g_hx711CalFactorRawPerGram;
+}
+
+void t4s3_scale_leave_shot_mode()
+{
+    const uint32_t now = millis();
+    const CoffeeShotSessionStatus status = coffeeShotSessionStatus(now);
+
+    // Ein laufender Shot ist fachlicher Zustand und darf nicht an die gerade
+    // sichtbare HMI-/WebUI-Seite gekoppelt sein. Beim Seitenwechsel laeuft die
+    // Messung deshalb im Hintergrund weiter, bis die normale Auto-Stop-Logik
+    // keine weitere Gewichtszunahme mehr erkennt.
+    if (status.running) {
+        appendBleShotLog("Shot läuft nach Seitenwechsel im Hintergrund");
+        Serial.println("[T4S3][SHOT] page changed while running; session continues in background");
+        return;
+    }
+
+    // Nur eine vorbereitete, aber noch nicht gestartete Messung wird beim
+    // Verlassen der Shot-Seite aufgehoben. So kann spaeter auf der normalen
+    // Waagenseite kein Bezug unbeabsichtigt starten.
+    if (status.armed) {
+        coffeeShotSessionCancelArm();
+        appendBleShotLog("Shot-Bereitschaft durch Seitenwechsel beendet");
+    }
 }
 
 static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, float weightGrams)
@@ -795,7 +857,7 @@ static void updateWebState(uint32_t now)
     updateBleStateInAppState();
 }
 
-static bool handleT4S3WebCommand(const char *cmd)
+static bool executeT4S3WebCommand(const char *cmd)
 {
     if (!cmd || cmd[0] == '\0') {
         return false;
@@ -824,6 +886,33 @@ static bool handleT4S3WebCommand(const char *cmd)
     return false;
 }
 
+static bool enqueueT4S3WebCommand(const char *cmd)
+{
+    if (!cmd || cmd[0] == '\0' || !g_webCommandQueue) {
+        return false;
+    }
+
+    PendingWebCommand pending{};
+    strlcpy(pending.text, cmd, sizeof(pending.text));
+    return xQueueSend(g_webCommandQueue, &pending, 0) == pdPASS;
+}
+
+static void processPendingWebCommands()
+{
+    if (!g_webCommandQueue) {
+        return;
+    }
+
+    PendingWebCommand pending{};
+    uint8_t processed = 0;
+    while (processed < 4 && xQueueReceive(g_webCommandQueue, &pending, 0) == pdPASS) {
+        if (!executeT4S3WebCommand(pending.text)) {
+            Serial.printf("[T4S3][WebUI] queued command failed: %s\n", pending.text);
+        }
+        ++processed;
+    }
+}
+
 static void beginWebUi()
 {
     if (g_webUiStarted) {
@@ -841,8 +930,15 @@ static void beginWebUi()
     refreshWebSettingsCache(millis(), true);
     refreshWebMaintenanceCache(millis(), true);
 
+    if (!g_webCommandQueue) {
+        g_webCommandQueue = xQueueCreate(kWebCommandQueueDepth, sizeof(PendingWebCommand));
+        if (!g_webCommandQueue) {
+            Serial.println("[T4S3][WebUI] ERROR: command queue could not be created");
+        }
+    }
+
     g_server.on("/", HTTP_GET, coffeeWebHandleRoot);
-    coffeeWebSetCommandHandler(handleT4S3WebCommand);
+    coffeeWebSetCommandHandler(enqueueT4S3WebCommand);
     coffeeWebBegin(g_server);
     coffeeOtaBegin(g_server);
     g_server.begin();
@@ -885,6 +981,8 @@ void setup()
             delay(1000);
         }
     }
+
+    configureT4S3PowerManagement();
 
     amoled.setRotation(0);  // T4-S3 Kaffeewaage: landscape 600x450, USB unten
     amoled.setBrightness(kDisplayBrightnessAwake);
@@ -948,6 +1046,7 @@ void loop()
     coffeeBleScaleTick(now, t4s3_scale_current_grams(), t4s3_scale_is_stable());
     handleBleCommands();
 #endif
+    processPendingWebCommands();
     ui_t4s3_tick();
     lv_task_handler();
 

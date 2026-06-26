@@ -150,6 +150,9 @@ lv_obj_t *wlanWebUiLabel = nullptr;
 lv_obj_t *wlanQualityBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *maintenanceWarningButton = nullptr;
 lv_obj_t *saveButton = nullptr;
+lv_obj_t *shotBackgroundLockOverlay = nullptr;
+lv_obj_t *shotBackgroundLockLabel = nullptr;
+bool shotBackgroundLockActive = false;
 lv_obj_t *totalsEditOverlay = nullptr;
 lv_obj_t *totalsEditModeLabel = nullptr;
 lv_obj_t *totalsEditShotsLabel = nullptr;
@@ -336,6 +339,9 @@ void reset_dynamic_labels()
     systemHx711RawLabel = nullptr;
     systemHx711GramsLabel = nullptr;
     saveButton = nullptr;
+    shotBackgroundLockOverlay = nullptr;
+    shotBackgroundLockLabel = nullptr;
+    shotBackgroundLockActive = false;
     totalsEditOverlay = nullptr;
     wlanSetupOverlay = nullptr;
     wlanSetupOverlayTitleLabel = nullptr;
@@ -361,6 +367,50 @@ void reset_dynamic_labels()
     for (uint8_t i = 0; i < kMaxGefaessSlots; ++i) {
         gefaessManageLabels[i] = nullptr;
     }
+}
+
+bool shot_session_running_now()
+{
+    return coffeeShotSessionStatus(millis()).running;
+}
+
+bool hmi_action_blocked_by_running_shot(const char *action)
+{
+    if (!action || !shot_session_running_now()) {
+        return false;
+    }
+
+    return strcmp(action, "tara") == 0 ||
+           strcmp(action, "save") == 0 ||
+           strcmp(action, "autodetect") == 0 ||
+           strcmp(action, "target_open") == 0 ||
+           strcmp(action, "vessel_select") == 0 ||
+           strcmp(action, "scale_calibration") == 0 ||
+           strcmp(action, "vessels_measure") == 0 ||
+           strcmp(action, "vessels_manage") == 0;
+}
+
+bool web_command_blocked_by_running_shot(const char *cmd)
+{
+    if (!cmd || !shot_session_running_now()) {
+        return false;
+    }
+
+    if (strcmp(cmd, "tare") == 0 ||
+        strcmp(cmd, "save_dose") == 0 ||
+        strcmp(cmd, "autodetect_on") == 0 ||
+        strcmp(cmd, "autodetect_off") == 0 ||
+        strcmp(cmd, "web_wizard_begin") == 0 ||
+        strcmp(cmd, "web_wizard_tare") == 0 ||
+        strcmp(cmd, "measure_gefaess_save") == 0) {
+        return true;
+    }
+
+    return strncmp(cmd, "select_siebtraeger_", 19) == 0 ||
+           strncmp(cmd, "select_gefaess_", 15) == 0 ||
+           strncmp(cmd, "set_selected_siebtraeger_weight_", 32) == 0 ||
+           strncmp(cmd, "scale_calibration_", 18) == 0 ||
+           strncmp(cmd, "delete_gefaess_", 15) == 0;
 }
 
 void set_text(lv_obj_t *obj, const char *text)
@@ -653,9 +703,10 @@ const char *vessel_name(uint8_t index)
 
 void update_autodetect_display()
 {
-    const bool singleDoseMode = !ui_t4s3_is_shot_scale_mode();
+    const bool shotRunning = shot_session_running_now();
+    const bool singleDoseMode = !ui_t4s3_is_shot_scale_mode() && !shotRunning;
     const bool autodetectEffective = singleDoseMode && autodetectEnabled && !webWizardActive;
-    set_text(autodetectStateLabel, !singleDoseMode ? "Shot" : (webWizardActive ? "Auto Pause" : "Auto"));
+    set_text(autodetectStateLabel, shotRunning ? "Shot" : (!singleDoseMode ? "Shot" : (webWizardActive ? "Auto Pause" : "Auto")));
     if (autodetectLed) {
         lv_obj_set_style_bg_color(autodetectLed, lv_color_hex(autodetectEffective ? COLOR_AUTODETECT_LED_ON : COLOR_AUTODETECT_LED_OFF), 0);
     }
@@ -671,9 +722,11 @@ void update_save_button_display()
         return;
     }
 
-    const uint32_t bg = saveReady ? COLOR_GREEN : COLOR_SAVE_DISABLED_BG;
-    const uint32_t border = saveReady ? COLOR_GREEN : COLOR_SAVE_DISABLED_BORDER;
-    const uint32_t text = saveReady ? COLOR_WHITE : COLOR_SAVE_DISABLED_TEXT;
+    const bool blockedByShot = shot_session_running_now();
+    const bool effectiveReady = saveReady && !blockedByShot;
+    const uint32_t bg = effectiveReady ? COLOR_GREEN : COLOR_SAVE_DISABLED_BG;
+    const uint32_t border = effectiveReady ? COLOR_GREEN : COLOR_SAVE_DISABLED_BORDER;
+    const uint32_t text = effectiveReady ? COLOR_WHITE : COLOR_SAVE_DISABLED_TEXT;
 
     lv_obj_clear_state(saveButton, LV_STATE_DISABLED);
 
@@ -683,7 +736,7 @@ void update_save_button_display()
     lv_obj_set_style_border_opa(saveButton, LV_OPA_COVER, 0);
     lv_obj_set_style_opa(saveButton, LV_OPA_COVER, 0);
 
-    if (saveReady) {
+    if (effectiveReady) {
         lv_obj_add_flag(saveButton, LV_OBJ_FLAG_CLICKABLE);
     } else {
         lv_obj_clear_flag(saveButton, LV_OBJ_FLAG_CLICKABLE);
@@ -705,6 +758,51 @@ void set_save_ready(bool ready)
 
     saveReady = ready;
     update_save_button_display();
+}
+
+void update_shot_background_lock_display()
+{
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+    const bool shouldLock = activePage == Page::Waage && shot.running;
+
+    if (shotBackgroundLockOverlay && lv_obj_is_valid(shotBackgroundLockOverlay)) {
+        if (shouldLock) {
+            lv_obj_clear_flag(shotBackgroundLockOverlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(shotBackgroundLockOverlay);
+        } else {
+            lv_obj_add_flag(shotBackgroundLockOverlay, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    if (shouldLock && shotBackgroundLockLabel && lv_obj_is_valid(shotBackgroundLockLabel)) {
+        const uint32_t tenths = (shot.elapsed_ms / 100U) % 10U;
+        const uint32_t seconds = (shot.elapsed_ms / 1000U) % 60U;
+        const uint32_t minutes = shot.elapsed_ms / 60000U;
+        char weight[24];
+        format_grams_float(weight, sizeof(weight), t4s3_scale_shot_grams());
+        char message[192];
+        snprintf(message, sizeof(message),
+                 "Shot läuft im Hintergrund\n"
+                 "Single-Dose-Waage gesperrt\n"
+                 "%02lu:%02lu:%lu  ·  %s\n"
+                 "Antippen: zurück zur Shot-Waage",
+                 static_cast<unsigned long>(minutes),
+                 static_cast<unsigned long>(seconds),
+                 static_cast<unsigned long>(tenths),
+                 weight);
+        set_text_if_changed(shotBackgroundLockLabel, message);
+    }
+
+    if (shouldLock != shotBackgroundLockActive) {
+        shotBackgroundLockActive = shouldLock;
+        update_autodetect_display();
+        update_save_button_display();
+        if (shouldLock) {
+            update_status("Shot läuft im Hintergrund - Waage gesperrt");
+        } else if (activePage == Page::Waage && shot.completed) {
+            update_status("Shot abgeschlossen - Waage wieder freigegeben");
+        }
+    }
 }
 
 void reset_single_dose_automation_state()
@@ -1736,10 +1834,10 @@ void navigate_to(Page page)
 {
     const bool leavingShotPage = activePage == Page::Stoppuhr && page != Page::Stoppuhr;
     if (leavingShotPage) {
-        coffeeShotSessionCancelArm();
+        t4s3_scale_leave_shot_mode();
     }
     activePage = page;
-    if (activePage != Page::Waage) {
+    if (activePage != Page::Waage || shot_session_running_now()) {
         reset_single_dose_automation_state();
     }
     build_current_page();
@@ -2332,6 +2430,11 @@ static void button_event_cb(lv_event_t *event)
 
     const char *action = static_cast<const char *>(lv_event_get_user_data(event));
     if (!action) {
+        return;
+    }
+
+    if (hmi_action_blocked_by_running_shot(action)) {
+        update_status("Shot läuft im Hintergrund - Aktion gesperrt");
         return;
     }
 
@@ -3476,9 +3579,32 @@ void create_waage_page(lv_obj_t *screen)
     lv_obj_t *vesselBtn = create_button(inputPanel, vessel_name(currentVesselIndex), "vessel_select", 175, 78);
     lv_obj_align(vesselBtn, LV_ALIGN_TOP_MID, 0, 180);
 
+    // Ein laufender Shot bleibt auch beim Wechsel auf die Waagenseite aktiv.
+    // Das Overlay sperrt nur die Single-Dose-Bedienung; die Navigation zur
+    // Shot-Seite bleibt über Overlay und Footer-Navigation erreichbar.
+    shotBackgroundLockOverlay = lv_btn_create(screen);
+    lv_obj_set_size(shotBackgroundLockOverlay, 564, 258);
+    lv_obj_align(shotBackgroundLockOverlay, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_style_bg_color(shotBackgroundLockOverlay, lv_color_hex(0x0D2138), 0);
+    lv_obj_set_style_bg_opa(shotBackgroundLockOverlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(shotBackgroundLockOverlay, lv_color_hex(COLOR_BLE_ACTIVE), 0);
+    lv_obj_set_style_border_width(shotBackgroundLockOverlay, 2, 0);
+    lv_obj_set_style_radius(shotBackgroundLockOverlay, 14, 0);
+    lv_obj_set_style_pad_all(shotBackgroundLockOverlay, 18, 0);
+    lv_obj_add_event_cb(shotBackgroundLockOverlay, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>("nav_stoppuhr"));
+
+    shotBackgroundLockLabel = lv_label_create(shotBackgroundLockOverlay);
+    lv_obj_set_width(shotBackgroundLockLabel, 520);
+    lv_label_set_long_mode(shotBackgroundLockLabel, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(shotBackgroundLockLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(shotBackgroundLockLabel, &lv_font_montserrat_24, 0);
+    style_label(shotBackgroundLockLabel, COLOR_WHITE);
+    lv_obj_center(shotBackgroundLockLabel);
+
     create_footer(screen,
                   "Waage bereit",
                   "");
+    update_shot_background_lock_display();
 }
 void create_stoppuhr_page(lv_obj_t *screen)
 {
@@ -3806,7 +3932,7 @@ void create_maintenance_row(lv_obj_t *parent,
     style_label(timeLabel, COLOR_MUTED);
     lv_obj_align(timeLabel, LV_ALIGN_TOP_RIGHT, -120, y + 10);
 
-    
+
     if (strcmp(action, "maintenance_reset_machine") == 0) {
         maintenanceMachineLeftLabel = leftLabel;
         maintenanceMachineTimeLabel = timeLabel;
@@ -4065,7 +4191,7 @@ void create_settings_wartung_page(lv_obj_t *screen)
     create_maintenance_row(panel, "Kaffeemühle", dirGrinder, timeGrinder, "maintenance_reset_grinder", 128);
     create_maintenance_row(panel, "Filter", dirFilter, timeFilter, "maintenance_reset_filter", 184);
 
-    
+
     update_maintenance_display();
     create_footer(screen,
                   "Wartung bereit",
@@ -4797,6 +4923,11 @@ bool ui_t4s3_handle_web_command(const char *cmd)
 
     ui_t4s3_notify_activity();
 
+    if (web_command_blocked_by_running_shot(cmd)) {
+        update_status("Shot läuft im Hintergrund - Aktion gesperrt");
+        return false;
+    }
+
     if (strcmp(cmd, "web_wizard_begin") == 0) {
         return ui_t4s3_web_wizard_begin();
     }
@@ -4982,12 +5113,13 @@ bool ui_t4s3_is_shot_scale_mode()
 
 bool ui_t4s3_ble_remote_control_allowed()
 {
-    return ui_t4s3_is_shot_scale_mode();
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+    return ui_t4s3_is_shot_scale_mode() || shot.armed || shot.running;
 }
 
 bool ui_t4s3_single_dose_automation_allowed()
 {
-    return activePage == Page::Waage && !webWizardActive;
+    return activePage == Page::Waage && !webWizardActive && !shot_session_running_now();
 }
 
 const char *ui_t4s3_scale_mode_key()
@@ -5057,9 +5189,13 @@ void ui_t4s3_tick()
 
     const uint32_t now = millis();
 
-    if ((timerRunning || ui_t4s3_is_shot_scale_mode()) && now - lastTimerMs >= 100) {
+    if (now - lastTimerMs >= 100) {
         lastTimerMs = now;
-        update_timer_display();
+        const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(now);
+        if (timerRunning || shot.running || ui_t4s3_is_shot_scale_mode()) {
+            update_timer_display();
+        }
+        update_shot_background_lock_display();
     }
 
     static uint32_t lastClockMs = 0;

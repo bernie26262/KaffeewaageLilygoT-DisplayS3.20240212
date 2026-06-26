@@ -35,6 +35,37 @@ T4-S3 GND         -> HX711 GND
 Der Batterieanschluss `+ / -` beziehungsweise `BAT` ist für eine einzelne
 LiPo-Zelle gedacht und darf nicht mit 5 V gespeist werden.
 
+### VBUS-Betrieb ohne Akku
+
+Der aktuelle T4-S3-Build ist für den geplanten stationären Betrieb über VBUS
+ohne angeschlossenen LiPo konfiguriert. Nach erfolgreicher Board-Initialisierung
+werden deshalb am SY6970-Powermanagement-Chip zwei Funktionen abgeschaltet:
+
+```text
+-DCOFFEE_T4S3_DISABLE_CHARGING=1
+-DCOFFEE_T4S3_DISABLE_CHARGE_LED=1
+```
+
+`COFFEE_T4S3_DISABLE_CHARGING` deaktiviert den Ladepfad. LilyGO empfiehlt dies,
+wenn USB/VBUS die einzige Versorgung ist und kein Akku angeschlossen ist, weil
+die Systemversorgung andernfalls instabil werden kann.
+
+`COFFEE_T4S3_DISABLE_CHARGE_LED` schaltet die rote Lade-/Status-LED aus. Ohne
+Akku blinkt diese LED sonst als Fehleranzeige. Beide Schalter sind absichtlich
+getrennt, damit bei einem späteren LiPo-Betrieb der Ladepfad wieder aktiviert,
+die LED aber auf Wunsch weiterhin ausgeschaltet bleiben kann.
+
+Für einen späteren Betrieb mit LiPo muss mindestens folgender Build-Flag auf `0`
+gesetzt oder aus `platformio.ini` entfernt werden:
+
+```text
+-DCOFFEE_T4S3_DISABLE_CHARGING=0
+```
+
+Beim Einspeisen externer 5 V an VBUS darf nicht gleichzeitig eine zweite
+5-V-Quelle über USB angeschlossen werden, sofern die beiden Versorgungswege
+nicht hardwareseitig gegeneinander entkoppelt sind.
+
 ## HX711-Anschluss
 
 Empfohlene Pins am T4-S3-Header:

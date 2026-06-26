@@ -12,4 +12,9 @@ bool t4s3_scale_calibrate(float knownGrams);
 
 float t4s3_scale_current_grams();
 float t4s3_scale_shot_grams();
+
+// Handle leaving the Shot page on the Arduino/LVGL loop task. Armed sessions
+// are cancelled; running sessions deliberately continue in the background.
+void t4s3_scale_leave_shot_mode();
+
 float t4s3_scale_calibration_factor();

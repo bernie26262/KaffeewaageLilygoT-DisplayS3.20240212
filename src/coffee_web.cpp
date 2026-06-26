@@ -14,7 +14,7 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
-#define COFFEE_WEB_ASSET_VERSION "20260620a"
+#define COFFEE_WEB_ASSET_VERSION "20260625a"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
   "public, max-age=31536000, immutable";
@@ -117,6 +117,11 @@ R"rawliteral(">
   <div id="scalePage" class="page">
   <section class="card scale-card">
     <div id="scaleModeBanner" class="mode-banner single-dose">Single-Dose-Waage · Autodetect aktiv</div>
+    <div id="scaleShotLock" class="shot-running-lock hidden" role="status" aria-live="polite">
+      <strong>Shot läuft im Hintergrund</strong>
+      <span id="scaleShotLockDetails">Single-Dose-Bedienung ist bis zum Shot-Ende gesperrt.</span>
+      <span>Über den Tab „Shot“ zur laufenden Messung zurückkehren.</span>
+    </div>
     <div class="weight-head">
       <div class="label">Gewicht</div>
       <div class="autodetect-row small">
@@ -516,6 +521,14 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     }
     .mode-banner.single-dose { color: #bbf7d0; border-color: rgba(85,195,66,.38); background: rgba(85,195,66,.12); }
     .mode-banner.shot { color: #dbeafe; border-color: rgba(59,130,246,.46); background: rgba(59,130,246,.14); }
+    .shot-running-lock {
+      display: grid; gap: 5px; padding: 12px 14px; border-radius: 14px;
+      border: 1px solid rgba(59,130,246,.55); background: rgba(30,64,175,.20);
+      color: #dbeafe; text-align: center;
+    }
+    .shot-running-lock strong { font-size: 1rem; color: #bfdbfe; }
+    .shot-running-lock span { color: #cbd5e1; font-size: .88rem; }
+    .shot-running-lock.hidden { display: none; }
     .shot-card { gap: 12px; }
     .shot-weight { font-size: clamp(3rem, 17vw, 5.6rem); line-height: .95; }
     .shot-flow { color: #93c5fd; font-variant-numeric: tabular-nums; }
@@ -2004,29 +2017,39 @@ function renderShotSession(s) {
 function renderScaleMode(s) {
   const label = s.system?.scale_mode_label || (s.system?.shot_mode ? 'Shot-Waage' : 'Single Dose');
   const shot = !!s.system?.shot_mode;
+  const shotRunning = !!s.shot?.running;
   setText('appTitle', shot ? 'Shot-Waage' : 'Single-Dose-Waage');
-  setText('scaleModeBanner', 'Single-Dose-Waage · Autodetect und Save aktiv');
+  setText('scaleModeBanner', shotRunning
+    ? 'Shot läuft im Hintergrund · Single-Dose gesperrt'
+    : 'Single-Dose-Waage · Autodetect und Save aktiv');
   setText('shotModeBanner', shot ? 'Shot-Waage · automatische Zeitmessung' : 'Shot-Waage · beim Öffnen automatisch');
-  el('scaleModeBanner')?.classList.toggle('single-dose', !shot);
-  el('scaleModeBanner')?.classList.toggle('shot', shot);
+  el('scaleModeBanner')?.classList.toggle('single-dose', !shotRunning);
+  el('scaleModeBanner')?.classList.toggle('shot', shotRunning);
   el('shotModeBanner')?.classList.toggle('shot', true);
+
+  const lock = el('scaleShotLock');
+  lock?.classList.toggle('hidden', !shotRunning);
+  if (shotRunning) {
+    setText('scaleShotLockDetails', `${fmtStopwatchTime(Number(s.shot?.elapsed_ms || 0))} · ${fmtG(s.weight?.actual_g)} g · ${fmtG(s.shot?.current_flow_g_s || 0)} g/s`);
+  }
   return label;
 }
 
 function renderAutodetect(s) {
   const autodetectOn = !!s.selection?.autodetect;
   const autodetectPaused = !!s.system?.autodetect_paused;
+  const shotRunning = !!s.shot?.running;
   const singleDoseAutomation = s.system?.single_dose_automation_allowed !== false;
   const autodetectToggle = el('autodetectToggle');
   const autodetectLed = el('autodetectLed');
 
-  setText('autodetectStatus', !singleDoseAutomation ? 'Shot aus' : (autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus')));
+  setText('autodetectStatus', shotRunning ? 'Shot läuft' : (!singleDoseAutomation ? 'Shot aus' : (autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus'))));
   autodetectToggle.classList.toggle('on', autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('off', !autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('paused', autodetectPaused);
   autodetectToggle.setAttribute('aria-pressed', autodetectOn ? 'true' : 'false');
   autodetectToggle.disabled = autodetectPaused || !singleDoseAutomation;
-  autodetectToggle.title = !singleDoseAutomation ? 'Autodetect ist auf der Shot-Waage deaktiviert' : (autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten'));
+  autodetectToggle.title = shotRunning ? 'Shot läuft im Hintergrund; Single-Dose-Bedienung ist gesperrt' : (!singleDoseAutomation ? 'Autodetect ist auf der Shot-Waage deaktiviert' : (autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten')));
   autodetectLed.classList.toggle('on', autodetectOn && !autodetectPaused);
 }
 
@@ -2110,7 +2133,14 @@ function renderStatsAndSystem(s) {
 }
 
 function renderActionAvailability(s) {
-  el('save').disabled = !s.status?.save_ready;
+  const shotRunning = !!s.shot?.running;
+  el('save').disabled = shotRunning || !s.status?.save_ready;
+  ['tare', 'targetWeight', 'targetSave', 'siebtraegerPicker'].forEach(id => {
+    const node = el(id);
+    if (node) node.disabled = shotRunning;
+  });
+  const shotTare = el('shotTare');
+  if (shotTare) shotTare.disabled = shotRunning;
   const swToggle = el('swToggle');
   const swReset = el('swReset');
   if (swToggle) swToggle.disabled = false;
@@ -2952,12 +2982,12 @@ void coffeeWebBegin(AsyncWebServer& server)
 
   server.on("/api/shot/samples", HTTP_GET, [](AsyncWebServerRequest* request) {
     constexpr size_t kMaxShotBatch = 120;
-    size_t from = 0;
+    size_t requestedFrom = 0;
     size_t limit = kMaxShotBatch;
 
     if (request->hasParam("from")) {
       const long value = request->getParam("from")->value().toInt();
-      if (value > 0) from = static_cast<size_t>(value);
+      if (value > 0) requestedFrom = static_cast<size_t>(value);
     }
     if (request->hasParam("limit")) {
       const long value = request->getParam("limit")->value().toInt();
@@ -2965,47 +2995,28 @@ void coffeeWebBegin(AsyncWebServer& server)
     }
     if (limit > kMaxShotBatch) limit = kMaxShotBatch;
 
-    CoffeeShotSessionStatus before = coffeeShotSessionStatus(millis());
-    size_t total = coffeeShotSessionSampleCount();
-    if (from > total) from = total;
-    const size_t available = total - from;
-    const size_t requestedCount = available < limit ? available : limit;
-
     CoffeeShotSample samples[kMaxShotBatch];
-    size_t count = 0;
-    for (; count < requestedCount; ++count) {
-      if (!coffeeShotSessionGetSample(from + count, samples[count])) break;
-    }
-
-    const CoffeeShotSessionStatus after = coffeeShotSessionStatus(millis());
-    if (after.session_id != before.session_id) {
-      before = after;
-      from = 0;
-      total = after.sample_count;
-      count = 0;
-    } else {
-      // Auto-Stop can trim the confirmation tail while this request is built.
-      total = after.sample_count;
-      if (from > total) {
-        from = total;
-        count = 0;
-      } else if (from + count > total) {
-        count = total - from;
-      }
-    }
+    CoffeeShotSessionStatus snapshot;
+    size_t actualFrom = 0;
+    const size_t count = coffeeShotSessionCopySamples(millis(),
+                                                       requestedFrom,
+                                                       samples,
+                                                       limit,
+                                                       actualFrom,
+                                                       snapshot);
 
     String out;
     out.reserve(160 + count * 34);
     out += F("{\"session_id\":");
-    out += String(before.session_id);
+    out += String(snapshot.session_id);
     out += F(",\"from\":");
-    out += String(from);
+    out += String(actualFrom);
     out += F(",\"count\":");
     out += String(count);
     out += F(",\"total\":");
-    out += String(total);
+    out += String(snapshot.sample_count);
     out += F(",\"state\":\"");
-    out += coffeeShotSessionStateName(before.state);
+    out += coffeeShotSessionStateName(snapshot.state);
     out += F("\",\"samples\":[");
     for (size_t i = 0; i < count; ++i) {
       if (i > 0) out += ',';

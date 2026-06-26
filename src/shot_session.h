@@ -57,4 +57,14 @@ void coffeeShotSessionReset();
 CoffeeShotSessionStatus coffeeShotSessionStatus(uint32_t now_ms);
 size_t coffeeShotSessionSampleCount();
 bool coffeeShotSessionGetSample(size_t index, CoffeeShotSample &sample);
+
+// Copy one consistent sample batch for AsyncWebServer. The implementation
+// protects the live session buffer against concurrent HX711 updates and shot
+// finalization on the Arduino loop task.
+size_t coffeeShotSessionCopySamples(uint32_t now_ms,
+                                    size_t requested_from,
+                                    CoffeeShotSample *samples,
+                                    size_t capacity,
+                                    size_t &actual_from,
+                                    CoffeeShotSessionStatus &status);
 const char *coffeeShotSessionStateName(CoffeeShotSessionState state);

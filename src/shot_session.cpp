@@ -2,6 +2,9 @@
 
 #include <math.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
+
 namespace {
 
 // Automatic timing deliberately measures first liquid in the cup through the
@@ -45,6 +48,16 @@ uint32_t g_last_sample_ms = 0;
 bool g_sample_buffer_full = false;
 float g_current_flow_g_s = 0.0f;
 bool g_flow_initialized = false;
+portMUX_TYPE g_shot_mux = portMUX_INITIALIZER_UNLOCKED;
+
+class ShotSessionLock {
+public:
+    ShotSessionLock() { portENTER_CRITICAL(&g_shot_mux); }
+    ~ShotSessionLock() { portEXIT_CRITICAL(&g_shot_mux); }
+
+    ShotSessionLock(const ShotSessionLock &) = delete;
+    ShotSessionLock &operator=(const ShotSessionLock &) = delete;
+};
 
 uint32_t nextSessionId()
 {
@@ -240,10 +253,39 @@ CoffeeShotSessionEvent stopSession(uint32_t now_ms, float weight_g, bool use_las
     return CoffeeShotSessionEvent::Stopped;
 }
 
+void cancelArmUnlocked()
+{
+    if (g_status.state != CoffeeShotSessionState::Armed) {
+        return;
+    }
+
+    g_status.armed = false;
+    g_status.running = false;
+    g_status.current_flow_g_s = 0.0f;
+    g_status.state = g_status.completed
+                       ? CoffeeShotSessionState::Completed
+                       : CoffeeShotSessionState::Idle;
+    g_start_candidate = false;
+    g_start_candidate_ms = 0;
+}
+
+CoffeeShotSessionStatus statusUnlocked(uint32_t now_ms)
+{
+    CoffeeShotSessionStatus result = g_status;
+    if (result.running) {
+        result.elapsed_ms = now_ms - g_started_at_ms;
+    }
+    result.sample_count = static_cast<uint16_t>(g_sample_count);
+    result.sample_buffer_full = g_sample_buffer_full;
+    return result;
+}
+
 } // namespace
 
 void coffeeShotSessionArm(uint32_t now_ms, float current_weight_g)
 {
+    ShotSessionLock lock;
+
     // Do not erase the previous completed result here. It is replaced only
     // when the next shot is positively detected.
     g_status.state = CoffeeShotSessionState::Armed;
@@ -260,28 +302,20 @@ void coffeeShotSessionArm(uint32_t now_ms, float current_weight_g)
 
 void coffeeShotSessionCancelArm()
 {
-    if (g_status.state != CoffeeShotSessionState::Armed) {
-        return;
-    }
-
-    g_status.armed = false;
-    g_status.running = false;
-    g_status.current_flow_g_s = 0.0f;
-    g_status.state = g_status.completed
-                       ? CoffeeShotSessionState::Completed
-                       : CoffeeShotSessionState::Idle;
-    g_start_candidate = false;
-    g_start_candidate_ms = 0;
+    ShotSessionLock lock;
+    cancelArmUnlocked();
 }
 
 CoffeeShotSessionEvent coffeeShotSessionTick(uint32_t now_ms, float weight_g)
 {
+    ShotSessionLock lock;
+
     const float weight = finiteWeight(weight_g);
     g_status.current_weight_g = weight;
 
     if (g_status.state == CoffeeShotSessionState::Armed) {
         if ((now_ms - g_armed_at_ms) >= kArmTimeoutMs) {
-            coffeeShotSessionCancelArm();
+            cancelArmUnlocked();
             return CoffeeShotSessionEvent::None;
         }
 
@@ -336,6 +370,8 @@ CoffeeShotSessionEvent coffeeShotSessionTick(uint32_t now_ms, float weight_g)
 
 CoffeeShotSessionEvent coffeeShotSessionExternalStart(uint32_t now_ms, float weight_g)
 {
+    ShotSessionLock lock;
+
     if (g_status.running) {
         return CoffeeShotSessionEvent::None;
     }
@@ -344,11 +380,14 @@ CoffeeShotSessionEvent coffeeShotSessionExternalStart(uint32_t now_ms, float wei
 
 CoffeeShotSessionEvent coffeeShotSessionExternalStop(uint32_t now_ms, float weight_g)
 {
+    ShotSessionLock lock;
     return stopSession(now_ms, weight_g, false);
 }
 
 void coffeeShotSessionReset()
 {
+    ShotSessionLock lock;
+
     const uint32_t clearedSessionId = nextSessionId();
     g_status = CoffeeShotSessionStatus{};
     g_status.session_id = clearedSessionId;
@@ -364,27 +403,47 @@ void coffeeShotSessionReset()
 
 CoffeeShotSessionStatus coffeeShotSessionStatus(uint32_t now_ms)
 {
-    CoffeeShotSessionStatus result = g_status;
-    if (result.running) {
-        result.elapsed_ms = now_ms - g_started_at_ms;
-    }
-    result.sample_count = static_cast<uint16_t>(g_sample_count);
-    result.sample_buffer_full = g_sample_buffer_full;
-    return result;
+    ShotSessionLock lock;
+    return statusUnlocked(now_ms);
 }
 
 size_t coffeeShotSessionSampleCount()
 {
+    ShotSessionLock lock;
     return g_sample_count;
 }
 
 bool coffeeShotSessionGetSample(size_t index, CoffeeShotSample &sample)
 {
+    ShotSessionLock lock;
     if (index >= g_sample_count) {
         return false;
     }
     sample = g_samples[index];
     return true;
+}
+
+size_t coffeeShotSessionCopySamples(uint32_t now_ms,
+                                    size_t requested_from,
+                                    CoffeeShotSample *samples,
+                                    size_t capacity,
+                                    size_t &actual_from,
+                                    CoffeeShotSessionStatus &status)
+{
+    ShotSessionLock lock;
+
+    actual_from = requested_from < g_sample_count ? requested_from : g_sample_count;
+    const size_t available = g_sample_count - actual_from;
+    const size_t count = available < capacity ? available : capacity;
+
+    if (samples) {
+        for (size_t i = 0; i < count; ++i) {
+            samples[i] = g_samples[actual_from + i];
+        }
+    }
+
+    status = statusUnlocked(now_ms);
+    return count;
 }
 
 const char *coffeeShotSessionStateName(CoffeeShotSessionState state)
