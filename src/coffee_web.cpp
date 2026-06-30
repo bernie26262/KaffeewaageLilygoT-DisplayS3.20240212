@@ -28,7 +28,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260617a">
+  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260626b">
 </head>
 <body>
 <main>
@@ -57,6 +57,11 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
   <div id="scalePage" class="page">
   <section class="card scale-card">
+    <div id="scaleShotLock" class="shot-running-lock hidden" role="status" aria-live="polite">
+      <strong>Shot läuft im Hintergrund</strong>
+      <span id="scaleShotLockDetails">Single-Dose-Bedienung ist bis zum Shot-Ende gesperrt.</span>
+      <span>Über den Tab „Shot“ zur laufenden Messung zurückkehren.</span>
+    </div>
     <div class="weight-head">
       <div class="label">Gewicht</div>
       <div class="autodetect-row small">
@@ -352,9 +357,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=legacy-shot-20260617a"></script>
-<script src="/coffee_render.js?v=legacy-shot-20260617a"></script>
-<script src="/coffee_events.js?v=legacy-shot-20260617a"></script>
+<script src="/coffee_core.js?v=legacy-shot-20260626b"></script>
+<script src="/coffee_render.js?v=legacy-shot-20260626b"></script>
+<script src="/coffee_events.js?v=legacy-shot-20260626b"></script>
 </body>
 </html>)rawliteral";
 
@@ -451,6 +456,14 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .stats-maintenance-button { margin: 0 0 12px 0; }
     /* ===== Autodetect / Gewichtskarte ===== */
     .scale-card { display: grid; gap: 12px; }
+    .shot-running-lock {
+      display: grid; gap: 5px; padding: 12px 14px; border-radius: 14px;
+      border: 1px solid rgba(59,130,246,.55); background: rgba(30,64,175,.20);
+      color: #dbeafe; text-align: center;
+    }
+    .shot-running-lock strong { font-size: 1rem; color: #bfdbfe; }
+    .shot-running-lock span { color: #cbd5e1; font-size: .88rem; }
+    .shot-running-lock.hidden { display: none; }
     .weight-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .weight-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; }
     .weight-row .weight { flex: 1 1 auto; min-width: 0; margin-left: auto; }
@@ -923,6 +936,7 @@ function showTab(targetPageId) {
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 
   if (targetPageId === 'timerPage') {
+    if (lastState?.shot) syncShotChart(lastState.shot);
     requestAnimationFrame(drawShotGraph);
   }
 }
@@ -964,9 +978,9 @@ function handleMainTabClick(targetPageId) {
   } else if (targetPageId === 'timerPage') {
     sendCommand(CMD.modeShot, 'Modus Shot-Waage gesendet …');
   } else if (targetPageId === 'statsPage') {
-    sendCommand(CMD.modeData, 'Shot-Modus beendet, HMI auf Daten …');
+    sendCommand(CMD.modeData, 'Daten geöffnet; laufender Shot bleibt im Hintergrund aktiv …');
   } else if (targetPageId === 'settingsPage') {
-    sendCommand(CMD.modeSettings, 'Shot-Modus beendet, HMI auf Einstellungen …');
+    sendCommand(CMD.modeSettings, 'Einstellungen geöffnet; laufender Shot bleibt im Hintergrund aktiv …');
   }
 }
 
@@ -1681,7 +1695,7 @@ function renderShotTimer() {
 function renderShotSession(s) {
   const shot = s?.shot || {};
   syncShotTimer(shot);
-  syncShotChart(shot);
+  if (currentMainTab === 'timerPage') syncShotChart(shot);
   renderShotTimer();
   setText('shotWeight', fmtG(shot.current_weight_g ?? s?.weight?.actual_g ?? 0));
   setText('shotFlow', fmtG(shot.current_flow_g_s || 0));
@@ -1742,6 +1756,7 @@ function renderGefaessSettings(s) {
   const list = el('gefaessList');
   if (!list) return;
 
+  const shotRunning = !!s.shot?.running;
   const weights = s?.gefaesse?.weights_g || [];
   list.innerHTML = GEFAESS_INDEXES.map(index => {
     const weight = Number(weights[index] || 0);
@@ -1751,7 +1766,7 @@ function renderGefaessSettings(s) {
       ? `<span class="gefaess-weight">${fmtG(weight)} g</span>`
       : '<span class="gefaess-missing">nicht eingemessen</span>';
     const button = measured
-      ? `<button class="compact danger delete-gefaess" data-gefaess-index="${index}">löschen</button>`
+      ? `<button class="compact danger delete-gefaess" data-gefaess-index="${index}"${shotRunning ? ' disabled' : ''}>löschen</button>`
       : '<button class="compact secondary" disabled>löschen</button>';
     return `<div class="gefaess-row"><div><b>${label}:</b> ${value}</div>${button}</div>`;
   }).join('');
@@ -1770,19 +1785,22 @@ function renderWeightAndSelection(s) {
 function renderAutodetect(s) {
   const autodetectOn = !!s.selection?.autodetect;
   const autodetectPaused = !!s.system?.autodetect_paused;
+  const shotRunning = !!s.shot?.running;
   const singleDoseAutomation = s.system?.single_dose_automation_allowed !== false;
   const autodetectToggle = el('autodetectToggle');
   const autodetectLed = el('autodetectLed');
 
-  setText('autodetectStatus', !singleDoseAutomation ? 'Shot aus' : (autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus')));
+  setText('autodetectStatus', shotRunning ? 'Shot läuft' : (!singleDoseAutomation ? 'Shot aus' : (autodetectPaused ? 'pausiert' : (autodetectOn ? 'an' : 'aus'))));
   autodetectToggle.classList.toggle('on', singleDoseAutomation && autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('off', singleDoseAutomation && !autodetectOn && !autodetectPaused);
   autodetectToggle.classList.toggle('paused', autodetectPaused || !singleDoseAutomation);
   autodetectToggle.setAttribute('aria-pressed', autodetectOn ? 'true' : 'false');
-  autodetectToggle.disabled = autodetectPaused || !singleDoseAutomation;
-  autodetectToggle.title = !singleDoseAutomation
-    ? 'Autodetect ist im Shot-Modus deaktiviert'
-    : (autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten'));
+  autodetectToggle.disabled = shotRunning || autodetectPaused || !singleDoseAutomation;
+  autodetectToggle.title = shotRunning
+    ? 'Shot läuft im Hintergrund; Single-Dose-Bedienung ist gesperrt'
+    : (!singleDoseAutomation
+        ? 'Autodetect ist im Shot-Modus deaktiviert'
+        : (autodetectPaused ? 'Autodetect ist während des Assistenten pausiert' : (autodetectOn ? 'Autodetect ausschalten' : 'Autodetect einschalten')));
   autodetectLed.classList.toggle('on', singleDoseAutomation && autodetectOn && !autodetectPaused);
 }
 
@@ -1830,7 +1848,7 @@ function renderBle(s) {
   const detailParts = [];
   if (enabled) detailParts.push(ble.mode || 'WeighMyBru');
   if (connected && hz > 0) detailParts.push(`${hz.toFixed(1)} Hz`);
-  detailParts.push(s.system?.shot_mode ? 'Remote aktiv' : 'Remote gesperrt');
+  detailParts.push((s.system?.shot_mode || s.shot?.armed || s.shot?.running) ? 'Remote aktiv' : 'Remote gesperrt');
 
   setText('statsBleStatus', status);
   setText('statsBleDetails', detailParts.join(' · '));
@@ -1909,8 +1927,41 @@ function renderStatsAndSystem(s) {
   }
 }
 
+function renderShotRunningLock(s) {
+  const shotRunning = !!s.shot?.running;
+  const lock = el('scaleShotLock');
+  if (!lock) return;
+
+  lock.classList.toggle('hidden', !shotRunning);
+  if (shotRunning) {
+    setText('scaleShotLockDetails', `${fmtShotTime(currentShotTimerMs())} · ${fmtG(s.shot?.current_weight_g ?? s.weight?.actual_g ?? 0)} g · ${fmtG(s.shot?.current_flow_g_s || 0)} g/s`);
+  }
+}
+
+function applyShotTelemetry(data) {
+  if (!lastState) return;
+
+  lastState.shot = Object.assign(lastState.shot || {}, data.shot || {});
+  lastState.weight = lastState.weight || {};
+  if (data.weight && Number.isFinite(Number(data.weight.actual_g))) {
+    lastState.weight.actual_g = Number(data.weight.actual_g);
+  }
+
+  renderShotSession(lastState);
+  renderShotRunningLock(lastState);
+}
+
 function renderActionAvailability(s) {
-  el('save').disabled = !s.status?.save_ready;
+  const shotRunning = !!s.shot?.running;
+  el('save').disabled = shotRunning || !s.status?.save_ready;
+  ['tare', 'targetWeight', 'targetSave', 'siebtraegerSelect', 'openCalibrate', 'openMeasureGefaess'].forEach(id => {
+    const node = el(id);
+    if (node) node.disabled = shotRunning;
+  });
+  const shotTare = el('shotTare');
+  if (shotTare) shotTare.disabled = shotRunning;
+
+  renderShotRunningLock(s);
 }
 
 function render(s) {
@@ -1956,6 +2007,7 @@ function connect() {
   ws.onmessage = e => {
     const data = JSON.parse(e.data);
     if (data.type === 'state') render(data);
+    if (data.type === 'shot_telemetry') applyShotTelemetry(data);
     if (data.type === 'ack') addLog(`OK: ${data.cmd}`);
     if (data.type === 'error') addLog(`Fehler: ${data.cmd || ''} ${data.message}`);
   };
@@ -2336,7 +2388,9 @@ function startClientTimers() {
   }, 1000);
 
   setInterval(function shotClientTick() {
-    if (lastState) renderShotTimer();
+    if (!lastState) return;
+    renderShotTimer();
+    renderShotRunningLock(lastState);
   }, 100);
 }
 
@@ -3060,12 +3114,43 @@ static String buildStateJson(const AppState& s)
   return out;
 }
 
+static String buildShotTelemetryJson(const AppState& s)
+{
+  StaticJsonDocument<768> doc;
+  doc["type"] = "shot_telemetry";
+  doc["weight"]["actual_g"] = s.weight.actual_g;
+  doc["shot"]["session_id"] = s.shot.session_id;
+  doc["shot"]["state"] = s.shot.state;
+  doc["shot"]["armed"] = s.shot.armed;
+  doc["shot"]["running"] = s.shot.running;
+  doc["shot"]["completed"] = s.shot.completed;
+  doc["shot"]["elapsed_ms"] = s.shot.elapsed_ms;
+  doc["shot"]["current_weight_g"] = s.shot.current_weight_g;
+  doc["shot"]["peak_weight_g"] = s.shot.peak_weight_g;
+  doc["shot"]["final_weight_g"] = s.shot.final_weight_g;
+  doc["shot"]["current_flow_g_s"] = s.shot.current_flow_g_s;
+  doc["shot"]["sample_count"] = s.shot.sample_count;
+  doc["shot"]["sample_buffer_full"] = s.shot.sample_buffer_full;
+
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
 void coffeeWebBroadcastState(const AppState& state)
 {
   if (!coffeeWebHasClients()) {
     return;
   }
   ws.textAll(buildStateJson(state));
+}
+
+void coffeeWebBroadcastShotTelemetry(const AppState& state)
+{
+  if (!coffeeWebHasClients()) {
+    return;
+  }
+  ws.textAll(buildShotTelemetryJson(state));
 }
 
 bool coffeeWebHasClients()

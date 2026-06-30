@@ -177,6 +177,7 @@ AsyncWebServer server(HTTP_PORT);
 
 AppState appState;
 static unsigned long lastWebStateBroadcastMs = 0;
+static unsigned long lastWebShotTelemetryBroadcastMs = 0;
 static unsigned long lastWebWeightBroadcastMs = 0;
 static float lastWebBroadcastWeightG = 0.0f;
 static bool hasWebBroadcastWeight = false;
@@ -482,6 +483,13 @@ static bool oldShotDisplayArmed = false;
 static bool oldShotDisplayRunning = false;
 static bool oldShotDisplayCompleted = false;
 static bool shotDisplayInitialised = false;
+static bool shotBackgroundLockDisplayed = false;
+static uint32_t oldShotBackgroundTenths = UINT32_MAX;
+static int32_t oldShotBackgroundWeightTenths = INT32_MIN;
+static int32_t oldShotBackgroundFlowTenths = INT32_MIN;
+static char oldShotBackgroundTimeText[11] = {0};
+static char oldShotBackgroundWeightText[8] = {0};
+static char oldShotBackgroundFlowText[9] = {0};
 
 #ifndef BLE_SCALE_START_DELAY_MS
 #define BLE_SCALE_START_DELAY_MS 5000UL
@@ -512,6 +520,8 @@ unsigned long lastTimeAutodetectPlace = 0;
 unsigned long lastTimeAutodetectLift = 0;
 const unsigned long AUTO_DETECT_SETTLE_MS = 500;
 const unsigned long AUTO_DETECT_POST_TARA_SETTLE_MS = 500;
+bool singleDoseAutomationResumePending = false;
+unsigned long singleDoseAutomationResumeRequestedMs = 0;
 const float AUTO_DETECT_PLACE_THRESHOLD_G = 40.0f;
 const float AUTO_DETECT_LIFT_THRESHOLD_G = 30.0f;
 const float AUTO_DETECT_GEFAESS_TOLERANCE_G = 2.0f;
@@ -904,7 +914,7 @@ static void updateCoffeeAppStateFromGlobals()
   appState.system.display_timeout_minutes = displayTimeoutMinutes;
   appState.system.scale_mode = scaleUiMode;
   appState.system.shot_mode = scaleUiMode == SCALE_UI_MODE_SHOT;
-  appState.system.single_dose_automation_allowed = scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE;
+  appState.system.single_dose_automation_allowed = scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && !shot.running;
   appState.system.uptime_ms = millis();
 
   const CoffeeBleScaleStatus ble = coffeeBleScaleStatus();
@@ -937,6 +947,8 @@ void RefreshTFTTaraWait();
 void RefreshTFTTaraFinished();
 void RedrawTFTShotPage();
 void RefreshTFTShotPage();
+void RedrawTFTShotBackgroundLock();
+void RefreshTFTShotBackgroundLock();
 void RefreshTFTBluetoothStatus();
 void DisplayOnOff();
 void doTara();
@@ -1152,6 +1164,68 @@ static void appendShotLog(const char* format, ...)
   coffeeBleScaleAppendLog(message);
 }
 
+static bool isShotRunningNow()
+{
+  return coffeeShotSessionStatus(millis()).running;
+}
+
+static bool isShotArmedOrRunningNow()
+{
+  const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+  return shot.armed || shot.running;
+}
+
+static void suspendSingleDoseAutomationForBackgroundShot()
+{
+  autoDetectPostTaraPending = false;
+  autoDetectPostTaraSecondTara = false;
+  ifPathAutoDetectPlace = false;
+  ifPathAutoDetectLift = false;
+  ifpathGefaessWasLifted = false;
+  measurementAutoDetectReady = false;
+  setAutoDetectState(AutoDetectState::Idle);
+  setSaveReady(false);
+}
+
+static void resumeSingleDoseAutomationAfterBackgroundShot()
+{
+  autoDetectPostTaraPending = false;
+  autoDetectPostTaraSecondTara = false;
+  ifPathAutoDetectPlace = false;
+  ifPathAutoDetectLift = false;
+  ifpathGefaessWasLifted = false;
+  setAutoDetectState(AutoDetectState::Idle);
+  oldWeightAutoDetect = actualWeight;
+  weightToCompareAutoDetect = 0.0f;
+  startWeightGrinding = actualWeight;
+  stopWeightGrinding = actualWeight;
+  measurementAutoDetectReady = autoDetect == 1;
+  singleDoseAutomationResumePending = false;
+  setSaveReady(false);
+}
+
+static void requestSingleDoseAutomationResume(uint32_t nowMs)
+{
+  suspendSingleDoseAutomationForBackgroundShot();
+  singleDoseAutomationResumePending = true;
+  singleDoseAutomationResumeRequestedMs = nowMs;
+}
+
+static void serviceSingleDoseAutomationResume(uint32_t nowMs)
+{
+  if (!singleDoseAutomationResumePending ||
+      scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE ||
+      isShotArmedOrRunningNow()) {
+    return;
+  }
+
+  if (nowMs - singleDoseAutomationResumeRequestedMs < AUTO_DETECT_POST_TARA_SETTLE_MS) {
+    return;
+  }
+
+  resumeSingleDoseAutomationAfterBackgroundShot();
+}
+
 static void armShotSessionAfterTare()
 {
   resetShotWeightFilter(0.0f);
@@ -1177,6 +1251,8 @@ static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t nowMs,
     appendShotLog("Shot beendet: %.1f g in %.1f s",
                   static_cast<double>(shot.final_weight_g),
                   static_cast<double>(shot.elapsed_ms) / 1000.0);
+    singleDoseAutomationResumePending = true;
+    singleDoseAutomationResumeRequestedMs = nowMs;
   }
 
   if (displayOff == 0 && pageID == 3) {
@@ -1527,6 +1603,31 @@ static constexpr const char* PREFIX_SET_DISPLAY_TIMEOUT = "set_display_timeout_"
 static constexpr const char* PREFIX_SET_MAINTENANCE_INTERVALS = "set_maintenance_intervals_";
 static constexpr const char* PREFIX_SET_MAINTENANCE_ENABLED = "set_maintenance_enabled_";
 
+static bool webCommandBlockedByRunningShot(const char* cmd)
+{
+  if (!cmd || !isShotRunningNow()) {
+    return false;
+  }
+
+  if (cmdEquals(cmd, CMD_TARE) ||
+      cmdEquals(cmd, CMD_SAVE_DOSE) ||
+      cmdEquals(cmd, CMD_AUTODETECT_ON) ||
+      cmdEquals(cmd, CMD_AUTODETECT_OFF) ||
+      cmdEquals(cmd, CMD_WEB_WIZARD_BEGIN) ||
+      cmdEquals(cmd, CMD_WEB_WIZARD_TARE) ||
+      cmdEquals(cmd, CMD_SCALE_CALIBRATION_APPLY) ||
+      cmdEquals(cmd, CMD_MEASURE_GEFAESS_SAVE)) {
+    return true;
+  }
+
+  return cmdStartsWith(cmd, PREFIX_SELECT_SIEBTRAEGER) ||
+         cmdStartsWith(cmd, PREFIX_SET_SELECTED_SIEBTRAEGER_WEIGHT) ||
+         cmdStartsWith(cmd, PREFIX_SCALE_CALIBRATION_SET_WEIGHT) ||
+         cmdStartsWith(cmd, PREFIX_SCALE_CALIBRATION_APPLY_WEIGHT) ||
+         cmdStartsWith(cmd, PREFIX_SELECT_GEFAESS) ||
+         cmdStartsWith(cmd, PREFIX_DELETE_GEFAESS);
+}
+
 static bool handleWebSelectionCommand(const char* cmd, bool& handled)
 {
   handled = true;
@@ -1631,7 +1732,7 @@ static void handleBleCommands()
 {
   CoffeeBleScaleCommand command = CoffeeBleScaleCommand::None;
   while (coffeeBleScalePopCommand(command)) {
-    if (scaleUiMode != SCALE_UI_MODE_SHOT) {
+    if (scaleUiMode != SCALE_UI_MODE_SHOT && !isShotArmedOrRunningNow()) {
       appendBleCommandResult(command, "ignoriert - Single Dose aktiv");
       continue;
     }
@@ -1938,16 +2039,16 @@ static bool setDisplayTimeoutFromWeb(uint16_t minutes)
 
 static bool setScaleUiModeAndHmiPageFromWeb(ScaleUiMode mode, byte targetPage)
 {
-  if (mode == SCALE_UI_MODE_SINGLE_DOSE) {
+  if (mode == SCALE_UI_MODE_SINGLE_DOSE && scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE) {
     const uint32_t nowMs = millis();
     const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(nowMs);
     if (shot.running) {
-      handleShotSessionEvent(
-        coffeeShotSessionExternalStop(nowMs, shotWeightFiltered),
-        nowMs,
-        shotWeightFiltered);
+      appendShotLog("Shot läuft nach Seitenwechsel im Hintergrund");
+    } else if (shot.armed) {
+      coffeeShotSessionCancelArm();
+      appendShotLog("Shot-Bereitschaft durch Seitenwechsel beendet");
     }
-    coffeeShotSessionCancelArm();
+    requestSingleDoseAutomationResume(nowMs);
   }
   scaleUiMode = mode;
   shotDisplayInitialised = false;
@@ -2077,6 +2178,10 @@ static bool handleWebSaveDoseCommand(const char* cmd, bool& handled)
 static bool handleCoffeeWebCommand(const char* cmd)
 {
   if (!cmd) {
+    return false;
+  }
+
+  if (webCommandBlockedByRunningShot(cmd)) {
     return false;
   }
 
@@ -2881,6 +2986,13 @@ void RefreshTFTTimeToChangeFilter()
 
 void RedrawTFTTime()
 {
+  // Auf der Single-Dose-Seite liegt waehrend eines laufenden Shots
+  // die Sperranzeige im gleichen Inhaltsbereich wie Datum und Uhrzeit.
+  // Deshalb darf die normale Uhr dort nichts ueberzeichnen.
+  if (pageID == 0 && isShotRunningNow()) {
+    return;
+  }
+
   if(!getLocalTime(&timeinfo, 0)){
     debugln("Failed to obtain time");
     return;
@@ -2925,6 +3037,15 @@ void EraseTFTTime()
 // Einträge Datum, Sekunden, Minuten und Stunden werden nur bei Veränderung neu gezeichnet 
 void RefreshTFTTime()
   {
+    // Solange ein Shot auf Seite 0 im Hintergrund weiterlaeuft,
+    // aktualisiert ausschliesslich die Sperranzeige ihre Werte.
+    // Die normale Uhr wuerde sonst Sekunden, Minuten und Stunden
+    // wieder in den gesperrten Inhaltsbereich zeichnen.
+    if (pageID == 0 && isShotRunningNow())
+    {
+      return;
+    }
+
     if (dateTimeDisplayed[pageID]==1)
     {
     if(!getLocalTime(&timeinfo, 0)){
@@ -3411,7 +3532,7 @@ void RefreshTFTAutodetect()  // nur auf pageID == 0 und nur wenn autodetect == 1
   // Autodetect/Auto-Tara laeuft inzwischen auch dann weiter, wenn auf dem
   // TFT gerade eine andere Seite angezeigt wird. Die TFT-Aktualisierung darf
   // dann aber keine fremden Seiten ueberschreiben.
-  if (pageID != 0) {
+  if (pageID != 0 || isShotRunningNow()) {
     return;
   }
 
@@ -3483,6 +3604,182 @@ static void checkHmiWifiSetupSaved()
   }
 }
 
+static void formatShotBackgroundTime(uint32_t elapsedMs, char* destination, size_t destinationSize)
+{
+  char elapsed[24];
+  formatShotElapsed(elapsedMs, elapsed, sizeof(elapsed));
+  snprintf(destination, destinationSize, "%10s", elapsed);
+}
+
+static void drawChangedShotBackgroundField(char* previousText,
+                                           const char* currentText,
+                                           size_t fieldLength,
+                                           int16_t x,
+                                           int16_t y,
+                                           uint16_t color,
+                                           bool forceRedraw)
+{
+  tft.setFreeFont(FM9);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(color, TFT_BLACK);
+
+  const int16_t cellWidth = tft.textWidth("0", GFXFF);
+  const int16_t cellHeight = 20;
+  for (size_t index = 0; index < fieldLength; ++index) {
+    if (!forceRedraw && previousText[index] == currentText[index]) {
+      continue;
+    }
+
+    const int16_t cellX = x + static_cast<int16_t>(index) * cellWidth;
+    tft.fillRect(cellX, y, cellWidth, cellHeight, TFT_BLACK);
+    if (currentText[index] != ' ') {
+      char glyph[2] = {currentText[index], '\0'};
+      tft.drawString(glyph, cellX, y, GFXFF);
+    }
+  }
+
+  memcpy(previousText, currentText, fieldLength);
+  previousText[fieldLength] = '\0';
+}
+
+static void drawShotBackgroundValues(const CoffeeShotSessionStatus& shot, bool forceRedraw)
+{
+  char timeText[11];
+  char weightText[8];
+  char flowText[9];
+
+  formatShotBackgroundTime(shot.elapsed_ms, timeText, sizeof(timeText));
+
+  const float safeWeight = constrain(isfinite(shot.current_weight_g) ? shot.current_weight_g : 0.0f,
+                                     -99.9f, 999.9f);
+  const float safeFlow = constrain(isfinite(shot.current_flow_g_s) ? shot.current_flow_g_s : 0.0f,
+                                   -9.9f, 99.9f);
+  snprintf(weightText, sizeof(weightText), "%5.1f g", static_cast<double>(safeWeight));
+  snprintf(flowText, sizeof(flowText), "%4.1f g/s", static_cast<double>(safeFlow));
+
+  drawChangedShotBackgroundField(oldShotBackgroundTimeText,
+                                 timeText,
+                                 sizeof(oldShotBackgroundTimeText) - 1,
+                                 8,
+                                 94,
+                                 TFT_YELLOW,
+                                 forceRedraw);
+  drawChangedShotBackgroundField(oldShotBackgroundWeightText,
+                                 weightText,
+                                 sizeof(oldShotBackgroundWeightText) - 1,
+                                 126,
+                                 94,
+                                 TFT_YELLOW,
+                                 forceRedraw);
+  drawChangedShotBackgroundField(oldShotBackgroundFlowText,
+                                 flowText,
+                                 sizeof(oldShotBackgroundFlowText) - 1,
+                                 216,
+                                 94,
+                                 TFT_CYAN,
+                                 forceRedraw);
+}
+
+void RedrawTFTShotBackgroundLock()
+{
+  if (pageID != 0 || !isShotRunningNow()) {
+    return;
+  }
+
+  const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+
+  tft.fillRect(0, 25, 320, 109, TFT_BLACK);
+  tft.setFreeFont(FSS9);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.drawString("Shot laeuft im Hintergrund", 160, 30, GFXFF);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Single-Dose-Waage gesperrt", 160, 51, GFXFF);
+
+  tft.setFreeFont(FM9);
+  const int16_t shotValueCellWidth = tft.textWidth("0", GFXFF);
+  const int16_t shotTimeCenterX = 8 + (10 * shotValueCellWidth) / 2;
+  const int16_t shotWeightCenterX = 126 + (7 * shotValueCellWidth) / 2;
+  const int16_t shotFlowCenterX = 216 + (8 * shotValueCellWidth) / 2;
+
+  tft.setFreeFont(FSS9);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Zeit", shotTimeCenterX, 74, GFXFF);
+  tft.drawString("Gewicht", shotWeightCenterX, 74, GFXFF);
+  tft.drawString("Flow", shotFlowCenterX, 74, GFXFF);
+
+  memset(oldShotBackgroundTimeText, 0, sizeof(oldShotBackgroundTimeText));
+  memset(oldShotBackgroundWeightText, 0, sizeof(oldShotBackgroundWeightText));
+  memset(oldShotBackgroundFlowText, 0, sizeof(oldShotBackgroundFlowText));
+  drawShotBackgroundValues(shot, true);
+
+  tft.setFreeFont(FSS9);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("Encoder: zur Shot-Waage", 160, 115, GFXFF);
+
+  tft.fillRect(0, 135, 320, 25, TFT_BLACK);
+  tft.drawLine(1, 134, 319, 134, TFT_GREEN);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("zur Shot", 48, 140, GFXFF);
+
+  u8f.setFontDirection(0);
+  u8f.setBackgroundColor(TFT_BLACK);
+  u8f.setFont(u8g2_font_unifont_t_symbols);
+  u8f.setFontMode(0);
+  u8f.setForegroundColor(TFT_WHITE);
+  u8f.drawGlyph(48,166,0x25bc);
+  u8f.setForegroundColor(TFT_BLACK);
+  u8f.drawGlyph(166,166,0x25bc);
+  u8f.drawGlyph(258,166,0x25bc);
+
+  oldShotBackgroundTenths = shot.elapsed_ms / 100U;
+  oldShotBackgroundWeightTenths = roundedTenths(shot.current_weight_g);
+  oldShotBackgroundFlowTenths = roundedTenths(shot.current_flow_g_s);
+  shotBackgroundLockDisplayed = true;
+}
+
+void RefreshTFTShotBackgroundLock()
+{
+  if (pageID != 0 || displayOff != 0) {
+    return;
+  }
+
+  const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+  if (!shot.running) {
+    if (shotBackgroundLockDisplayed) {
+      shotBackgroundLockDisplayed = false;
+      oldShotBackgroundTenths = UINT32_MAX;
+      oldShotBackgroundWeightTenths = INT32_MIN;
+      oldShotBackgroundFlowTenths = INT32_MIN;
+      RefreshTFTDisplay();
+      RefreshTFTCursor();
+    }
+    return;
+  }
+
+  if (!shotBackgroundLockDisplayed) {
+    RedrawTFTShotBackgroundLock();
+    return;
+  }
+
+  const uint32_t tenths = shot.elapsed_ms / 100U;
+  const int32_t weightTenths = roundedTenths(shot.current_weight_g);
+  const int32_t flowTenths = roundedTenths(shot.current_flow_g_s);
+  if (tenths == oldShotBackgroundTenths &&
+      weightTenths == oldShotBackgroundWeightTenths &&
+      flowTenths == oldShotBackgroundFlowTenths) {
+    return;
+  }
+
+  drawShotBackgroundValues(shot, false);
+
+  oldShotBackgroundTenths = tenths;
+  oldShotBackgroundWeightTenths = weightTenths;
+  oldShotBackgroundFlowTenths = flowTenths;
+}
+
 static void ClearTFTContentArea()
 {
   // Allgemeines Loeschen des Inhaltsbereichs zwischen Header und Footer.
@@ -3500,18 +3797,27 @@ void RefreshTFTDisplay()
   tft.setFreeFont(FSS9);                 // Select the font MonoSpace 9pt
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(String(headerOfPageID[pageID]),24,2,GFXFF);
-  if (autoDetect == 1)
+  const bool shotBackgroundLock = pageID == 0 && isShotRunningNow();
+  if (autoDetect == 1 && !shotBackgroundLock)
   {
     tft.setTextDatum(TR_DATUM); // Set datum to Top Right
     tft.drawString(String("Auto"),258,2,GFXFF);
   }
-  if (autoDetect == 0)
+  if (autoDetect == 0 || shotBackgroundLock)
   {
     tft.setTextDatum(TR_DATUM); // Set datum to Top Right
     tft.drawString(String("         "),258,2,GFXFF);
   }
   RefreshTFTBluetoothStatus();
   tft.drawLine(1, 24, 319, 24, TFT_GREEN);
+
+  if (shotBackgroundLock)
+  {
+    RedrawTFTShotBackgroundLock();
+    return;
+  }
+
+  shotBackgroundLockDisplayed = false;
 
   // MenuEntries der Seite
   
@@ -3619,6 +3925,11 @@ void RefreshTFTDisplay()
 
   void RefreshTFTCursor()
   {//Cursor Position
+
+  if (pageID == 0 && isShotRunningNow())
+  {
+    return;
+  }
 
   int menuPfeil = 0x2617;
   if (menuItemPos == 0)                    // Über Encoder ist Menüpunkt 0 ausgewählt
@@ -3729,6 +4040,15 @@ void RefreshTFTDisplay()
 
 
 void saveGrindResult(){
+
+  if (isShotRunningNow())
+  {
+    buttonPressedbuttonRight = 0;
+    buttonReleasedbuttonRight = 0;
+    statusSwitchSaveWeightFell = 0;
+    statusSwitchSaveWeightRose = 0;
+    return;
+  }
 
   if (buttonPressedbuttonRight == 1)
 { 
@@ -4009,7 +4329,15 @@ static void updateScaleUiModeFromHmiPage()
 {
   if (pageID == 0) {
     if (scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE) {
-      coffeeShotSessionCancelArm();
+      const uint32_t nowMs = millis();
+      const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(nowMs);
+      if (shot.running) {
+        appendShotLog("Shot läuft nach Seitenwechsel im Hintergrund");
+      } else if (shot.armed) {
+        coffeeShotSessionCancelArm();
+        appendShotLog("Shot-Bereitschaft durch Seitenwechsel beendet");
+      }
+      requestSingleDoseAutomationResume(nowMs);
       shotDisplayInitialised = false;
     }
     scaleUiMode = SCALE_UI_MODE_SINGLE_DOSE;
@@ -4021,6 +4349,8 @@ static void updateScaleUiModeFromHmiPage()
 static bool shouldRunScaleAutomation()
 {
   return scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
+         !isShotRunningNow() &&
+         !singleDoseAutomationResumePending &&
          !webWizardActive &&
          !isHmiScaleAutomationBlocked();
 }
@@ -4137,7 +4467,11 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
         }
     if (pageID !=3){
   
-    encoderPos = highlightedMenuItemWhenEnteringPage[pageID];
+    if (pageID == 0 && isShotRunningNow()) {
+      encoderPos = 2;
+    } else {
+      encoderPos = highlightedMenuItemWhenEnteringPage[pageID];
+    }
     menuItemPos = encoderPos;
     RefreshTFTDisplay();
     RefreshTFTCursor();
@@ -4165,7 +4499,12 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
   if (displayOff == 0 && encoderPosChanged == true)
   {  
     lastActionAgainstDisplayOff = millis();
-  if (changeOfEncoderPosChangesMenuItem[pageID] == 1)           // für alle Seiten, auf denen mit dem Rotary Encoder der Menü-Eintrag eingestellt wird.
+  if (pageID == 0 && isShotRunningNow())
+  {
+    encoderPos = 2;
+    menuItemPos = 2;
+  }
+  else if (changeOfEncoderPosChangesMenuItem[pageID] == 1)           // für alle Seiten, auf denen mit dem Rotary Encoder der Menü-Eintrag eingestellt wird.
   { 
     encoderPos += encoderIncrement;
     
@@ -4242,6 +4581,27 @@ if (buttonPressedRotarySW && displayOff == 1)
 if (buttonPressedRotarySW == 1 && displayOff == 0)
 {  
     lastActionAgainstDisplayOff = millis();
+
+    if (pageID == 0 && isShotRunningNow())
+    {
+      pageID = 3;
+      newPageID = 3;
+      scaleUiMode = SCALE_UI_MODE_SHOT;
+      encoderPos = highlightedMenuItemWhenEnteringPage[3];
+      menuItemPos = encoderPos;
+      shotBackgroundLockDisplayed = false;
+      buttonPressedRotarySW = 0;
+      callOfFunctionTerminated = 0;
+      pageEntered = true;
+      broadcastWebStateFromGlobals();
+      return;
+    }
+
+    if (isShotRunningNow() && pageID == 1 && menuItemPos <= 2)
+    {
+      buttonPressedRotarySW = 0;
+      return;
+    }
 
       callFunctionOfPage[pageID] = 1;                            // Zum Aufruf seitenspezifischer Funktionen
       
@@ -4326,7 +4686,11 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
     lastActionAgainstDisplayOff = millis();
     if (buttonMiddleActiveOnPage[pageID] == 1)
   {
-    if (pageID == 0)
+    if (pageID == 0 && isShotRunningNow())
+       {
+        RedrawTFTShotBackgroundLock();
+       }
+    else if (pageID == 0)
        {
         taraRequest = true;
         RefreshTFTTaraWait();
@@ -4934,6 +5298,7 @@ void loop(void)
   updateScaleUiModeFromHmiPage();
   const uint32_t nowLoopMs = millis();
   tickShotSession(nowLoopMs);
+  serviceSingleDoseAutomationResume(nowLoopMs);
   tickBleScale(nowLoopMs);
   updateCoffeeAppStateFromGlobals();
   checkHmiWifiSetupSaved();
@@ -4942,21 +5307,30 @@ void loop(void)
   const bool webWeightChanged = !hasWebBroadcastWeight ||
     webWeightDelta > WEB_STATE_WEIGHT_BROADCAST_DELTA_G ||
     webWeightDelta < -WEB_STATE_WEIGHT_BROADCAST_DELTA_G;
-  const bool shotTelemetryActive = appState.system.shot_mode &&
-    (appState.shot.armed || appState.shot.running);
+  const bool shotTelemetryActive = appState.shot.armed || appState.shot.running;
+  const bool fullStateDue =
+    nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_FULL_BROADCAST_INTERVAL_MS;
+  const bool normalWeightStateDue = !shotTelemetryActive && webWeightChanged &&
+    nowWebMs - lastWebWeightBroadcastMs >= WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS;
   const bool shotTelemetryDue = shotTelemetryActive &&
-    (nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_SHOT_BROADCAST_INTERVAL_MS);
+    nowWebMs - lastWebShotTelemetryBroadcastMs >= WEB_STATE_SHOT_BROADCAST_INTERVAL_MS;
 
-  if (coffeeWebHasClients() &&
-      ((nowWebMs - lastWebStateBroadcastMs >= WEB_STATE_FULL_BROADCAST_INTERVAL_MS) ||
-       shotTelemetryDue ||
-       (webWeightChanged && nowWebMs - lastWebWeightBroadcastMs >= WEB_STATE_WEIGHT_BROADCAST_MIN_INTERVAL_MS)))
+  if (coffeeWebHasClients())
   {
-    lastWebStateBroadcastMs = nowWebMs;
-    lastWebWeightBroadcastMs = nowWebMs;
-    lastWebBroadcastWeightG = actualWeight;
-    hasWebBroadcastWeight = true;
-    coffeeWebBroadcastState(appState);
+    if (fullStateDue || normalWeightStateDue)
+    {
+      lastWebStateBroadcastMs = nowWebMs;
+      lastWebShotTelemetryBroadcastMs = nowWebMs;
+      lastWebWeightBroadcastMs = nowWebMs;
+      lastWebBroadcastWeightG = actualWeight;
+      hasWebBroadcastWeight = true;
+      coffeeWebBroadcastState(appState);
+    }
+    else if (shotTelemetryDue)
+    {
+      lastWebShotTelemetryBroadcastMs = nowWebMs;
+      coffeeWebBroadcastShotTelemetry(appState);
+    }
   }
   
   
@@ -4967,7 +5341,9 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   {
       
     stringifyActualWeight();
-    if (actualWeightDisplayed[pageID] == 1 && oldActualWeightAsString != actualWeightAsString)
+    if (actualWeightDisplayed[pageID] == 1 &&
+        !(pageID == 0 && isShotRunningNow()) &&
+        oldActualWeightAsString != actualWeightAsString)
       {
         RefreshTFTActualWeight();
         oldActualWeightAsString = actualWeightAsString;
@@ -4987,6 +5363,9 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   //#########################################
   if (pageID == 3 ){
     RefreshTFTShotPage();
+  }
+  if (pageID == 0 ){
+    RefreshTFTShotBackgroundLock();
   }
   if (pageID == 11 || pageID == 17){
     RefreshTFTTimeToCleanMuehle();
@@ -5057,28 +5436,28 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   if (displayKaffeemReinigen == 1) anzahlWarnungen++;
   if (displayFilterwechseln == 1) anzahlWarnungen++;
 
-  if (warnungenDisplayed[pageID] == 1 && anzahlWarnungen != oldanzahlWarnungenDisplayed)
+  if (!(pageID == 0 && isShotRunningNow()) && warnungenDisplayed[pageID] == 1 && anzahlWarnungen != oldanzahlWarnungenDisplayed)
   {
     RedrawTFTWarnungen();
     oldanzahlWarnungenDisplayed = anzahlWarnungen;
   }
 
-  if (warnungenDisplayed[pageID] == 1 && (displayMuehleReinigen == 1 && olddisplayMuehleReinigen == 0))
+  if (!(pageID == 0 && isShotRunningNow()) && warnungenDisplayed[pageID] == 1 && (displayMuehleReinigen == 1 && olddisplayMuehleReinigen == 0))
   {
     RedrawTFTWarnungen();
     olddisplayMuehleReinigen = 1;
   }
-  if (warnungenDisplayed[pageID] == 1 && (displayKaffeemReinigen == 1 && olddisplayKaffeemReinigen == 0))
+  if (!(pageID == 0 && isShotRunningNow()) && warnungenDisplayed[pageID] == 1 && (displayKaffeemReinigen == 1 && olddisplayKaffeemReinigen == 0))
   {
     RedrawTFTWarnungen();
     olddisplayKaffeemReinigen = 1;
   }
-  if (warnungenDisplayed[pageID] == 1 && (displayFilterwechseln == 1 && olddisplayFilterwechseln == 0))
+  if (!(pageID == 0 && isShotRunningNow()) && warnungenDisplayed[pageID] == 1 && (displayFilterwechseln == 1 && olddisplayFilterwechseln == 0))
   {
     RedrawTFTWarnungen();
     olddisplayFilterwechseln = 1;
   }
-  if (warnungenDisplayed[pageID] == 1 && (displayMuehleReinigen == 0 && olddisplayMuehleReinigen == 0) && (displayKaffeemReinigen == 0 && olddisplayKaffeemReinigen == 0) && (displayFilterwechseln == 0 && olddisplayFilterwechseln == 0))
+  if (!(pageID == 0 && isShotRunningNow()) && warnungenDisplayed[pageID] == 1 && (displayMuehleReinigen == 0 && olddisplayMuehleReinigen == 0) && (displayKaffeemReinigen == 0 && olddisplayKaffeemReinigen == 0) && (displayFilterwechseln == 0 && olddisplayFilterwechseln == 0))
   {
     RedrawTFTWarnungen();
     olddisplayMuehleReinigen = 1;
