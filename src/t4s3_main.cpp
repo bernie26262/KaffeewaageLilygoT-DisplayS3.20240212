@@ -21,6 +21,7 @@
 #include "t4s3_time.h"
 #include "t4s3_settings.h"
 #include "t4s3_scale.h"
+#include "t4s3_weight_diag.h"
 #include "app_state.h"
 #include "coffee_web.h"
 #include "coffee_ota.h"
@@ -302,6 +303,8 @@ static void tickHx711Test(uint32_t now)
         g_lastMovementMs = now;
     } else {
         const float previousFast = g_fastWeightRaw;
+        const bool wasMoving = g_weightMoving;
+        const bool wasStable = g_weightStable;
 
         const float fastDeltaRaw = fabsf(median - g_fastWeightRaw);
         const float stableDeltaRaw = fabsf(median - g_stableWeightRaw);
@@ -348,6 +351,13 @@ static void tickHx711Test(uint32_t now)
             g_weightStable = false;
         }
 
+        if (!wasMoving && g_weightMoving) {
+            t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_MOVEMENT);
+        }
+        if (!wasStable && g_weightStable) {
+            t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_STABLE_REACHED);
+        }
+
         // Adaptive display path:
         // - during movement: follow fast path immediately
         // - while settling and still visibly away from fast: keep catching up
@@ -377,8 +387,26 @@ static void tickHx711Test(uint32_t now)
     handleShotSessionEvent(shotEvent, now, shotWeightGrams);
     const CoffeeShotSessionStatus shotAfter = coffeeShotSessionStatus(now);
     if (shotBefore.armed && !shotAfter.armed && shotEvent == CoffeeShotSessionEvent::None) {
+        t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_DISARM);
         appendBleShotLog("Shot-Bereitschaft beendet");
     }
+
+    const float gramsFactor = g_hx711CalFactorRawPerGram > 0.0f
+                                ? g_hx711CalFactorRawPerGram
+                                : 1.0f;
+    t4s3WeightDiagRecord(now,
+                         g_lastHx711Raw,
+                         median,
+                         g_lastHx711Raw / gramsFactor,
+                         median / gramsFactor,
+                         g_fastWeightRaw / gramsFactor,
+                         g_stableWeightRaw / gramsFactor,
+                         g_displayWeightRaw / gramsFactor,
+                         g_shotWeightRaw / gramsFactor,
+                         shotAfter.current_flow_g_s,
+                         g_weightMoving,
+                         g_weightStable,
+                         static_cast<uint8_t>(shotAfter.state));
 
     ui_t4s3_set_hx711_raw_value(static_cast<int32_t>(g_lastHx711Raw));
     ui_t4s3_set_hx711_grams_value(t4s3_scale_current_grams(), g_hx711Ready);
@@ -417,6 +445,7 @@ bool t4s3_scale_tare()
         return false;
     }
 
+    t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_TARE_BEGIN);
     g_loadCell.tare();
     g_lastHx711Raw = 0.0f;
     g_lastHx711Filtered = 0.0f;
@@ -433,8 +462,10 @@ bool t4s3_scale_tare()
     g_hxHistoryFilled = false;
     g_sleepWeightReferenceValid = false;
     g_weightActivityReferenceValid = false;
+    t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_TARE_DONE);
     if (ui_t4s3_is_shot_scale_mode()) {
         coffeeShotSessionArm(millis(), 0.0f);
+        t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_ARMED);
         appendBleShotLog("Shot bereit - warte auf ersten Tropfen");
         Serial.println("[T4S3][SHOT] armed by tare; waiting for first liquid");
     }
@@ -511,6 +542,7 @@ static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, f
     }
 
     if (event == CoffeeShotSessionEvent::Started) {
+        t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_START);
         ui_t4s3_set_shot_timer(0, true);
         appendBleShotLog("Shot gestartet bei %.1f g", static_cast<double>(weightGrams));
         Serial.printf("[T4S3][SHOT] auto START first-liquid weight=%.2f g at %lu ms\n",
@@ -520,6 +552,7 @@ static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, f
     }
 
     if (event == CoffeeShotSessionEvent::Stopped) {
+        t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_STOP);
         const CoffeeShotSessionStatus status = coffeeShotSessionStatus(now);
         ui_t4s3_set_shot_timer(status.elapsed_ms, false);
         appendBleShotLog("Shot beendet: %.1f g in %.1f s",
@@ -717,6 +750,7 @@ static void handleBleCommands()
         bool handled = false;
         switch (command) {
             case CoffeeBleScaleCommand::Tare:
+                t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_BLE_TARE);
                 handled = ui_t4s3_handle_web_command("tare");
                 break;
             case CoffeeBleScaleCommand::TimerStart: {
@@ -739,6 +773,7 @@ static void handleBleCommands()
                 // Keep the completed result visible. RESET only prepares the
                 // next detection; the old timer is replaced on the next START.
                 coffeeShotSessionArm(millis(), t4s3_scale_shot_grams());
+                t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_ARMED);
                 appendBleShotLog("Shot bereit per BLE-RESET");
                 handled = true;
                 break;
@@ -870,6 +905,36 @@ static bool executeT4S3WebCommand(const char *cmd)
         refreshWebMaintenanceCache(now, true);
         updateWebState(now);
         coffeeWebBroadcastState(g_webState);
+        return true;
+    }
+
+    if (strcmp(cmd, "diag_weight_start") == 0) {
+        const bool ok = t4s3WeightDiagStart(millis());
+        Serial.printf("[T4S3][DIAG] weight recording start: %s\n", ok ? "ok" : "allocation failed");
+        return ok;
+    }
+
+    if (strcmp(cmd, "diag_weight_stop") == 0) {
+        t4s3WeightDiagStop(millis());
+        Serial.println("[T4S3][DIAG] weight recording stopped");
+        return true;
+    }
+
+    if (strcmp(cmd, "diag_weight_clear") == 0) {
+        t4s3WeightDiagClear(millis());
+        Serial.println("[T4S3][DIAG] weight recording cleared");
+        return true;
+    }
+
+    if (strcmp(cmd, "diag_shot_abort") == 0) {
+        const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(millis());
+        if (shot.running || shot.armed) {
+            t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_ABORT);
+            coffeeShotSessionReset();
+            ui_t4s3_set_shot_timer(0, false);
+            appendBleShotLog("Shot manuell über WebUI abgebrochen");
+            Serial.println("[T4S3][DIAG] shot aborted from WebUI");
+        }
         return true;
     }
 

@@ -5,6 +5,10 @@
 #include "coffee_wifi.h"
 #include "ble_scale.h"
 #include "shot_session.h"
+#if defined(COFFEE_T4S3_LVGL)
+#include "t4s3_weight_diag.h"
+#include <memory>
+#endif
 
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
@@ -14,7 +18,7 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
-#define COFFEE_WEB_ASSET_VERSION "20260625a"
+#define COFFEE_WEB_ASSET_VERSION "20260911diag1"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
   "public, max-age=31536000, immutable";
@@ -159,6 +163,26 @@ R"rawliteral(">
         <input id="siebtraegerSelect" type="hidden" value="0">
       </div>
     </div>
+  </section>
+
+  <section class="card diag-card">
+    <details id="weightDiagDetails">
+      <summary>Gewichtsdiagnose</summary>
+      <div class="diag-status-row small">
+        <span>Status: <b id="weightDiagStatus">nicht gestartet</b></span>
+        <span>Samples: <b id="weightDiagCount">0</b></span>
+        <span>Dauer: <b id="weightDiagDuration">00:00</b></span>
+      </div>
+      <div class="button-row diag-controls">
+        <button id="weightDiagStart" class="compact">Start</button>
+        <button id="weightDiagStop" class="compact secondary">Stop</button>
+        <button id="weightDiagClear" class="compact secondary">Löschen</button>
+        <button id="weightDiagCsv" class="compact secondary">CSV</button>
+        <button id="weightDiagAbortShot" class="compact danger">Shot abbrechen</button>
+      </div>
+      <div class="small diag-note">Aufzeichnung: 10 Hz im PSRAM. Die Live-Anzeige wird separat und deutlich langsamer aktualisiert.</div>
+      <pre class="diag-log mono" id="weightDiagLog">Noch keine Diagnosewerte.</pre>
+    </details>
   </section>
   </div>
 
@@ -721,6 +745,16 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
       color: #cbd5e1; white-space: pre-wrap; overflow-wrap: anywhere;
       max-height: 280px; overflow-y: auto; line-height: 1.45;
     }
+    .diag-card details > summary { cursor: pointer; font-weight: 750; }
+    .diag-status-row { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; }
+    .diag-controls { margin-top: 12px; }
+    .diag-note { margin-top: 10px; line-height: 1.4; }
+    .diag-log {
+      margin: 12px 0 0; padding: 12px; border-radius: 14px;
+      background: #07111b; border: 1px solid rgba(148,163,184,.24);
+      color: #cbd5e1; white-space: pre; overflow: auto;
+      max-height: 360px; line-height: 1.35; font-size: .78rem;
+    }
     .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
     .stats-title { font-size: 1.05rem; font-weight: 750; margin-bottom: 8px; color: var(--text); }
     .stat-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,.14); }
@@ -894,6 +928,8 @@ let shotChartFetchGeneration = 0;
 let shotChartResizeObserver = null;
 let bleLogSequenceLoaded = -1;
 let bleLogFetchInFlight = false;
+let weightDiagFetchInFlight = false;
+let weightDiagTimer = null;
 const el = id => document.getElementById(id);
 const setText = (id, value) => {
   const node = el(id);
@@ -928,6 +964,10 @@ const CMD = Object.freeze({
   maintenanceResetGrinder: 'maintenance_reset_grinder',
   maintenanceResetFilter: 'maintenance_reset_filter',
   restartDevice: 'restart_device',
+  weightDiagStart: 'diag_weight_start',
+  weightDiagStop: 'diag_weight_stop',
+  weightDiagClear: 'diag_weight_clear',
+  weightDiagAbortShot: 'diag_shot_abort',
   setStatsTotalsPrefix: 'set_stats_totals_',
   setMaintenanceIntervalPrefix: 'set_maintenance_interval_',
   setMaintenanceEnabledPrefix: 'set_maintenance_enabled_'
@@ -1400,6 +1440,78 @@ function openMeasureGefaessWizard() {
 
 function openStatsTotalsWizard() {
   openWizard('statsTotals', false);
+}
+
+function fmtDiagDuration(ms) {
+  const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function renderWeightDiag(data) {
+  if (!data) return;
+  setText('weightDiagStatus', data.running ? 'Aufnahme läuft' : (data.count > 0 ? 'gestoppt' : 'nicht gestartet'));
+  setText('weightDiagCount', `${Number(data.count || 0)} / ${Number(data.capacity || 0)}`);
+  setText('weightDiagDuration', fmtDiagDuration(data.duration_ms));
+
+  const rows = Array.isArray(data.samples) ? data.samples : [];
+  const log = el('weightDiagLog');
+  if (!log) return;
+  if (!rows.length) {
+    log.textContent = 'Noch keine Diagnosewerte.';
+    return;
+  }
+
+  const lines = ['t[s]   lib[g] med[g] fast[g] stab[g] disp[g] shot[g] flow  M S state      events'];
+  rows.forEach(r => {
+    const values = [
+      (Number(r[0] || 0) / 1000).toFixed(1).padStart(5),
+      Number(r[1] || 0).toFixed(2).padStart(6),
+      Number(r[2] || 0).toFixed(2).padStart(6),
+      Number(r[3] || 0).toFixed(2).padStart(7),
+      Number(r[4] || 0).toFixed(2).padStart(7),
+      Number(r[5] || 0).toFixed(2).padStart(7),
+      Number(r[6] || 0).toFixed(2).padStart(7),
+      Number(r[7] || 0).toFixed(2).padStart(5),
+      r[8] ? '1' : '0',
+      r[9] ? '1' : '0',
+      String(r[10] || '').padEnd(10),
+      String(r[11] || '')
+    ];
+    lines.push(values.join(' '));
+  });
+  log.textContent = lines.join('\n');
+  log.scrollTop = log.scrollHeight;
+}
+
+async function fetchWeightDiag() {
+  if (weightDiagFetchInFlight) return;
+  const details = el('weightDiagDetails');
+  if (!details || !details.open) return;
+
+  weightDiagFetchInFlight = true;
+  try {
+    const response = await fetch('/api/weight-diag/recent?limit=40', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderWeightDiag(await response.json());
+  } catch (error) {
+    setText('weightDiagStatus', 'Abruf fehlgeschlagen');
+  } finally {
+    weightDiagFetchInFlight = false;
+  }
+}
+
+function startWeightDiagPolling() {
+  if (weightDiagTimer) return;
+  fetchWeightDiag();
+  weightDiagTimer = setInterval(fetchWeightDiag, 1000);
+}
+
+function stopWeightDiagPolling() {
+  if (!weightDiagTimer) return;
+  clearInterval(weightDiagTimer);
+  weightDiagTimer = null;
 }
 )rawliteral";
 
@@ -2562,6 +2674,30 @@ function bindDashboardHandlers() {
       goToMaintenanceSettings();
     }
   });
+
+  el('weightDiagDetails')?.addEventListener('toggle', e => {
+    if (e.target.open) startWeightDiagPolling();
+    else stopWeightDiagPolling();
+  });
+  el('weightDiagStart')?.addEventListener('click', () => {
+    sendCommand(CMD.weightDiagStart, 'Gewichtsdiagnose gestartet …');
+    setTimeout(fetchWeightDiag, 250);
+  });
+  el('weightDiagStop')?.addEventListener('click', () => {
+    sendCommand(CMD.weightDiagStop, 'Gewichtsdiagnose gestoppt …');
+    setTimeout(fetchWeightDiag, 250);
+  });
+  el('weightDiagClear')?.addEventListener('click', () => {
+    sendCommand(CMD.weightDiagClear, 'Gewichtsdiagnose gelöscht …');
+    setTimeout(fetchWeightDiag, 250);
+  });
+  el('weightDiagCsv')?.addEventListener('click', () => {
+    window.location.href = '/api/weight-diag.csv';
+  });
+  el('weightDiagAbortShot')?.addEventListener('click', () => {
+    sendCommand(CMD.weightDiagAbortShot, 'Shot-Abbruch gesendet …');
+    setTimeout(fetchWeightDiag, 250);
+  });
 }
 
 function bindNavigationHandlers() {
@@ -2670,6 +2806,7 @@ function initWebUi() {
 }
 
 window.addEventListener('beforeunload', () => {
+  stopWeightDiagPolling();
   if (isWebSocketReady() && !wizardEndSent) {
     ws.send(JSON.stringify({ cmd: CMD.wizardEnd }));
   }
@@ -2924,6 +3061,182 @@ static void handleWsText(AsyncWebSocketClient* client, const uint8_t* data, size
   sendWsError(client, cmd, "command_failed");
 }
 
+#if defined(COFFEE_T4S3_LVGL)
+static void appendWeightDiagEventLabels(String& out, uint32_t flags)
+{
+  struct EventLabel { uint32_t flag; const char* label; };
+  static const EventLabel labels[] = {
+    { T4S3_DIAG_EVENT_RECORD_START, "REC_START" },
+    { T4S3_DIAG_EVENT_AUTO_TARE, "AUTO_TARE" },
+    { T4S3_DIAG_EVENT_TARE_BEGIN, "TARE_BEGIN" },
+    { T4S3_DIAG_EVENT_TARE_DONE, "TARE_DONE" },
+    { T4S3_DIAG_EVENT_BLE_TARE, "BLE_TARE" },
+    { T4S3_DIAG_EVENT_STABLE_REACHED, "STABLE" },
+    { T4S3_DIAG_EVENT_MOVEMENT, "MOVEMENT" },
+    { T4S3_DIAG_EVENT_SHOT_ARMED, "SHOT_ARM" },
+    { T4S3_DIAG_EVENT_SHOT_START, "SHOT_START" },
+    { T4S3_DIAG_EVENT_SHOT_STOP, "SHOT_STOP" },
+    { T4S3_DIAG_EVENT_SHOT_ABORT, "SHOT_ABORT" },
+    { T4S3_DIAG_EVENT_SHOT_DISARM, "SHOT_DISARM" },
+  };
+
+  bool first = true;
+  for (const auto& entry : labels) {
+    if ((flags & entry.flag) == 0) continue;
+    if (!first) out += '|';
+    out += entry.label;
+    first = false;
+  }
+}
+
+static void sendWeightDiagRecent(AsyncWebServerRequest* request)
+{
+  size_t limit = 40;
+  if (request->hasParam("limit")) {
+    const long requested = request->getParam("limit")->value().toInt();
+    if (requested > 0) limit = static_cast<size_t>(requested);
+  }
+  if (limit > 80) limit = 80;
+
+  const T4S3WeightDiagStatus status = t4s3WeightDiagGetStatus(millis());
+  const size_t from = status.sample_count > limit ? status.sample_count - limit : 0;
+
+  String out;
+  out.reserve(320 + (status.sample_count - from) * 150);
+  out += F("{\"running\":");
+  out += status.running ? F("true") : F("false");
+  out += F(",\"count\":");
+  out += String(status.sample_count);
+  out += F(",\"capacity\":");
+  out += String(status.capacity);
+  out += F(",\"duration_ms\":");
+  out += String(status.duration_ms);
+  out += F(",\"dropped\":");
+  out += String(status.dropped_samples);
+  out += F(",\"sample_interval_ms\":");
+  out += String(status.sample_interval_ms);
+  out += F(",\"samples\":[");
+
+  bool first = true;
+  for (size_t i = from; i < status.sample_count; ++i) {
+    T4S3WeightDiagSample sample;
+    if (!t4s3WeightDiagGetSample(i, sample)) continue;
+    if (!first) out += ',';
+    first = false;
+
+    String events;
+    appendWeightDiagEventLabels(events, sample.events);
+    const uint32_t elapsed = sample.timestamp_ms - status.started_ms;
+
+    out += '[';
+    out += String(elapsed);
+    out += ','; out += String(sample.library_g, 3);
+    out += ','; out += String(sample.median_g, 3);
+    out += ','; out += String(sample.fast_g, 3);
+    out += ','; out += String(sample.stable_g, 3);
+    out += ','; out += String(sample.display_g, 3);
+    out += ','; out += String(sample.shot_g, 3);
+    out += ','; out += String(sample.flow_g_s, 3);
+    out += ','; out += sample.moving ? '1' : '0';
+    out += ','; out += sample.stable ? '1' : '0';
+    out += F(",\"");
+    out += coffeeShotSessionStateName(static_cast<CoffeeShotSessionState>(sample.shot_state));
+    out += F("\",\"");
+    out += events;
+    out += F("\"]");
+  }
+  out += F("]}");
+
+  AsyncWebServerResponse* response = request->beginResponse(200, "application/json", out);
+  response->addHeader("Cache-Control", "no-store");
+  request->send(response);
+}
+
+struct WeightDiagCsvContext {
+  size_t next_sample = 0;
+  size_t total_samples = 0;
+  uint32_t started_ms = 0;
+  bool header_pending = true;
+  char pending[384] = {0};
+  size_t pending_len = 0;
+  size_t pending_pos = 0;
+};
+
+static void sendWeightDiagCsv(AsyncWebServerRequest* request)
+{
+  const T4S3WeightDiagStatus status = t4s3WeightDiagGetStatus(millis());
+  auto context = std::make_shared<WeightDiagCsvContext>();
+  context->total_samples = status.sample_count;
+  context->started_ms = status.started_ms;
+
+  AsyncWebServerResponse* response = request->beginChunkedResponse(
+    "text/csv; charset=utf-8",
+    [context](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
+      (void)index;
+      size_t written = 0;
+
+      while (written < maxLen) {
+        if (context->pending_pos >= context->pending_len) {
+          context->pending_pos = 0;
+          context->pending_len = 0;
+
+          if (context->header_pending) {
+            context->header_pending = false;
+            const char* header = "elapsed_ms,timestamp_ms,library_raw,median_raw,library_g,median_g,fast_g,stable_g,display_g,shot_g,flow_g_s,moving,stable,shot_state,events\r\n";
+            context->pending_len = strlcpy(context->pending, header, sizeof(context->pending));
+          } else if (context->next_sample < context->total_samples) {
+            T4S3WeightDiagSample sample;
+            if (!t4s3WeightDiagGetSample(context->next_sample++, sample)) {
+              continue;
+            }
+
+            String events;
+            appendWeightDiagEventLabels(events, sample.events);
+            const char* state = coffeeShotSessionStateName(static_cast<CoffeeShotSessionState>(sample.shot_state));
+            const uint32_t elapsed = sample.timestamp_ms - context->started_ms;
+            const int len = snprintf(context->pending,
+                                     sizeof(context->pending),
+                                     "%lu,%lu,%.2f,%.2f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%u,%u,%s,%s\r\n",
+                                     static_cast<unsigned long>(elapsed),
+                                     static_cast<unsigned long>(sample.timestamp_ms),
+                                     static_cast<double>(sample.library_raw),
+                                     static_cast<double>(sample.median_raw),
+                                     static_cast<double>(sample.library_g),
+                                     static_cast<double>(sample.median_g),
+                                     static_cast<double>(sample.fast_g),
+                                     static_cast<double>(sample.stable_g),
+                                     static_cast<double>(sample.display_g),
+                                     static_cast<double>(sample.shot_g),
+                                     static_cast<double>(sample.flow_g_s),
+                                     static_cast<unsigned>(sample.moving),
+                                     static_cast<unsigned>(sample.stable),
+                                     state,
+                                     events.c_str());
+            context->pending_len = len > 0
+                                     ? static_cast<size_t>(len < static_cast<int>(sizeof(context->pending)) ? len : sizeof(context->pending) - 1)
+                                     : 0;
+          } else {
+            break;
+          }
+        }
+
+        const size_t available = context->pending_len - context->pending_pos;
+        const size_t space = maxLen - written;
+        const size_t chunk = available < space ? available : space;
+        memcpy(buffer + written, context->pending + context->pending_pos, chunk);
+        context->pending_pos += chunk;
+        written += chunk;
+      }
+
+      return written;
+    });
+
+  response->addHeader("Cache-Control", "no-store");
+  response->addHeader("Content-Disposition", "attachment; filename=weight_diag.csv");
+  request->send(response);
+}
+#endif
+
 // -----------------------------------------------------------------------------
 // Public API
 // -----------------------------------------------------------------------------
@@ -2979,6 +3292,16 @@ void coffeeWebBegin(AsyncWebServer& server)
     response->addHeader("Cache-Control", "no-store");
     request->send(response);
   });
+
+#if defined(COFFEE_T4S3_LVGL)
+  server.on("/api/weight-diag/recent", HTTP_GET, [](AsyncWebServerRequest* request) {
+    sendWeightDiagRecent(request);
+  });
+
+  server.on("/api/weight-diag.csv", HTTP_GET, [](AsyncWebServerRequest* request) {
+    sendWeightDiagCsv(request);
+  });
+#endif
 
   server.on("/api/shot/samples", HTTP_GET, [](AsyncWebServerRequest* request) {
     constexpr size_t kMaxShotBatch = 120;

@@ -5,6 +5,7 @@
 #include "../t4s3_time.h"
 #include "../t4s3_settings.h"
 #include "../t4s3_scale.h"
+#include "../t4s3_weight_diag.h"
 #include "../coffee_wifi.h"
 #include "../ble_scale.h"
 #include "../shot_session.h"
@@ -1031,6 +1032,7 @@ void update_autodetect_gefaess_preview()
         return;
     }
 
+    t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_AUTO_TARE);
     if (!t4s3_scale_tare()) {
         update_status("Auto-Tara fehlgeschlagen - HX711 nicht bereit");
         autodetectPendingGefaess = kNoDetectedGefaess;
