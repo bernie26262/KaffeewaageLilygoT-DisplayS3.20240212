@@ -18,7 +18,7 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
-#define COFFEE_WEB_ASSET_VERSION "20260911diag1"
+#define COFFEE_WEB_ASSET_VERSION "20260913shot1"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
   "public, max-age=31536000, immutable";
@@ -1843,7 +1843,7 @@ function selectSiebtraeger(index) {
 function renderWeightAndSelection(s) {
   updateSiebtraegerSelectOptions(s);
   setText('actual', fmtG(s.weight?.actual_g));
-  setText('shotActual', fmtG(s.weight?.actual_g));
+  setText('shotActual', fmtG(s.shot?.current_weight_g ?? s.weight?.actual_g));
   if (!targetWeightDirty && document.activeElement !== el('targetWeight')) {
     el('targetWeight').value = fmtG(s.weight?.set_g);
   }
@@ -2113,6 +2113,7 @@ function initShotChart() {
 
 function renderShotSession(s) {
   const shot = s.shot || {};
+  setText('shotActual', fmtG(shot.current_weight_g ?? s.weight?.actual_g ?? 0));
   setText('shotFlow', fmtG(shot.current_flow_g_s || 0));
   syncShotChart(shot);
   let text = 'Tara auslösen, um die automatische Zeitmessung vorzubereiten.';
@@ -2124,6 +2125,17 @@ function renderShotSession(s) {
     text = 'Shot abgeschlossen · bleibt bis zum nächsten Shot im RAM';
   }
   setText('shotSessionStatus', text);
+}
+
+function renderShotRunningLock(s) {
+  const shotRunning = !!s.shot?.running;
+  const lock = el('scaleShotLock');
+  if (!lock) return;
+  lock.classList.toggle('hidden', !shotRunning);
+  if (shotRunning) {
+    const weight = s.shot?.current_weight_g ?? s.weight?.actual_g ?? 0;
+    setText('scaleShotLockDetails', `${fmtStopwatchTime(currentStopwatchMs())} · ${fmtG(weight)} g · ${fmtG(s.shot?.current_flow_g_s || 0)} g/s`);
+  }
 }
 
 function renderScaleMode(s) {
@@ -2139,11 +2151,7 @@ function renderScaleMode(s) {
   el('scaleModeBanner')?.classList.toggle('shot', shotRunning);
   el('shotModeBanner')?.classList.toggle('shot', true);
 
-  const lock = el('scaleShotLock');
-  lock?.classList.toggle('hidden', !shotRunning);
-  if (shotRunning) {
-    setText('scaleShotLockDetails', `${fmtStopwatchTime(Number(s.shot?.elapsed_ms || 0))} · ${fmtG(s.weight?.actual_g)} g · ${fmtG(s.shot?.current_flow_g_s || 0)} g/s`);
-  }
+  renderShotRunningLock(s);
   return label;
 }
 
@@ -2244,6 +2252,20 @@ function renderStatsAndSystem(s) {
   }
 }
 
+function applyShotTelemetry(data) {
+  if (!lastState) return;
+  lastState.shot = Object.assign(lastState.shot || {}, data.shot || {});
+  lastState.weight = lastState.weight || {};
+  if (data.weight && Number.isFinite(Number(data.weight.actual_g))) {
+    lastState.weight.actual_g = Number(data.weight.actual_g);
+  }
+
+  syncStopwatchTimer({ ms: lastState.shot?.elapsed_ms || 0, running: !!lastState.shot?.running });
+  renderStopwatch();
+  renderShotSession(lastState);
+  renderShotRunningLock(lastState);
+}
+
 function renderActionAvailability(s) {
   const shotRunning = !!s.shot?.running;
   el('save').disabled = shotRunning || !s.status?.save_ready;
@@ -2322,6 +2344,7 @@ function connect() {
   ws.onmessage = e => {
     const data = JSON.parse(e.data);
     if (data.type === 'state') scheduleRenderState(data);
+    if (data.type === 'shot_telemetry') applyShotTelemetry(data);
     if (data.type === 'ack') addLog(`OK: ${data.cmd}`);
     if (data.type === 'error') addLog(`Fehler: ${data.cmd || ''} ${data.message}`);
   };
@@ -2792,6 +2815,7 @@ function startClientTimers() {
 
   setInterval(function stopwatchClientTick() {
     renderStopwatch();
+    if (lastState) renderShotRunningLock(lastState);
   }, 100);
 }
 
@@ -3605,6 +3629,7 @@ static String buildStateJson(const AppState& s)
   doc["shot"]["running"] = s.shot.running;
   doc["shot"]["completed"] = s.shot.completed;
   doc["shot"]["elapsed_ms"] = s.shot.elapsed_ms;
+  doc["shot"]["current_weight_g"] = s.shot.current_weight_g;
   doc["shot"]["peak_weight_g"] = s.shot.peak_weight_g;
   doc["shot"]["final_weight_g"] = s.shot.final_weight_g;
   doc["shot"]["current_flow_g_s"] = s.shot.current_flow_g_s;
@@ -3699,12 +3724,42 @@ static String buildStateJson(const AppState& s)
   return out;
 }
 
+static String buildShotTelemetryJson(const AppState& s)
+{
+  StaticJsonDocument<768> doc;
+  doc["type"] = "shot_telemetry";
+  doc["weight"]["actual_g"] = s.weight.actual_g;
+  doc["shot"]["session_id"] = s.shot.session_id;
+  doc["shot"]["state"] = s.shot.state;
+  doc["shot"]["armed"] = s.shot.armed;
+  doc["shot"]["running"] = s.shot.running;
+  doc["shot"]["completed"] = s.shot.completed;
+  doc["shot"]["elapsed_ms"] = s.shot.elapsed_ms;
+  doc["shot"]["current_weight_g"] = s.shot.current_weight_g;
+  doc["shot"]["peak_weight_g"] = s.shot.peak_weight_g;
+  doc["shot"]["final_weight_g"] = s.shot.final_weight_g;
+  doc["shot"]["current_flow_g_s"] = s.shot.current_flow_g_s;
+  doc["shot"]["sample_count"] = s.shot.sample_count;
+  doc["shot"]["sample_buffer_full"] = s.shot.sample_buffer_full;
+  String out;
+  serializeJson(doc, out);
+  return out;
+}
+
 void coffeeWebBroadcastState(const AppState& state)
 {
   if (!coffeeWebHasClients()) {
     return;
   }
   ws.textAll(buildStateJson(state));
+}
+
+void coffeeWebBroadcastShotTelemetry(const AppState& state)
+{
+  if (!coffeeWebHasClients()) {
+    return;
+  }
+  ws.textAll(buildShotTelemetryJson(state));
 }
 
 bool coffeeWebHasClients()

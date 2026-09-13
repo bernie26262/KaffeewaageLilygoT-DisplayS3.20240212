@@ -26,6 +26,7 @@ struct ShotSessionState {
   bool running = false;
   bool completed = false;
   uint32_t elapsed_ms = 0;
+  float current_weight_g = 0.0f;
   float peak_weight_g = 0.0f;
   float final_weight_g = 0.0f;
   float current_flow_g_s = 0.0f;

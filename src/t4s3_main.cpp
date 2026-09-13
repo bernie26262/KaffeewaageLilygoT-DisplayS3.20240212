@@ -50,6 +50,7 @@ static bool g_webSettingsCacheValid = false;
 static uint32_t g_lastWebSettingsRefreshMs = 0;
 static uint32_t g_lastWebMaintenanceRefreshMs = 0;
 static uint32_t g_lastWebBroadcastMs = 0;
+static uint32_t g_lastWebShotTelemetryBroadcastMs = 0;
 static bool g_webUiStarted = false;
 static constexpr uint32_t kWebStartDelayMs = 5000UL;
 
@@ -65,6 +66,8 @@ static uint32_t g_webMaintenanceFilterEpoch = 0;
 static constexpr uint32_t kWebSettingsRefreshMs = 5000UL;
 static constexpr uint32_t kWebMaintenanceRefreshMs = 10000UL;
 static constexpr uint32_t kWebBroadcastIntervalMs = 500UL;
+static constexpr uint32_t kWebShotFullBroadcastIntervalMs = 1000UL;
+static constexpr uint32_t kWebShotTelemetryIntervalMs = 200UL;
 #ifndef BLE_SCALE_START_DELAY_MS
 #define BLE_SCALE_START_DELAY_MS 5000UL
 #endif
@@ -806,6 +809,23 @@ static void handleBleCommands()
     }
 }
 
+static void updateWebShotState(uint32_t now)
+{
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(now);
+    g_webState.shot.session_id = shot.session_id;
+    strlcpy(g_webState.shot.state, coffeeShotSessionStateName(shot.state), sizeof(g_webState.shot.state));
+    g_webState.shot.armed = shot.armed;
+    g_webState.shot.running = shot.running;
+    g_webState.shot.completed = shot.completed;
+    g_webState.shot.elapsed_ms = shot.elapsed_ms;
+    g_webState.shot.current_weight_g = shot.current_weight_g;
+    g_webState.shot.peak_weight_g = shot.peak_weight_g;
+    g_webState.shot.final_weight_g = shot.final_weight_g;
+    g_webState.shot.current_flow_g_s = shot.current_flow_g_s;
+    g_webState.shot.sample_count = shot.sample_count;
+    g_webState.shot.sample_buffer_full = shot.sample_buffer_full;
+}
+
 static void updateWebState(uint32_t now)
 {
     refreshWebSettingsCache(now);
@@ -821,18 +841,7 @@ static void updateWebState(uint32_t now)
     g_webState.stopwatch.ms = ui_t4s3_web_stopwatch_ms();
     g_webState.stopwatch.running = ui_t4s3_web_stopwatch_running();
 
-    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(now);
-    g_webState.shot.session_id = shot.session_id;
-    strlcpy(g_webState.shot.state, coffeeShotSessionStateName(shot.state), sizeof(g_webState.shot.state));
-    g_webState.shot.armed = shot.armed;
-    g_webState.shot.running = shot.running;
-    g_webState.shot.completed = shot.completed;
-    g_webState.shot.elapsed_ms = shot.elapsed_ms;
-    g_webState.shot.peak_weight_g = shot.peak_weight_g;
-    g_webState.shot.final_weight_g = shot.final_weight_g;
-    g_webState.shot.current_flow_g_s = shot.current_flow_g_s;
-    g_webState.shot.sample_count = shot.sample_count;
-    g_webState.shot.sample_buffer_full = shot.sample_buffer_full;
+    updateWebShotState(now);
 
     g_webState.selection.siebtraeger = g_webSettingsCache.selectedSiebtraeger;
     g_webState.selection.gefaess = ui_t4s3_web_selected_gefaess();
@@ -1037,13 +1046,29 @@ static void tickWebUi(uint32_t now)
         return;
     }
 
-    if (now - g_lastWebBroadcastMs < kWebBroadcastIntervalMs) {
+    const CoffeeShotSessionStatus shot = coffeeShotSessionStatus(now);
+    const bool shotTelemetryActive = shot.armed || shot.running;
+    const uint32_t fullBroadcastInterval = shotTelemetryActive
+                                             ? kWebShotFullBroadcastIntervalMs
+                                             : kWebBroadcastIntervalMs;
+    const bool fullStateDue = now - g_lastWebBroadcastMs >= fullBroadcastInterval;
+    const bool shotTelemetryDue = shotTelemetryActive &&
+                                  now - g_lastWebShotTelemetryBroadcastMs >= kWebShotTelemetryIntervalMs;
+
+    if (fullStateDue) {
+        g_lastWebBroadcastMs = now;
+        g_lastWebShotTelemetryBroadcastMs = now;
+        updateWebState(now);
+        coffeeWebBroadcastState(g_webState);
         return;
     }
 
-    g_lastWebBroadcastMs = now;
-    updateWebState(now);
-    coffeeWebBroadcastState(g_webState);
+    if (shotTelemetryDue) {
+        g_lastWebShotTelemetryBroadcastMs = now;
+        g_webState.weight.actual_g = t4s3_scale_current_grams();
+        updateWebShotState(now);
+        coffeeWebBroadcastShotTelemetry(g_webState);
+    }
 }
 
 void setup()
