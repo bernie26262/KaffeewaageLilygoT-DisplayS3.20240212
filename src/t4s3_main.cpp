@@ -121,7 +121,6 @@ static constexpr float kFastFilterLargeDeltaGrams = 5.0f;
 static constexpr float kFastFilterMediumDeltaGrams = 1.0f;
 static constexpr float kStableFilterLargeDeltaGrams = 10.0f;
 static constexpr float kStableFilterMediumDeltaGrams = 2.0f;
-static constexpr float kDisplaySettleFastDeltaGrams = 1.5f;
 static constexpr float kDisplayStableDeadbandGrams = 0.08f;
 // Shot page: separate calm path. It follows the same median input but avoids
 // the immediate fast-path jumps used for responsive Single-Dose handling.
@@ -358,22 +357,16 @@ static void tickHx711Test(uint32_t now)
             t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_STABLE_REACHED);
         }
 
-        // Adaptive display path:
-        // - during movement: follow fast path immediately
-        // - while settling and still visibly away from fast: keep catching up
-        // - once stable: blend more strongly to the calm stable path
+        // Single-Dose display path:
+        // - while moving or settling: stay on the responsive fast path
+        // - once stable: only follow slow changes outside the display deadband
+        // The previous settling path blended back toward g_stableWeightRaw and
+        // could visibly lag behind (or even move backwards) after a large step.
         const float displayFastDeltaRaw = fabsf(g_fastWeightRaw - g_displayWeightRaw);
-        if (g_weightMoving) {
+        if (g_weightMoving || !g_weightStable) {
             g_displayWeightRaw = g_fastWeightRaw;
-        } else if (displayFastDeltaRaw >= gramsToRawDelta(kDisplaySettleFastDeltaGrams)) {
-            g_displayWeightRaw = g_displayWeightRaw * 0.40f + g_fastWeightRaw * 0.60f;
-        } else if (g_weightStable) {
-            const float stableDisplayDeltaRaw = fabsf(g_stableWeightRaw - g_displayWeightRaw);
-            if (stableDisplayDeltaRaw >= gramsToRawDelta(kDisplayStableDeadbandGrams)) {
-                g_displayWeightRaw = g_displayWeightRaw * 0.85f + g_stableWeightRaw * 0.15f;
-            }
-        } else {
-            g_displayWeightRaw = g_displayWeightRaw * 0.75f + g_stableWeightRaw * 0.25f;
+        } else if (displayFastDeltaRaw >= gramsToRawDelta(kDisplayStableDeadbandGrams)) {
+            g_displayWeightRaw = g_displayWeightRaw * 0.85f + g_fastWeightRaw * 0.15f;
         }
 
         g_lastHx711Filtered = g_displayWeightRaw;

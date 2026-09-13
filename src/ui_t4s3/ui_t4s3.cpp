@@ -926,7 +926,6 @@ void update_autodetect_gefaess_preview()
         !autodetectEnabled ||
         !hx711DisplayValid ||
         !t4s3_scale_is_ready() ||
-        !t4s3_scale_is_stable() ||
         vesselOverlay ||
         gefaessManageOverlay ||
         gefaessMeasureOverlay ||
@@ -952,7 +951,8 @@ void update_autodetect_gefaess_preview()
         // Nach einer Auto-Tara liegt das aufliegende Gefäß bei netto 0,0 g.
         // Beim Abheben erscheint deshalb ungefähr das negative Gefäßgewicht.
         // Erst bei stabilem Gewicht <= -30 g tarieren wir erneut auf leer.
-        if (currentGrams <= -kGefaessRemovedThresholdGrams) {
+        if (currentGrams <= -kGefaessRemovedThresholdGrams &&
+            t4s3_scale_is_stable()) {
             set_save_ready(false);
             if (t4s3_scale_tare()) {
                 hx711DisplayGrams = 0.0f;
@@ -5244,6 +5244,7 @@ void ui_t4s3_tick()
     }
     update_gefaess_measure_weight_display();
 }
+
 
 
 
