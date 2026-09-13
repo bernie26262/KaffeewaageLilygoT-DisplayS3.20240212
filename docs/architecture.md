@@ -9,7 +9,7 @@ Die Kaffeewaage soll als eigenständiges ESP32-S3-Gerät funktionieren und gleic
 | Bereich | Branch / Environment | Status |
 |---|---|---|
 | T4-S3 / LVGL | `feature/t4s3-lvgl-touch` / `lilygo-t4-s3-lvgl` | aktueller Hauptstand |
-| Legacy-TFT | `stable/legacy-tft-pre-t4s3` bzw. `feature/legacy-webui-maintenance-settings` / `KaffeewaageLilygoT-DisplayS3_20240212` | finaler klassischer Stand / Referenz |
+| Legacy-TFT | `feature/legacy-shot-scale` / `KaffeewaageLilygoT-DisplayS3_20240212` | finaler klassischer Stand mit Gaggiuino-Shot-Waage / Referenz |
 
 Für T4-S3 immer gezielt bauen:
 
@@ -64,6 +64,19 @@ Persistente T4-S3-HMI- und Waagenwerte im Namespace `t4s3ui`:
 
 T4-S3-nahe WLAN-Status- und Hilfslogik.
 
+### `src/t4s3_weight_diag.cpp/.h`
+
+USB-unabhängiger Diagnose-Recorder für die komplette T4-S3-Gewichtskette:
+
+- 10-Hz-Aufzeichnung in einem PSRAM-Ringpuffer
+- bevorzugt 9.000 Samples / 15 Minuten, Fallback 1.200 Samples / 2 Minuten
+- Library-, Median-, FAST-, STABLE-, DISPLAY- und SHOT-Werte
+- Flow, Moving/Stable und Shot-State
+- Ereignisse für Tara, Autotara, BLE, Shot-Start/-Stop/-False-Start
+- Steuerung und CSV-Export über die Home-WebUI
+
+Details: `docs/weight-diagnostics.md`.
+
 ### `src/app_state.h`
 
 Gemeinsamer Zustand für WebUI/JSON-Ausgabe. `t4s3_main.cpp` aktualisiert den AppState; `coffee_web.cpp` serialisiert ihn für WebSocket-Clients.
@@ -89,10 +102,12 @@ Gemeinsame WebUI- und WebSocket-Schicht für Legacy und T4-S3:
 - PWA-Manifest-Handler
 - Icon-/Favicon-Routen
 - Shot-Sample-Endpunkt `/api/shot/samples`
+- kompakte `shot_telemetry`-WebSocket-Nachrichten während `armed/running`
+- Weight-Diagnose-Endpunkte für Liveansicht und CSV-Export
 - zentrale Asset-Versionierung und Produktiv-Caching
 - Synchronisierung mehrerer WebUI-Clients mit dem HMI-Seitenzustand
 
-Das WebUI-Rendering ist browserseitig optimiert: WebSocket-State-Nachrichten werden per `requestAnimationFrame` gebündelt, und DOM-Werte werden nur bei Änderung geschrieben. Das verhindert nach Langlauf die Chrome-Meldungen `message handler took ... ms`.
+Das WebUI-Rendering ist browserseitig optimiert: Full-State-Nachrichten werden per `requestAnimationFrame` gebündelt, und DOM-Werte werden nur bei Änderung geschrieben. Außerhalb eines Shots wird der Full State alle `500 ms` gesendet. Während `armed/running` läuft ein kleiner `shot_telemetry`-Pfad mit `200 ms`, während der große Full State auf `1000 ms` reduziert wird. Das verbessert Gewicht, Flow und Timer auf der Shot-Seite, ohne den vollständigen AppState fünfmal pro Sekunde zu übertragen.
 
 
 ### `src/ble_scale.cpp/.h`
@@ -114,14 +129,17 @@ Zentrale, nicht persistente Shot-Session:
 
 - Zustände `Idle`, `Armed`, `Running`, `Completed`
 - Arming durch Tara im Shot-Modus
-- automatischer Start beim ersten bestätigten Flüssigkeitsgewicht
+- Startkandidat ab `0,25 g`, Bestätigung ab `0,45 g`
+- zusätzliche Trend-Plausibilisierung über ca. `1,2 s`: mindestens `0,15 g` Nettozuwachs, mindestens `0,08 g/s` Steigung und maximal `0,05 g` RMSE zum linearen Trend
 - Armed-Timeout nach 45 Sekunden
+- False-Start-Watchdog für frühe, leichte und flowfreie Sessions, die wieder nahe Null zurückfallen
+- Recovery durch Gaggiuino-Tara bei einem sehr frühen, kleinen Fehlstart
 - automatischer Stop nach ausbleibendem relevantem Gewichtszuwachs
 - maximal 1.200 Samples bei 10 Hz, entsprechend 120 Sekunden
 - letzter Shot bleibt bis zum tatsächlichen Start des nächsten Shots im RAM
 - Flowrate über lineare Regression eines 2,5-Sekunden-Fensters plus EMA-Glättung
 
-Die Shot-Zeit beginnt bewusst beim ersten erkannten Tropfen und ist nicht identisch mit der Pumpenzeit inklusive Pre-Infusion.
+Die Shot-Zeit beginnt beim ersten **softwareseitig plausibilisierten Flüssigkeitszuwachs**. Sie ist deshalb nicht identisch mit Pumpenzeit/Pre-Infusion und kann bei sehr langsamem ersten Tropfen etwas nach dem optisch sichtbaren ersten Tropfen starten.
 
 ### `src/coffee_ota.cpp/.h`
 
@@ -162,7 +180,7 @@ Die Betriebsart wird zentral aus der aktiven HMI-Hauptseite abgeleitet. BLE blei
 - Tara lokal oder von der Maschine möglich
 - BLE-Maschinenkommandos freigegeben
 - eigener ruhiger Shot-Gewichtspfad
-- automatische Zeitmessung ab erstem Tropfen
+- automatische Zeitmessung ab erstem plausibilisierten Flüssigkeitszuwachs
 - Flowrate und RAM-Verlauf für HMI/WebUI
 
 Ein Seitenwechsel beendet die BLE-Verbindung nicht. Dadurch werden unnötige Reconnects vermieden.
@@ -170,6 +188,10 @@ Ein Seitenwechsel beendet die BLE-Verbindung nicht. Dadurch werden unnötige Rec
 ## Waagenlogik und Autodetect
 
 Autodetect, Auto-Tara und Save-ready sind nicht mehr an die aktuell sichtbare HMI-Seite gekoppelt. Dadurch funktioniert die Waagenlogik auch dann, wenn die WebUI auf der Waage-Seite benutzt wird und das lokale HMI gerade Daten, Wartung, WLAN oder System zeigt.
+
+Für die Responsiveness wartet die Gefäßerkennung nicht mehr auf das globale Stable-Flag. Während Bewegung und Settling folgt die Anzeige dem FAST-Pfad; ein erkanntes Gefäß muss `800 ms` innerhalb der Erkennungstoleranz bleiben, bevor Auto-Tara ausgeführt wird. Das Abheben eines bereits auto-tarierten Gefäßes bleibt dagegen zusätzlich an `stable` gekoppelt, damit kurze negative Störungen keine Leer-Tara auslösen.
+
+Beim mechanischen Endaufbau ist darauf zu achten, dass kein HX711-/Wägezellenkabel die Wägeplatte berührt. Ein solcher Kontakt hatte im Test einen spiegelbildlichen Nachlauf von etwa `+0,2…0,3 g` nach Belastung und entsprechend negativ nach Entlastung erzeugt. Nach Freilegen des Kabels blieb der Nullpunkt über mehrere Zyklen stabil.
 
 Bewusst blockiert bleibt Autodetect während Sonderabläufen:
 

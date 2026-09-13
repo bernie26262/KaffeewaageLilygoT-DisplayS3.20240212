@@ -67,13 +67,35 @@ Idle -> Armed -> Running -> Completed
 
 ### Armed
 
-Tara im Shot-Modus aktiviert die First-Drop-Erkennung. Nach 500 ms Beruhigungszeit wird ein Startkandidat ab 0,25 g beobachtet. Bestätigt wird der Start ab 0,45 g über mindestens 250 ms.
+Tara im Shot-Modus aktiviert die Flüssigkeits-Erkennung. Nach `500 ms` Beruhigungszeit wird ab `0,25 g` ein Startkandidat beobachtet. Die reine Gewichtsschwelle reicht bewusst nicht mehr aus, weil die Vibrationspumpe im realen Aufbau scheinbare Gewichtsänderungen von mehr als `0,45 g` erzeugen kann.
+
+Ein Start wird erst bestätigt, wenn zusätzlich ein plausibler positiver Trend vorliegt:
+
+- Bestätigungsgewicht mindestens `0,45 g`
+- Kandidat mindestens `250 ms`
+- Trendfenster ca. `1,2 s`
+- auswertbare Zeitspanne mindestens `0,9 s`
+- Nettozuwachs mindestens `0,15 g`
+- Regressionssteigung mindestens `0,08 g/s`
+- RMSE zum linearen Trend maximal `0,05 g`
+
+Diese Kriterien wurden gegen reine Pumpenläufe und mehrere reale Shots geprüft. Die Pumpenläufe starteten keine Session; reale Flüssigkeitszunahme wurde weiterhin erkannt.
 
 Ohne Start endet Armed nach 45 Sekunden. Ein zuvor abgeschlossener Shot bleibt dabei erhalten.
 
 ### Running
 
 Beim Start wird der vorherige Sample-Puffer gelöscht und eine neue Session-ID vergeben. Samples werden mit 10 Hz aufgezeichnet.
+
+Zusätzliche False-Start-Sicherung:
+
+- nur in den ersten `6 s`
+- Peakgewicht unter `2 g`
+- Flow höchstens `0,05 g/s`
+- wenn das Gewicht mindestens `1 s` wieder bei höchstens `0,12 g` liegt, wird die Session als Fehlstart verworfen und erneut `Armed`
+- ein Gaggiuino-`TARE` kann einen sehr frühen Fehlstart ebenfalls zurücksetzen, wenn die Session noch leicht/flowfrei ist und das aktuelle Gewicht höchstens `0,20 g` beträgt
+
+Damit bleibt ein Phantom-Shot nicht mehr unbegrenzt aktiv, falls die Pumpenvibration trotz Trendprüfung einmal einen Start auslösen sollte.
 
 Automatischer Stop:
 
@@ -90,9 +112,11 @@ Endzeit, Endgewicht und Graph bleiben stehen. Tara bereitet nur den nächsten Sh
 
 ## Zeitdefinition
 
-Die Waage misst **Extraktionszeit ab erstem Tropfen in der Tasse**.
+Die Waage misst die Zeit ab dem ersten **plausibilisierten Flüssigkeitszuwachs** in der Tasse.
 
-Da Gaggiuino kein Timer-Startkommando sendet, kann die Waage Pumpenstart und Pre-Infusion nicht erkennen. Die Maschinenzeit in Gaggiuino kann daher länger sein als die Waagenzeit.
+Das ist bewusst nicht exakt gleichbedeutend mit dem optisch sichtbaren ersten Tropfen: Bei sehr langsamem Tropfen kann die Trendprüfung erst etwas später genügend Signal sammeln. Sie verhindert im Gegenzug, dass reine Pumpenvibration als erster Tropfen interpretiert wird.
+
+Da Gaggiuino im getesteten WeighMyBru-Betrieb kein `TIMER_START` sendet, kann die Waage Pumpenstart und Pre-Infusion nicht direkt übernehmen. Die Maschinenzeit in Gaggiuino kann daher länger sein als die Waagenzeit.
 
 ## RAM-Puffer
 
@@ -117,13 +141,21 @@ Die Flowrate wird aus der Steigung der Gewichtskurve berechnet:
 
 Diese stärkere Glättung ist bewusst gewählt, weil die Ableitung kleine Gewichtsschwankungen stark verstärkt.
 
-## WebUI-Graph
+## WebUI-Graph und Live-Telemetrie
 
-Die WebUI erhält Live-Status per WebSocket. Shot-Samples werden separat über `/api/shot/samples` in Paketen bis 120 Punkte geladen.
+Die WebUI verwendet zwei Ebenen:
+
+- Full State außerhalb eines Shots alle `500 ms`
+- während `armed/running` kompaktes `shot_telemetry` alle `200 ms`; der große Full State wird in dieser Phase auf `1000 ms` reduziert
+
+`shot_telemetry` enthält unter anderem Session-ID, Zustand, Shot-Gewicht, Zeit, Peak, Flow und Sampleanzahl. Dadurch aktualisieren sich Gewicht und Flow sichtbar flüssiger, ohne den vollständigen AppState mit 5 Hz zu übertragen. Der Browser führt die Timeranzeige zwischen den Telemetriepaketen weiter.
+
+Shot-Samples werden weiterhin separat über `/api/shot/samples` in Paketen bis 120 Punkte geladen.
 
 Vorteile:
 
 - kleine reguläre WebSocket-Nachrichten
+- flüssige Shot-Anzeige mit ca. 5 Hz Telemetrie
 - Browser-Reconnect kann kompletten RAM-Shot nachladen
 - Desktop und Mobilgerät bleiben reaktiv
 - keine Flash-Schreibzugriffe

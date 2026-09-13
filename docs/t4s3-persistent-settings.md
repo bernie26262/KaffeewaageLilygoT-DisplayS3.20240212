@@ -25,7 +25,7 @@ Wichtig:
 
 - Siebträger-Gewichte werden nicht gespeichert.
 - Siebträger dienen auf der Single-Dose-Waage nur als Profil für das Sollgewicht.
-- Auto-Tara / Autodetect basiert später auf Gefäßen, nicht auf Siebträger-Gewichten.
+- Auto-Tara / Autodetect basiert auf den gespeicherten Gefäßen, nicht auf Siebträger-Gewichten.
 - Gefäßgewichte, Kalibrierwerte, Wartungszeiten und Statistikwerte sind inzwischen ergänzt.
 
 Standardwerte:

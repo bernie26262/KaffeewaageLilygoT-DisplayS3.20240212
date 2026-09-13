@@ -5,9 +5,11 @@ Dieses Repo enthält zwei eng verwandte Projektstände der Single-Dose-Kaffeewaa
 | Stand | Branch / Environment | Zweck |
 |---|---|---|
 | **T4-S3 / LVGL** | `feature/t4s3-lvgl-touch` / `lilygo-t4-s3-lvgl` | aktueller Hauptstand für LilyGO T4-S3 AMOLED Touch mit LVGL-HMI und WebUI |
-| **Legacy-TFT** | `stable/legacy-tft-pre-t4s3` bzw. `feature/legacy-webui-maintenance-settings` / `KaffeewaageLilygoT-DisplayS3_20240212` | finaler klassischer TFT-/Encoder-Stand als Referenz und Rückfallbasis |
+| **Legacy-TFT** | `feature/legacy-shot-scale` / `KaffeewaageLilygoT-DisplayS3_20240212` | finaler klassischer TFT-/Encoder-Stand mit Gaggiuino-Shot-Waage; Referenz und Rückfallbasis |
 
 Der aktuelle Arbeitsstand dieses ZIPs ist der **T4-S3-/LVGL-Branch**. Die Legacy-Doku und ältere Codepfade bleiben im Repo erhalten, sind aber nicht der primäre Build für neue T4-S3-Arbeiten.
+
+Stabiler Referenz-Tag für diesen Stand: `t4s3-gaggiuino-shot-scale-stable-2026-09-13`.
 
 ## Aktueller T4-S3-Stand
 
@@ -23,7 +25,7 @@ Der T4-S3-Stand kombiniert:
 - NVS/Preferences für UI-, Waagen-, Wartungs- und WLAN-Werte
 - WeighMyBru-kompatible BLE-Waage für Gaggiuino
 - getrennte Betriebsarten **Single Dose** und **Shot-Waage**
-- automatische Shot-Zeitmessung ab erstem Tropfen
+- automatische Shot-Zeitmessung ab erstem **plausiblen** Flüssigkeitszuwachs
 - geglättete Flowrate in g/s auf HMI und WebUI
 - WebUI-Shotgraph für Gewicht und Flowrate
 - letzter Shot ausschließlich im RAM, ohne doppelte dauerhafte Historie
@@ -35,10 +37,13 @@ Wichtige zuletzt getestete Punkte:
 - Deaktivierte Wartungen erzeugen keine Warnungen und die jeweiligen Zähler für Shots/Mahlgut frieren ein. WebUI zeigt `disabled`, HMI zeigt wegen Platz `-`.
 - Autodetect, Auto-Tara und Save-ready laufen unabhängig davon, welche HMI-Seite gerade sichtbar ist. Wizard-/Kalibrier-/Messabläufe pausieren Autodetect weiterhin bewusst.
 - Negative Null wird in der HMI-Gewichtsanzeige unterdrückt: gerundete `-0,0 g` wird als `0,0 g` angezeigt.
-- Die adaptive HX711-Anzeige reagiert schnell bei großen Änderungen und bleibt im stabilen Zustand ruhig. Die Stable-Deadband der Anzeige liegt aktuell bei `0.08 g`, damit einzelne Bohnen ab etwas über `0.1 g` sichtbar werden.
-- WebUI-WebSocket-Rendering ist per `requestAnimationFrame` gebündelt und schreibt DOM-Werte nur bei Änderung. Dadurch traten nach Langzeittest keine Chrome-`message handler took ... ms`-Meldungen mehr auf.
+- Die adaptive HX711-Anzeige reagiert bei großen Änderungen unmittelbar über den FAST-Pfad und bleibt im stabilen Zustand ruhig. Autodetect wartet nicht mehr auf das globale Stable-Flag; ein erkanntes Gefäß wird aktuell `800 ms` bestätigt und dann tariert. Das Abheben eines auto-tarierten Gefäßes bleibt dagegen bewusst an einen stabilen Messwert gekoppelt.
+- Der mechanische Endaufbau wurde geprüft. Ein Kabel, das von unten gegen die Wägeplatte drückte, verursachte zuvor einen reproduzierbaren Nachlauf von etwa `0,2–0,3 g` nach Be- und Entlastung. Nach Freilegen des Kabels bleibt der Nullpunkt über wiederholte Auflege-/Abhebezyklen stabil.
+- Die HX711-Diagnose kann ohne USB über die Home-WebUI aufgezeichnet werden. Ein PSRAM-Ringpuffer speichert 10-Hz-Zwischenwerte und Ereignisse; CSV-Export und ein manueller `Shot abbrechen`-Befehl stehen zur Verfügung.
+- WebUI-WebSocket-Rendering ist per `requestAnimationFrame` gebündelt und schreibt DOM-Werte nur bei Änderung. Während `armed/running` wird zusätzlich alle `200 ms` ein kompaktes `shot_telemetry`-Paket gesendet; der große Gesamtzustand läuft dann mit `1000 ms`, außerhalb eines Shots mit `500 ms`.
 - BLE startet fünf Sekunden nach dem Boot. Die Verbindung bleibt unabhängig vom aktiven Modus bestehen; Maschinenkommandos werden nur auf der Shot-Seite ausgeführt.
-- Gaggiuino sendet im getesteten WeighMyBru-Betrieb zuverlässig `TARE`, jedoch keine Timerkommandos. Deshalb erkennt die Waage Shot-Start und -Ende anhand des ruhigen Shot-Gewichtspfads.
+- Gaggiuino sendet im getesteten WeighMyBru-Betrieb zuverlässig `TARE`, jedoch keine Timerkommandos. Die Shot-Erkennung kombiniert deshalb Gewichtsschwellen mit einer Trend-Plausibilisierung über ca. `1,2 s`, um Pumpenvibrationen von echtem Flüssigkeitszuwachs zu unterscheiden.
+- Frühe Fehlstarts werden zusätzlich abgefangen: ein passendes Gaggiuino-Tara kann einen sehr frühen, leichten Fehlstart zurücksetzen; ein Watchdog verwirft eine Session, die in den ersten Sekunden ohne Flow wieder nahe Null fällt.
 - Der letzte Shot wird mit maximal 1.200 Samples bei 10 Hz im RAM gehalten. Ein neuer Shot überschreibt den alten erst beim tatsächlichen Start.
 - Das lokale HMI ist Master für die aktive Haupt- und Einstellungsseite. Neu verbundene WebUI-Geräte übernehmen diesen Zustand.
 - WebUI-Assets verwenden eine zentrale Versionskennung und werden im Produktivbetrieb langfristig mit `immutable` gecacht.
@@ -50,6 +55,17 @@ Für den aktuellen T4-S3-Stand immer gezielt das LVGL-Environment bauen:
 ```powershell
 pio run -e lilygo-t4-s3-lvgl
 ```
+
+Für den stabilen Referenzstand werden die getesteten Kernabhängigkeiten in `platformio.ini` exakt gepinnt. Relevant sind insbesondere:
+
+```text
+HX711_ADC          1.2.12
+ESPAsyncWebServer  3.11.0
+AsyncTCP           3.4.10
+ArduinoJson        7.4.3
+```
+
+Damit zieht ein späterer Clean-Build nicht unbeabsichtigt eine neuere AsyncWebServer-/AsyncTCP-Kombination ein.
 
 Upload per USB:
 
@@ -135,7 +151,8 @@ Details stehen im Ordner `docs/`:
 - `docs/storage.md`
 - `docs/test-plan.md`
 - `docs/ble-shot-scale.md`
+- `docs/weight-diagnostics.md`
 
 ## Beobachtungspunkt
 
-Ein einmaliger TFT-/HMI-Grafikfehler mit invertierten Farben bzw. hellem Hintergrund wurde früher beobachtet, war aber bisher nicht reproduzierbar. Bei erneutem Auftreten Foto, Zeitpunkt und Bedienkontext notieren.
+Ein einmaliger TFT-/HMI-Grafikfehler mit invertierten Farben bzw. hellem Hintergrund wurde früher beobachtet, war aber bisher nicht reproduzierbar. Zusätzlich trat einmal nach einem Shot beim Wechsel zurück auf Home ein vollständiger HMI-/WebUI-Freeze auf; auch dieser ließ sich in wiederholten Seitenwechsel- und Diagnose-Polling-Tests nicht reproduzieren. Bei erneutem Auftreten Zeitpunkt, Bedienkontext und wenn möglich Diagnosezustand notieren.

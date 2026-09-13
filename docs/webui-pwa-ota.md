@@ -58,12 +58,14 @@ Die WebUI verarbeitet Live-State-Nachrichten über WebSocket. Nach langen Laufze
 
 Der aktuelle Stand reduziert die Last im Browser:
 
-- eingehende State-Nachrichten werden über `requestAnimationFrame` gebündelt
+- eingehende Full-State-Nachrichten werden über `requestAnimationFrame` gebündelt
 - wenn mehrere States schnell nacheinander eintreffen, wird nur der letzte State gerendert
 - Text und HTML werden nur ins DOM geschrieben, wenn sich der Inhalt geändert hat
 - teure Listen wie Wartung, Gefäße, Siebträger und WLAN-Balken werden über Signaturen gecacht
+- während `armed/running` kommt zusätzlich ein kleines `shot_telemetry`-Paket alle `200 ms`
+- in dieser Phase sinkt die Rate des großen Full State von `500 ms` auf `1000 ms`
 
-Der Fix wurde auf dem T4-S3 nach mehreren Stunden Laufzeit ohne neue `message handler`-Violations getestet.
+Der Fix wurde auf dem T4-S3 nach mehreren Stunden Laufzeit ohne neue `message handler`-Violations getestet. Die zusätzliche Shot-Telemetrie wurde anschließend mit realen Shots geprüft und erzeugt eine sichtbar flüssigere Gewicht-/Flow-/Timer-Darstellung.
 
 
 ## Shot-Graph und Sample-Endpunkt
@@ -73,7 +75,9 @@ Die Shot-Seite zeigt den laufenden oder zuletzt abgeschlossenen RAM-Shot mit zwe
 - Gewicht in Gramm
 - Flowrate in g/s
 
-Die normalen WebSocket-State-Nachrichten enthalten nur Status, aktuelle Werte, Session-ID und Sampleanzahl. Die Messpunkte werden paketweise über folgenden Endpunkt nachgeladen:
+Der normale Full State enthält den vollständigen App-Zustand. Während `armed/running` wird zusätzlich `shot_telemetry` gesendet. Das kompakte Paket enthält nur für den Shot relevante Felder wie Session-ID, Zustand, Zeit, aktuelles Gewicht, Peak, Flow und Sampleanzahl.
+
+Die Messpunkte selbst werden weiterhin paketweise über folgenden Endpunkt nachgeladen:
 
 ```text
 /api/shot/samples?from=<index>&limit=120
@@ -82,6 +86,7 @@ Die normalen WebSocket-State-Nachrichten enthalten nur Status, aktuelle Werte, S
 Eigenschaften:
 
 - maximal 1.200 Punkte bei 10 Hz
+- Shot-Live-Telemetrie ca. 5 Hz (`200 ms`), Full State während Shot ca. 1 Hz
 - nur laufender beziehungsweise letzter Shot
 - kein Flash- oder NVS-Logging
 - Browser-Reconnect lädt den vorhandenen RAM-Verlauf erneut
@@ -129,7 +134,7 @@ Diese Routen mappen auf die Dateien im SPIFFS.
 CSS und JavaScript verwenden eine gemeinsame zentrale Versionskennung in `src/coffee_web.cpp`:
 
 ```cpp
-#define COFFEE_WEB_ASSET_VERSION "20260614b"
+#define COFFEE_WEB_ASSET_VERSION "20260913shot1"
 ```
 
 Die Versionskennung wird automatisch an `/coffee.css` und alle JavaScript-Routen angehängt. Bei jeder Änderung an eingebettetem HTML, CSS oder JavaScript muss ausschließlich diese zentrale Kennung erhöht werden.

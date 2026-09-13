@@ -16,6 +16,17 @@ Erwartung:
 
 Hinweis: Für den aktuellen T4-S3-Branch nicht nur `pio run` verwenden, weil sonst je nach `platformio.ini` auch das Legacy-Environment gebaut werden kann.
 
+Für einen stabilen Referenzstand zusätzlich im Dependency Graph prüfen:
+
+```text
+HX711_ADC          1.2.12
+ESPAsyncWebServer  3.11.0
+AsyncTCP           3.4.10
+ArduinoJson        7.4.3
+```
+
+Abweichungen von diesen Versionen vor einem Release/Tag bewusst bewerten.
+
 ## WebUI-Basistest
 
 Im Browser oeffnen:
@@ -162,9 +173,12 @@ Autodetect EIN:
 - HMI bewusst auf eine andere Seite stellen, z.B. Daten, Wartung oder WLAN
 - WebUI auf Waage öffnen
 - bekanntes Gefäß auflegen
-- Auto-Tara abwarten
+- Anzeige muss unmittelbar auf den Lastsprung reagieren
+- Auto-Tara soll nach stabiler Gefäßerkennung mit aktuell `800 ms` Bestätigung erfolgen; das globale Stable-Flag ist für die Erkennung nicht mehr Voraussetzung
+- nach Tara Nullpunkt mindestens 30 s beobachten
 - Save-Freigabe prüfen
 - Gefäß abheben
+- Leer-Tara darf erst bei negativer Änderung >= 30 g und stabilem Messwert erfolgen
 - Save wird gesperrt
 
 Autodetect AUS:
@@ -252,11 +266,14 @@ Bekannte Einschränkung: Beim getesteten Gaggiuino-Client werden keine `START`, 
 
 1. Tara auslösen.
 2. Bezug starten.
-3. Timer startet beim ersten bestätigten Flüssigkeitsgewicht.
-4. Gewicht, Zeit und Flowrate laufen auf HMI/WebUI.
-5. Nach Ende des relevanten Gewichtszuwachses stoppt die Session automatisch.
-6. Endzeit, Endgewicht und Graph bleiben sichtbar.
-7. Pre-Infusion vor dem ersten Tropfen ist bewusst nicht Teil dieser Zeit.
+3. Pumpenvibration allein darf keinen `SHOT_START` erzeugen.
+4. Timer startet beim ersten plausibilisierten Flüssigkeitszuwachs; bei langsamem ersten Tropfen kann dies etwas nach dem optisch sichtbaren Tropfen liegen.
+5. Gewicht, Zeit und Flowrate laufen auf HMI/WebUI.
+6. `SHOT_FALSE_START` darf bei einem normalen echten Shot nicht auftreten.
+7. Nach Ende des relevanten Gewichtszuwachses stoppt die Session automatisch.
+8. Endzeit, Endgewicht und Graph bleiben sichtbar.
+9. Pre-Infusion vor dem plausibilisierten Flüssigkeitszuwachs ist bewusst nicht Teil dieser Zeit.
+10. Abschließendes Gaggiuino-Tara nach dem Ausschalten des Bezugs muss den nächsten Shot wieder armeren, ohne den gespeicherten Graphen sofort zu löschen.
 
 ### Zweiter Shot
 
@@ -271,13 +288,36 @@ Bekannte Einschränkung: Beim getesteten Gaggiuino-Client werden keine `START`, 
 - nach Stop wird der aktuelle Flow-Wert auf 0 gesetzt
 - Gewichtsdaten an Gaggiuino bleiben von der Flowrate-Glättung unabhängig
 
+## Weight-Diagnose / CSV
+
+1. Home -> `Gewichtsdiagnose` öffnen.
+2. `Start` drücken und prüfen, dass Samplezahl/Dauer steigen.
+3. Zwischen Home und Shot wechseln; die Aufnahme muss im ESP weiterlaufen.
+4. `Stop` drücken und CSV herunterladen.
+5. CSV muss Library-, Median-, FAST-, STABLE-, DISPLAY- und SHOT-Werte sowie Event-Spalte enthalten.
+6. `Löschen` leert den Ringpuffer.
+7. `Shot abbrechen` darf eine laufende/armed Shot-Session manuell auflösen, ohne Neustart des ESP.
+8. Bei längeren Tests PSRAM-Kapazität prüfen: bevorzugt 9.000 Samples / 15 min, Fallback 1.200 Samples / 2 min.
+
+## Pumpenvibrations-Test
+
+Für Regression der Shot-Startlogik:
+
+1. Tasse/Gefäß auf der Waage mehrere Minuten setzen lassen und tarieren.
+2. Diagnose starten.
+3. Vibrationspumpe ca. 10 s laufen lassen, ohne Wasser in das Gefäß auf der Waage einzuleiten.
+4. Erwartung: deutliche Messwertunruhe ist zulässig, aber kein `SHOT_START`.
+5. Anschließend echten Shot messen und prüfen, dass ein konsistenter positiver Flüssigkeitstrend weiterhin startet.
+
 ## Shot-Graph / RAM-Reconnect
 
 1. Shot durchführen und Graph abwarten.
-2. Browser neu laden oder WebSocket kurz trennen.
-3. Erwartung: letzter Shot wird über `/api/shot/samples` wieder aus RAM geladen.
-4. Tara ohne folgenden Shot darf den Graph nicht löschen.
-5. ESP-Neustart darf den Graph bewusst löschen.
+2. Während `armed/running` müssen Gewicht/Flow sichtbar flüssig aktualisieren; die kompakte Shot-Telemetrie läuft mit ca. 5 Hz (`200 ms`).
+3. Der Full State wird währenddessen nur etwa einmal pro Sekunde gesendet; außerhalb eines Shots bleibt er bei 500 ms.
+4. Browser neu laden oder WebSocket kurz trennen.
+5. Erwartung: letzter Shot wird über `/api/shot/samples` wieder aus RAM geladen.
+6. Tara ohne folgenden Shot darf den Graph nicht löschen.
+7. ESP-Neustart darf den Graph bewusst löschen.
 
 ## Mehrgeräte- und HMI-Seitensynchronisierung
 

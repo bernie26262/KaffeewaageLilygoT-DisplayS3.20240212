@@ -63,12 +63,12 @@ Die frühere Stoppuhr-Seite ist die maschinennahe Shot-Waage. Sie bleibt ohne Sc
 Inhalte:
 
 - großes aktuelles Gewicht
-- Extraktionszeit ab erstem Tropfen
+- Extraktionszeit ab erstem plausibilisierten Flüssigkeitszuwachs
 - aktuelle geglättete Flowrate in g/s
 - Tara-Button
 - Status `bereit`, `wartet auf Bezug`, `läuft` oder `abgeschlossen`
 
-Start, Stop und Reset werden nicht als lokale Buttons angeboten. Gaggiuino sendet im getesteten WeighMyBru-Betrieb nur Tara. Die Waage startet daher automatisch beim ersten bestätigten Flüssigkeitsgewicht und stoppt nach ausbleibendem relevantem Gewichtszuwachs.
+Start, Stop und Reset werden nicht als lokale Buttons angeboten. Gaggiuino sendet im getesteten WeighMyBru-Betrieb nur Tara. Die Waage startet daher automatisch beim ersten durch Gewichtsschwelle und positiven Trend plausibilisierten Flüssigkeitszuwachs und stoppt nach ausbleibendem relevantem Gewichtszuwachs.
 
 Ein Tara aktiviert die Erkennung für maximal 45 Sekunden. Ohne beginnenden Shot kehrt die Session in den Bereitschaftszustand zurück. Der zuvor abgeschlossene Verlauf bleibt im RAM erhalten.
 

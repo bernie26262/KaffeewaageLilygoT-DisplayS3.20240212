@@ -114,6 +114,19 @@ Grün + Weiß     -> Messsignal / Differenzsignal
 Die verdrillten Paare helfen, Störungen gleichmäßiger in beide Leitungen eines
 Paares einzukoppeln und damit im Differenzsignal besser zu unterdrücken.
 
+## Mechanische Kabelführung
+
+Die Kabelführung zwischen Biegebalken und HX711 ist messtechnisch relevant. Im fertigen Housing wurde ein Nachlauf von etwa `0,2–0,3 g` nach Be- und Entlastung auf einen Kabelkontakt mit der Unterseite der Wägeplatte zurückgeführt.
+
+Deshalb:
+
+- kein Kabel darf die Wägeplatte oder den beweglichen Bereich des Biegebalkens berühren
+- genügend freie Schlaufe vorsehen, damit keine Federkraft über das Kabel eingeleitet wird
+- Zugentlastung am festen Teil des Aufbaus
+- bei scheinbarem Drift/Creep zuerst auf mechanische Nebenkräfte prüfen
+
+Nach Beseitigung des Kontakts blieb die Waage bei wiederholten Auflege-/Abhebezyklen stabil um Null.
+
 ## Hinweise zur späteren Integration
 
 Der aktuelle T4-S3-Build verwendet:
