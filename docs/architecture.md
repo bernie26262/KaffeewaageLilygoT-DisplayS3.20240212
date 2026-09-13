@@ -73,7 +73,7 @@ USB-unabhängiger Diagnose-Recorder für die komplette T4-S3-Gewichtskette:
 - Library-, Median-, FAST-, STABLE-, DISPLAY- und SHOT-Werte
 - Flow, Moving/Stable und Shot-State
 - Ereignisse für Tara, Autotara, BLE, Shot-Start/-Stop/-False-Start
-- Steuerung und CSV-Export über die Home-WebUI
+- Steuerung und CSV-Export über `Einstellungen -> System / OTA` in der WebUI
 
 Details: `docs/weight-diagnostics.md`.
 

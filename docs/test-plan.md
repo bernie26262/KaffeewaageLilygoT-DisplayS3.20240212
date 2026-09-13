@@ -290,10 +290,10 @@ Bekannte Einschränkung: Beim getesteten Gaggiuino-Client werden keine `START`, 
 
 ## Weight-Diagnose / CSV
 
-1. Home -> `Gewichtsdiagnose` öffnen.
+1. `Einstellungen -> System / OTA -> Gewichtsdiagnose` öffnen.
 2. `Start` drücken und prüfen, dass Samplezahl/Dauer steigen.
-3. Zwischen Home und Shot wechseln; die Aufnahme muss im ESP weiterlaufen.
-4. `Stop` drücken und CSV herunterladen.
+3. Zwischen `System / OTA`, Home und Shot wechseln; die Aufnahme muss im ESP weiterlaufen.
+4. Zurück zu `System / OTA`, `Stop` drücken und CSV herunterladen.
 5. CSV muss Library-, Median-, FAST-, STABLE-, DISPLAY- und SHOT-Werte sowie Event-Spalte enthalten.
 6. `Löschen` leert den Ringpuffer.
 7. `Shot abbrechen` darf eine laufende/armed Shot-Session manuell auflösen, ohne Neustart des ESP.

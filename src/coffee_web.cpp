@@ -18,7 +18,7 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
-#define COFFEE_WEB_ASSET_VERSION "20260913shot1"
+#define COFFEE_WEB_ASSET_VERSION "20260913diag1"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
   "public, max-age=31536000, immutable";
@@ -165,25 +165,6 @@ R"rawliteral(">
     </div>
   </section>
 
-  <section class="card diag-card">
-    <details id="weightDiagDetails">
-      <summary>Gewichtsdiagnose</summary>
-      <div class="diag-status-row small">
-        <span>Status: <b id="weightDiagStatus">nicht gestartet</b></span>
-        <span>Samples: <b id="weightDiagCount">0</b></span>
-        <span>Dauer: <b id="weightDiagDuration">00:00</b></span>
-      </div>
-      <div class="button-row diag-controls">
-        <button id="weightDiagStart" class="compact">Start</button>
-        <button id="weightDiagStop" class="compact secondary">Stop</button>
-        <button id="weightDiagClear" class="compact secondary">Löschen</button>
-        <button id="weightDiagCsv" class="compact secondary">CSV</button>
-        <button id="weightDiagAbortShot" class="compact danger">Shot abbrechen</button>
-      </div>
-      <div class="small diag-note">Aufzeichnung: 10 Hz im PSRAM. Die Live-Anzeige wird separat und deutlich langsamer aktualisiert.</div>
-      <pre class="diag-log mono" id="weightDiagLog">Noch keine Diagnosewerte.</pre>
-    </details>
-  </section>
   </div>
 
   <div id="timerPage" class="page hidden">
@@ -401,6 +382,26 @@ R"rawliteral(">
         <div>Pakete / Commands: <b id="bleSystemCounters">---</b></div>
       </div>
       <pre class="ble-log mono" id="bleLog">Noch keine BLE-Ereignisse.</pre>
+    </section>
+
+    <section class="card diag-card">
+      <details id="weightDiagDetails">
+        <summary>Gewichtsdiagnose</summary>
+        <div class="diag-status-row small">
+          <span>Status: <b id="weightDiagStatus">nicht gestartet</b></span>
+          <span>Samples: <b id="weightDiagCount">0</b></span>
+          <span>Dauer: <b id="weightDiagDuration">00:00</b></span>
+        </div>
+        <div class="button-row diag-controls">
+          <button id="weightDiagStart" class="compact">Start</button>
+          <button id="weightDiagStop" class="compact secondary">Stop</button>
+          <button id="weightDiagClear" class="compact secondary">Löschen</button>
+          <button id="weightDiagCsv" class="compact secondary">CSV</button>
+          <button id="weightDiagAbortShot" class="compact danger">Shot abbrechen</button>
+        </div>
+        <div class="small diag-note">Aufzeichnung: 10 Hz im PSRAM. Die Live-Anzeige wird separat und deutlich langsamer aktualisiert.</div>
+        <pre class="diag-log mono" id="weightDiagLog">Noch keine Diagnosewerte.</pre>
+      </details>
     </section>
 
     <section class="card">
@@ -1073,6 +1074,7 @@ function applyTab(targetPageId, scrollToTop = true) {
   if (changed && scrollToTop) {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }
+  syncWeightDiagPolling();
 }
 
 function showTab(targetPageId) {
@@ -1093,6 +1095,7 @@ function applySettingsTab(targetPanelId) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-current', active ? 'page' : 'false');
   });
+  syncWeightDiagPolling();
 }
 
 function showSettingsTab(targetPanelId) {
@@ -1485,10 +1488,21 @@ function renderWeightDiag(data) {
   log.scrollTop = log.scrollHeight;
 }
 
+function weightDiagPanelIsVisible() {
+  return activeMainTab === 'settingsPage' &&
+    activeSettingsPanel === 'settingsSystemPanel';
+}
+
+function syncWeightDiagPolling() {
+  const details = el('weightDiagDetails');
+  if (details?.open && weightDiagPanelIsVisible()) startWeightDiagPolling();
+  else stopWeightDiagPolling();
+}
+
 async function fetchWeightDiag() {
   if (weightDiagFetchInFlight) return;
   const details = el('weightDiagDetails');
-  if (!details || !details.open) return;
+  if (!details || !details.open || !weightDiagPanelIsVisible()) return;
 
   weightDiagFetchInFlight = true;
   try {
@@ -2698,9 +2712,8 @@ function bindDashboardHandlers() {
     }
   });
 
-  el('weightDiagDetails')?.addEventListener('toggle', e => {
-    if (e.target.open) startWeightDiagPolling();
-    else stopWeightDiagPolling();
+  el('weightDiagDetails')?.addEventListener('toggle', () => {
+    syncWeightDiagPolling();
   });
   el('weightDiagStart')?.addEventListener('click', () => {
     sendCommand(CMD.weightDiagStart, 'Gewichtsdiagnose gestartet …');

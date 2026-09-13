@@ -193,7 +193,7 @@ Die Flowrate verändert weder Rohmessung noch Single-Dose-Stabilitätslogik.
 
 Für den eingebauten Zustand ohne USB existiert `src/t4s3_weight_diag.cpp/.h`.
 
-Die Home-WebUI kann die Aufzeichnung starten/stoppen, löschen und als CSV herunterladen. Aufgezeichnet werden unter anderem:
+`Einstellungen -> System / OTA -> Gewichtsdiagnose` kann die Aufzeichnung starten/stoppen, löschen und als CSV herunterladen. Aufgezeichnet werden unter anderem:
 
 - `library_g`
 - `median_g`

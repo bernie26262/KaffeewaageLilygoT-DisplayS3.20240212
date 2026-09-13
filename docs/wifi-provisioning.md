@@ -321,9 +321,9 @@ Ziel der Aufteilung:
 - `Wartung`: Wartungsstatus und Wartungs-Reset
 - `Waage & Gefaeße`: Kalibrierung, Gefaeße einmessen und Gesamtwerte
 - `WLAN`: WLAN-Status, gespeicherte WLAN-Daten, Setup-WLAN und Aktivierung/Deaktivierung
-- `System / OTA`: Update-Seite, ESP32-Neustart und Log
+- `System / OTA`: Update-Seite, ESP32-Neustart, Gewichtsdiagnose und Log
 
-Damit bleiben die sicherheitsrelevanten WLAN-Funktionen zusammen, waehrend `System / OTA` wieder kurz und uebersichtlich bleibt.
+Damit bleiben die sicherheitsrelevanten WLAN-Funktionen zusammen, waehrend `System / OTA` die seltener benötigten Service- und Diagnosefunktionen bündelt.
 
 
 ## WLAN-Signalqualität

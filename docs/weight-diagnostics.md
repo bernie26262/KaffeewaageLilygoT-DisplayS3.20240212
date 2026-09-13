@@ -11,7 +11,7 @@ src/t4s3_weight_diag.cpp
 src/t4s3_weight_diag.h
 ```
 
-Bedienung erfolgt auf der Home-/Waagen-Seite der WebUI im Bereich `Gewichtsdiagnose`.
+Bedienung erfolgt in der WebUI unter `Einstellungen -> System / OTA -> Gewichtsdiagnose`.
 
 ## Bedienung
 
@@ -32,7 +32,7 @@ Die Aufnahme läuft im ESP weiter, auch wenn in der WebUI auf die Shot-Seite ode
 - Fallback ohne PSRAM-Allokation: 1.200 Samples / ca. 2 Minuten
 - Ringpuffer: bei Überlauf werden die ältesten Samples ersetzt
 
-Die Liveansicht der WebUI ist nur eine Darstellung. Sie bestimmt nicht den Aufnahmetakt.
+Die Liveansicht der WebUI ist nur eine Darstellung. Sie bestimmt nicht den Aufnahmetakt. Das Live-Polling läuft nur, solange `System / OTA -> Gewichtsdiagnose` sichtbar und aufgeklappt ist; die Aufnahme im ESP läuft unabhängig davon weiter.
 
 ## CSV-Felder
 
@@ -110,11 +110,11 @@ Dieser Test zeigte, dass reine Pumpenvibration im SHOT-Pfad zeitweise scheinbare
 
 ### Echter Shot
 
-1. Diagnose auf Home starten.
+1. Unter `Einstellungen -> System / OTA -> Gewichtsdiagnose` die Aufnahme starten.
 2. zur Shot-Seite wechseln.
 3. Shot normal durchführen.
 4. nach Shot-Ende und abschließendem Gaggiuino-Tara noch einige Sekunden warten.
-5. zurück zu Home.
+5. zurück zu `Einstellungen -> System / OTA`.
 6. Diagnose stoppen und CSV herunterladen.
 
 Die Aufnahme bleibt während der Seitenwechsel aktiv.
