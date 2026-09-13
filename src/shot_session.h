@@ -14,6 +14,7 @@ enum class CoffeeShotSessionEvent : uint8_t {
     None,
     Started,
     Stopped,
+    FalseStart,
 };
 
 constexpr size_t COFFEE_SHOT_MAX_SAMPLES = 1200;  // 120 s at 10 Hz
@@ -52,6 +53,10 @@ CoffeeShotSessionEvent coffeeShotSessionTick(uint32_t now_ms, float weight_g);
 // current Gaggiuino/WeighMyBru tests only send TARE.
 CoffeeShotSessionEvent coffeeShotSessionExternalStart(uint32_t now_ms, float weight_g);
 CoffeeShotSessionEvent coffeeShotSessionExternalStop(uint32_t now_ms, float weight_g);
+
+// A machine TARE may arrive shortly after a vibration-triggered false start.
+// Recover only while the session is still very early, light and flow-free.
+CoffeeShotSessionEvent coffeeShotSessionRecoverForBleTare(uint32_t now_ms, float weight_g);
 void coffeeShotSessionReset();
 
 CoffeeShotSessionStatus coffeeShotSessionStatus(uint32_t now_ms);

@@ -562,6 +562,14 @@ static void handleShotSessionEvent(CoffeeShotSessionEvent event, uint32_t now, f
                       static_cast<unsigned long>(status.elapsed_ms),
                       static_cast<double>(status.final_weight_g),
                       static_cast<double>(status.peak_weight_g));
+        return;
+    }
+
+    if (event == CoffeeShotSessionEvent::FalseStart) {
+        t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_SHOT_FALSE_START);
+        ui_t4s3_set_shot_timer(0, false);
+        appendBleShotLog("Fehlstart verworfen - Shot wieder bereit");
+        Serial.println("[T4S3][SHOT] false start rejected; session re-armed");
     }
 }
 
@@ -749,11 +757,22 @@ static void handleBleCommands()
 
         bool handled = false;
         switch (command) {
-            case CoffeeBleScaleCommand::Tare:
+            case CoffeeBleScaleCommand::Tare: {
                 t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_BLE_TARE);
+                const uint32_t now = millis();
+                const float weight = t4s3_scale_shot_grams();
+                const CoffeeShotSessionEvent recovery =
+                    coffeeShotSessionRecoverForBleTare(now, weight);
+                handleShotSessionEvent(recovery, now, weight);
+
+                // After a qualifying early false-start recovery the session is
+                // no longer running, so the normal UI tare path can execute
+                // and re-arm the shot detector at a clean zero.
                 handled = ui_t4s3_handle_web_command("tare");
                 break;
+            }
             case CoffeeBleScaleCommand::TimerStart: {
+                t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_BLE_TIMER_START);
                 const uint32_t now = millis();
                 const float weight = t4s3_scale_shot_grams();
                 const CoffeeShotSessionEvent event = coffeeShotSessionExternalStart(now, weight);
@@ -762,6 +781,7 @@ static void handleBleCommands()
                 break;
             }
             case CoffeeBleScaleCommand::TimerStop: {
+                t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_BLE_TIMER_STOP);
                 const uint32_t now = millis();
                 const float weight = t4s3_scale_shot_grams();
                 const CoffeeShotSessionEvent event = coffeeShotSessionExternalStop(now, weight);
@@ -770,6 +790,7 @@ static void handleBleCommands()
                 break;
             }
             case CoffeeBleScaleCommand::TimerReset:
+                t4s3WeightDiagMarkEvent(T4S3_DIAG_EVENT_BLE_TIMER_RESET);
                 // Keep the completed result visible. RESET only prepares the
                 // next detection; the old timer is replaced on the next START.
                 coffeeShotSessionArm(millis(), t4s3_scale_shot_grams());

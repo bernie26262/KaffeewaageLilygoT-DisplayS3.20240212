@@ -16,6 +16,27 @@ constexpr float kStartConfirmWeightG = 0.45f;
 constexpr uint32_t kStartConfirmMs = 250UL;
 constexpr float kStartCancelWeightG = 0.12f;
 
+// The pump can create >0.45 g apparent weight for a few hundred milliseconds.
+// Before accepting a start, require a smooth positive trend similar to the
+// measured first-liquid curves from real shots.
+constexpr uint32_t kStartTrendSampleIntervalMs = 100UL;
+constexpr uint32_t kStartTrendWindowMs = 1200UL;
+constexpr uint32_t kStartTrendMinimumSpanMs = 900UL;
+constexpr float kStartTrendMinimumGrowthG = 0.15f;
+constexpr float kStartTrendMinimumSlopeGPerS = 0.08f;
+constexpr float kStartTrendMaximumRmseG = 0.05f;
+constexpr size_t kStartTrendMaxSamples = 16;
+
+// Last-resort protection against a start that nevertheless collapses back to
+// zero. This guard is active only during the first seconds of a light,
+// flow-free session, so the normal shot stop logic remains unchanged.
+constexpr uint32_t kFalseStartGuardMs = 6000UL;
+constexpr float kFalseStartMaxPeakG = 2.0f;
+constexpr float kFalseStartReturnWeightG = 0.12f;
+constexpr uint32_t kFalseStartReturnHoldMs = 1000UL;
+constexpr float kFalseStartMaxFlowGPerS = 0.05f;
+constexpr float kBleTareRecoverWeightG = 0.20f;
+
 constexpr uint32_t kMinimumShotDurationMs = 8000UL;
 constexpr float kMinimumShotWeightG = 4.0f;
 constexpr float kSignificantGrowthG = 0.20f;
@@ -39,6 +60,16 @@ uint32_t g_armed_at_ms = 0;
 float g_arm_weight_g = 0.0f;
 bool g_start_candidate = false;
 uint32_t g_start_candidate_ms = 0;
+
+struct ArmTrendSample {
+    uint32_t time_ms = 0;
+    float net_weight_g = 0.0f;
+};
+ArmTrendSample g_arm_trend_samples[kStartTrendMaxSamples];
+size_t g_arm_trend_count = 0;
+uint32_t g_arm_trend_last_sample_ms = 0;
+
+uint32_t g_false_start_low_since_ms = 0;
 uint32_t g_started_at_ms = 0;
 uint32_t g_last_growth_ms = 0;
 float g_last_growth_weight_g = 0.0f;
@@ -80,6 +111,104 @@ void clearSamples()
     g_sample_buffer_full = false;
     g_current_flow_g_s = 0.0f;
     g_flow_initialized = false;
+}
+
+void clearArmTrend()
+{
+    g_arm_trend_count = 0;
+    g_arm_trend_last_sample_ms = 0;
+}
+
+void recordArmTrend(uint32_t now_ms, float net_weight_g)
+{
+    if (g_arm_trend_count > 0 &&
+        (now_ms - g_arm_trend_last_sample_ms) < kStartTrendSampleIntervalMs) {
+        return;
+    }
+
+    if (g_arm_trend_count >= kStartTrendMaxSamples) {
+        for (size_t i = 1; i < g_arm_trend_count; ++i) {
+            g_arm_trend_samples[i - 1] = g_arm_trend_samples[i];
+        }
+        --g_arm_trend_count;
+    }
+
+    ArmTrendSample &sample = g_arm_trend_samples[g_arm_trend_count++];
+    sample.time_ms = now_ms;
+    sample.net_weight_g = finiteWeight(net_weight_g);
+    g_arm_trend_last_sample_ms = now_ms;
+}
+
+bool startTrendPlausible(uint32_t now_ms)
+{
+    if (g_arm_trend_count < 2) {
+        return false;
+    }
+
+    size_t first = 0;
+    const uint32_t window_start_ms = now_ms > kStartTrendWindowMs
+                                       ? now_ms - kStartTrendWindowMs
+                                       : 0;
+    while (first + 1 < g_arm_trend_count &&
+           g_arm_trend_samples[first].time_ms < window_start_ms) {
+        ++first;
+    }
+
+    const size_t count = g_arm_trend_count - first;
+    if (count < 2) {
+        return false;
+    }
+
+    const ArmTrendSample &first_sample = g_arm_trend_samples[first];
+    const ArmTrendSample &last_sample = g_arm_trend_samples[g_arm_trend_count - 1];
+    const uint32_t span_ms = last_sample.time_ms - first_sample.time_ms;
+    if (span_ms < kStartTrendMinimumSpanMs) {
+        return false;
+    }
+
+    const float net_growth_g = last_sample.net_weight_g - first_sample.net_weight_g;
+    if (net_growth_g < kStartTrendMinimumGrowthG) {
+        return false;
+    }
+
+    float sum_x = 0.0f;
+    float sum_y = 0.0f;
+    float sum_xx = 0.0f;
+    float sum_xy = 0.0f;
+
+    for (size_t i = first; i < g_arm_trend_count; ++i) {
+        const float x = static_cast<float>(g_arm_trend_samples[i].time_ms -
+                                           first_sample.time_ms) / 1000.0f;
+        const float y = g_arm_trend_samples[i].net_weight_g;
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+
+    const float n = static_cast<float>(count);
+    const float denominator = n * sum_xx - sum_x * sum_x;
+    if (fabsf(denominator) < 0.000001f) {
+        return false;
+    }
+
+    const float slope = (n * sum_xy - sum_x * sum_y) / denominator;
+    if (!isfinite(slope) || slope < kStartTrendMinimumSlopeGPerS) {
+        return false;
+    }
+
+    const float intercept = (sum_y - slope * sum_x) / n;
+    float squared_error_sum = 0.0f;
+    for (size_t i = first; i < g_arm_trend_count; ++i) {
+        const float x = static_cast<float>(g_arm_trend_samples[i].time_ms -
+                                           first_sample.time_ms) / 1000.0f;
+        const float predicted = intercept + slope * x;
+        const float error = g_arm_trend_samples[i].net_weight_g - predicted;
+        squared_error_sum += error * error;
+    }
+
+    const float rmse = sqrtf(squared_error_sum / n);
+    return isfinite(rmse) && rmse <= kStartTrendMaximumRmseG;
 }
 
 float calculateFlowForLatestSample()
@@ -219,6 +348,8 @@ CoffeeShotSessionEvent startSession(uint32_t now_ms, float weight_g)
     g_last_growth_ms = now_ms;
     g_last_growth_weight_g = weight;
     g_start_candidate = false;
+    clearArmTrend();
+    g_false_start_low_since_ms = 0;
     clearSamples();
     recordSample(now_ms, weight, true);
     return CoffeeShotSessionEvent::Started;
@@ -253,6 +384,34 @@ CoffeeShotSessionEvent stopSession(uint32_t now_ms, float weight_g, bool use_las
     return CoffeeShotSessionEvent::Stopped;
 }
 
+CoffeeShotSessionEvent recoverFalseStartUnlocked(uint32_t now_ms, float weight_g)
+{
+    const float weight = finiteWeight(weight_g);
+
+    g_status.state = CoffeeShotSessionState::Armed;
+    g_status.armed = true;
+    g_status.running = false;
+    g_status.completed = false;
+    g_status.elapsed_ms = 0;
+    g_status.current_weight_g = weight;
+    g_status.peak_weight_g = 0.0f;
+    g_status.final_weight_g = 0.0f;
+    g_status.current_flow_g_s = 0.0f;
+
+    g_armed_at_ms = now_ms;
+    g_arm_weight_g = weight;
+    g_start_candidate = false;
+    g_start_candidate_ms = 0;
+    clearArmTrend();
+    g_false_start_low_since_ms = 0;
+    g_started_at_ms = 0;
+    g_last_growth_ms = 0;
+    g_last_growth_weight_g = 0.0f;
+    clearSamples();
+
+    return CoffeeShotSessionEvent::FalseStart;
+}
+
 void cancelArmUnlocked()
 {
     if (g_status.state != CoffeeShotSessionState::Armed) {
@@ -267,6 +426,7 @@ void cancelArmUnlocked()
                        : CoffeeShotSessionState::Idle;
     g_start_candidate = false;
     g_start_candidate_ms = 0;
+    clearArmTrend();
 }
 
 CoffeeShotSessionStatus statusUnlocked(uint32_t now_ms)
@@ -298,6 +458,8 @@ void coffeeShotSessionArm(uint32_t now_ms, float current_weight_g)
     g_arm_weight_g = g_status.current_weight_g;
     g_start_candidate = false;
     g_start_candidate_ms = 0;
+    clearArmTrend();
+    g_false_start_low_since_ms = 0;
 }
 
 void coffeeShotSessionCancelArm()
@@ -324,6 +486,8 @@ CoffeeShotSessionEvent coffeeShotSessionTick(uint32_t now_ms, float weight_g)
         }
 
         const float netWeight = weight - g_arm_weight_g;
+        recordArmTrend(now_ms, netWeight);
+
         if (netWeight < kStartCancelWeightG) {
             g_start_candidate = false;
             return CoffeeShotSessionEvent::None;
@@ -336,7 +500,8 @@ CoffeeShotSessionEvent coffeeShotSessionTick(uint32_t now_ms, float weight_g)
             }
 
             if ((now_ms - g_start_candidate_ms) >= kStartConfirmMs &&
-                netWeight >= kStartConfirmWeightG) {
+                netWeight >= kStartConfirmWeightG &&
+                startTrendPlausible(now_ms)) {
                 return startSession(now_ms, weight);
             }
         }
@@ -357,6 +522,22 @@ CoffeeShotSessionEvent coffeeShotSessionTick(uint32_t now_ms, float weight_g)
     if (weight >= (g_last_growth_weight_g + kSignificantGrowthG)) {
         g_last_growth_weight_g = weight;
         g_last_growth_ms = now_ms;
+    }
+
+    if (g_status.elapsed_ms <= kFalseStartGuardMs &&
+        g_status.peak_weight_g < kFalseStartMaxPeakG &&
+        g_status.current_flow_g_s <= kFalseStartMaxFlowGPerS) {
+        if (weight <= kFalseStartReturnWeightG) {
+            if (g_false_start_low_since_ms == 0) {
+                g_false_start_low_since_ms = now_ms;
+            } else if ((now_ms - g_false_start_low_since_ms) >= kFalseStartReturnHoldMs) {
+                return recoverFalseStartUnlocked(now_ms, weight);
+            }
+        } else {
+            g_false_start_low_since_ms = 0;
+        }
+    } else {
+        g_false_start_low_since_ms = 0;
     }
 
     if (g_status.elapsed_ms >= kMinimumShotDurationMs &&
@@ -384,6 +565,26 @@ CoffeeShotSessionEvent coffeeShotSessionExternalStop(uint32_t now_ms, float weig
     return stopSession(now_ms, weight_g, false);
 }
 
+CoffeeShotSessionEvent coffeeShotSessionRecoverForBleTare(uint32_t now_ms, float weight_g)
+{
+    ShotSessionLock lock;
+
+    if (!g_status.running) {
+        return CoffeeShotSessionEvent::None;
+    }
+
+    const uint32_t elapsed_ms = now_ms - g_started_at_ms;
+    const float weight = finiteWeight(weight_g);
+    if (elapsed_ms > kFalseStartGuardMs ||
+        g_status.peak_weight_g >= kFalseStartMaxPeakG ||
+        weight > kBleTareRecoverWeightG ||
+        g_status.current_flow_g_s > kFalseStartMaxFlowGPerS) {
+        return CoffeeShotSessionEvent::None;
+    }
+
+    return recoverFalseStartUnlocked(now_ms, weight);
+}
+
 void coffeeShotSessionReset()
 {
     ShotSessionLock lock;
@@ -395,6 +596,8 @@ void coffeeShotSessionReset()
     g_arm_weight_g = 0.0f;
     g_start_candidate = false;
     g_start_candidate_ms = 0;
+    clearArmTrend();
+    g_false_start_low_since_ms = 0;
     g_started_at_ms = 0;
     g_last_growth_ms = 0;
     g_last_growth_weight_g = 0.0f;

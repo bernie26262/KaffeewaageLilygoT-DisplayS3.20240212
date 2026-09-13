@@ -20,6 +20,10 @@ enum T4S3WeightDiagEvent : uint32_t {
     T4S3_DIAG_EVENT_SHOT_STOP      = 1u << 9,
     T4S3_DIAG_EVENT_SHOT_ABORT     = 1u << 10,
     T4S3_DIAG_EVENT_SHOT_DISARM    = 1u << 11,
+    T4S3_DIAG_EVENT_BLE_TIMER_START = 1u << 12,
+    T4S3_DIAG_EVENT_BLE_TIMER_STOP  = 1u << 13,
+    T4S3_DIAG_EVENT_BLE_TIMER_RESET = 1u << 14,
+    T4S3_DIAG_EVENT_SHOT_FALSE_START = 1u << 15,
 };
 
 struct T4S3WeightDiagSample {
