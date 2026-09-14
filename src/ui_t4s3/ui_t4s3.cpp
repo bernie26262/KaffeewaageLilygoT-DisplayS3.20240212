@@ -89,7 +89,8 @@ lv_obj_t *timerInfoLabel = nullptr;
 lv_obj_t *flowLabel = nullptr;
 lv_obj_t *timerButtonLabel = nullptr;
 lv_obj_t *targetLabel = nullptr;
-lv_obj_t *clockLabel = nullptr;
+lv_obj_t *clockDateLabel = nullptr;
+lv_obj_t *clockTimeLabel = nullptr;
 lv_obj_t *autodetectButtonLabel = nullptr;
 lv_obj_t *autodetectStateLabel = nullptr;
 lv_obj_t *autodetectLed = nullptr;
@@ -303,7 +304,8 @@ void reset_dynamic_labels()
     flowLabel = nullptr;
     timerButtonLabel = nullptr;
     targetLabel = nullptr;
-    clockLabel = nullptr;
+    clockDateLabel = nullptr;
+    clockTimeLabel = nullptr;
     autodetectButtonLabel = nullptr;
     autodetectStateLabel = nullptr;
     autodetectLed = nullptr;
@@ -1687,7 +1689,18 @@ void update_clock_display()
 {
     char buf[32];
     format_header_datetime(buf, sizeof(buf));
-    set_text(clockLabel, buf);
+
+    // Header format is always "DD.MM.YY  HH:MM:SS". Date and time use separate
+    // fixed-position labels so the changing clock can never move the date.
+    char *separator = strstr(buf, "  ");
+    const char *timeText = "--:--:--";
+    if (separator) {
+        *separator = '\0';
+        timeText = separator + 2;
+    }
+
+    set_text(clockDateLabel, buf);
+    set_text(clockTimeLabel, timeText);
     update_system_time_display();
 }
 
@@ -3270,7 +3283,7 @@ lv_obj_t *create_nav_button(lv_obj_t *parent, const char *text, const char *acti
 {
     lv_obj_t *btn = lv_btn_create(parent);
     style_nav_button(btn, active);
-    lv_obj_set_size(btn, 128, 60);
+    lv_obj_set_size(btn, 133, 60);
     lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(action));
 
     lv_obj_t *label = lv_label_create(btn);
@@ -3412,11 +3425,25 @@ void create_header(lv_obj_t *screen)
     style_label(title, COLOR_GREEN);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 12);
 
-    clockLabel = lv_label_create(screen);
-    lv_obj_set_width(clockLabel, 220);
-    lv_obj_set_style_text_align(clockLabel, LV_TEXT_ALIGN_RIGHT, 0);
-    style_label(clockLabel, COLOR_WHITE);
-    lv_obj_align(clockLabel, LV_ALIGN_TOP_RIGHT, -104, 12);
+    clockDateLabel = lv_label_create(screen);
+    // Date changes only once per day, so keep the natural Montserrat spacing.
+    // It has its own fixed box and therefore cannot move with the seconds.
+    lv_obj_set_width(clockDateLabel, 84);
+    lv_obj_set_style_text_align(clockDateLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_letter_space(clockDateLabel, 0, 0);
+    style_label(clockDateLabel, COLOR_WHITE);
+    lv_obj_set_style_text_font(clockDateLabel, coffee_ui_font(), 0);
+    lv_obj_align(clockDateLabel, LV_ALIGN_TOP_RIGHT, -198, 12);
+
+    clockTimeLabel = lv_label_create(screen);
+    // The time uses normal Montserrat spacing as well. Keeping date and time
+    // in separate fixed boxes prevents the changing seconds from moving the date.
+    lv_obj_set_width(clockTimeLabel, 90);
+    lv_obj_set_style_text_align(clockTimeLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_letter_space(clockTimeLabel, 0, 0);
+    style_label(clockTimeLabel, COLOR_WHITE);
+    lv_obj_set_style_text_font(clockTimeLabel, coffee_ui_font(), 0);
+    lv_obj_align(clockTimeLabel, LV_ALIGN_TOP_RIGHT, -96, 12);
     update_clock_display();
 
     headerBleBadge = lv_obj_create(screen);
@@ -3472,13 +3499,13 @@ void create_nav(lv_obj_t *screen)
     lv_obj_align(navWaage, LV_ALIGN_BOTTOM_LEFT, 18, -16);
 
     lv_obj_t *navStoppuhr = create_nav_button(screen, "Shot", "nav_stoppuhr", activePage == Page::Stoppuhr);
-    lv_obj_align(navStoppuhr, LV_ALIGN_BOTTOM_LEFT, 158, -16);
+    lv_obj_align(navStoppuhr, LV_ALIGN_BOTTOM_LEFT, 164, -16);
 
     const bool dataActive = activePage == Page::Daten ||
                             activePage == Page::DatenMahldaten ||
                             activePage == Page::DatenSystem;
     lv_obj_t *navDaten = create_nav_button(screen, "Daten", "nav_daten", dataActive);
-    lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 298, -16);
+    lv_obj_align(navDaten, LV_ALIGN_BOTTOM_LEFT, 310, -16);
 
     const bool settingsActive = activePage == Page::Settings ||
                                 activePage == Page::SettingsWartung ||
@@ -3487,7 +3514,7 @@ void create_nav(lv_obj_t *screen)
                                 activePage == Page::SettingsWlan ||
                                 activePage == Page::SettingsSystem;
     lv_obj_t *navSettings = create_nav_button(screen, "Settings", "nav_settings", settingsActive);
-    lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 438, -16);
+    lv_obj_align(navSettings, LV_ALIGN_BOTTOM_LEFT, 456, -16);
 }
 
 void create_waage_page(lv_obj_t *screen)
@@ -3568,18 +3595,18 @@ void create_waage_page(lv_obj_t *screen)
 
     lv_obj_t *inputPanel = lv_obj_create(screen);
     style_plain_block(inputPanel, COLOR_BG);
-    lv_obj_set_size(inputPanel, 195, 258);
-    lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
+    lv_obj_set_size(inputPanel, 202, 258);
+    lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -11, 54);
 
-    lv_obj_t *tara = create_button(inputPanel, "Tara", "tara", 175, 78);
-    lv_obj_align(tara, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_t *tara = create_button(inputPanel, "Tara", "tara", 192, 78);
+    lv_obj_align(tara, LV_ALIGN_TOP_RIGHT, 0, 0);
 
-    saveButton = create_button(inputPanel, "Save", "save", 175, 78);
-    lv_obj_align(saveButton, LV_ALIGN_TOP_MID, 0, 90);
+    saveButton = create_button(inputPanel, "Save", "save", 192, 78);
+    lv_obj_align(saveButton, LV_ALIGN_TOP_RIGHT, 0, 90);
     update_save_button_display();
 
-    lv_obj_t *vesselBtn = create_button(inputPanel, vessel_name(currentVesselIndex), "vessel_select", 175, 78);
-    lv_obj_align(vesselBtn, LV_ALIGN_TOP_MID, 0, 180);
+    lv_obj_t *vesselBtn = create_button(inputPanel, vessel_name(currentVesselIndex), "vessel_select", 192, 78);
+    lv_obj_align(vesselBtn, LV_ALIGN_TOP_RIGHT, 0, 180);
 
     // Ein laufender Shot bleibt auch beim Wechsel auf die Waagenseite aktiv.
     // Das Overlay sperrt nur die Single-Dose-Bedienung; die Navigation zur
@@ -3658,18 +3685,18 @@ void create_stoppuhr_page(lv_obj_t *screen)
 
     lv_obj_t *inputPanel = lv_obj_create(screen);
     style_plain_block(inputPanel, COLOR_BG);
-    lv_obj_set_size(inputPanel, 195, 258);
-    lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -18, 54);
+    lv_obj_set_size(inputPanel, 202, 258);
+    lv_obj_align(inputPanel, LV_ALIGN_TOP_RIGHT, -11, 54);
 
-    lv_obj_t *tare = create_button(inputPanel, "Tara", "tara", 175, 70);
-    lv_obj_align(tare, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_t *tare = create_button(inputPanel, "Tara", "tara", 192, 70);
+    lv_obj_align(tare, LV_ALIGN_TOP_RIGHT, 0, 0);
 
     lv_obj_t *remoteTitle = lv_label_create(inputPanel);
     lv_label_set_text(remoteTitle, "Shot-Automatik");
     lv_obj_set_width(remoteTitle, 175);
     lv_obj_set_style_text_align(remoteTitle, LV_TEXT_ALIGN_CENTER, 0);
     style_label(remoteTitle, COLOR_GREEN);
-    lv_obj_align(remoteTitle, LV_ALIGN_TOP_MID, 0, 92);
+    lv_obj_align(remoteTitle, LV_ALIGN_TOP_LEFT, 10, 92);
 
     lv_obj_t *remoteHint = lv_label_create(inputPanel);
     lv_label_set_text(remoteHint, "Tara kommt per BLE\nTimer ab erstem Tropfen");
@@ -3677,14 +3704,14 @@ void create_stoppuhr_page(lv_obj_t *screen)
     lv_label_set_long_mode(remoteHint, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(remoteHint, LV_TEXT_ALIGN_CENTER, 0);
     style_label(remoteHint, COLOR_MUTED);
-    lv_obj_align(remoteHint, LV_ALIGN_TOP_MID, 0, 124);
+    lv_obj_align(remoteHint, LV_ALIGN_TOP_LEFT, 10, 124);
 
     lv_obj_t *autoHint = lv_label_create(inputPanel);
     lv_label_set_text(autoHint, "Autodetect aus");
     lv_obj_set_width(autoHint, 175);
     lv_obj_set_style_text_align(autoHint, LV_TEXT_ALIGN_CENTER, 0);
     style_label(autoHint, COLOR_MUTED);
-    lv_obj_align(autoHint, LV_ALIGN_TOP_MID, 0, 198);
+    lv_obj_align(autoHint, LV_ALIGN_TOP_LEFT, 10, 198);
 
     create_footer(screen,
                   "Shot-Waage - Timer automatisch",
@@ -3695,8 +3722,8 @@ void create_daten_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -3717,7 +3744,7 @@ void create_daten_page(lv_obj_t *screen)
     for (const auto &card : cards) {
         lv_obj_t *btn = lv_btn_create(panel);
         style_button(btn);
-        lv_obj_set_size(btn, 526, 78);
+        lv_obj_set_size(btn, 533, 78);
         lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 0, card.y);
         lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
 
@@ -3728,7 +3755,7 @@ void create_daten_page(lv_obj_t *screen)
 
         lv_obj_t *line1 = lv_label_create(btn);
         lv_label_set_text(line1, card.line1);
-        lv_obj_set_width(line1, 470);
+        lv_obj_set_width(line1, 477);
         lv_label_set_long_mode(line1, LV_LABEL_LONG_DOT);
         style_label(line1, COLOR_WHITE);
         lv_obj_align(line1, LV_ALIGN_TOP_LEFT, 0, 28);
@@ -3816,8 +3843,8 @@ void create_daten_mahldaten_page(lv_obj_t *screen)
 
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -3827,7 +3854,7 @@ void create_daten_mahldaten_page(lv_obj_t *screen)
 
     lv_obj_t *shotsPanel = lv_obj_create(panel);
     style_panel(shotsPanel);
-    lv_obj_set_size(shotsPanel, 260, 174);
+    lv_obj_set_size(shotsPanel, 264, 174);
     lv_obj_align(shotsPanel, LV_ALIGN_TOP_LEFT, 0, 58);
     lv_obj_clear_flag(shotsPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(shotsPanel, LV_SCROLLBAR_MODE_OFF);
@@ -3841,7 +3868,7 @@ void create_daten_mahldaten_page(lv_obj_t *screen)
 
     lv_obj_t *gramsPanel = lv_obj_create(panel);
     style_panel(gramsPanel);
-    lv_obj_set_size(gramsPanel, 260, 174);
+    lv_obj_set_size(gramsPanel, 264, 174);
     lv_obj_align(gramsPanel, LV_ALIGN_TOP_RIGHT, 0, 58);
     lv_obj_clear_flag(gramsPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(gramsPanel, LV_SCROLLBAR_MODE_OFF);
@@ -3862,8 +3889,8 @@ void create_daten_system_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -3985,8 +4012,8 @@ void create_settings_wlan_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -4022,8 +4049,8 @@ void create_settings_totals_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -4047,7 +4074,7 @@ void create_settings_totals_page(lv_obj_t *screen)
     for (const auto &card : cards) {
         lv_obj_t *btn = lv_btn_create(panel);
         style_button(btn);
-        lv_obj_set_size(btn, 526, 78);
+        lv_obj_set_size(btn, 533, 78);
         lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 0, card.y);
         lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
 
@@ -4071,8 +4098,8 @@ void create_settings_waage_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -4092,14 +4119,14 @@ void create_settings_waage_page(lv_obj_t *screen)
 
     const ScaleCard cards[] = {
         {"Kalibrierung", "bekanntes Gewicht", "Waage abgleichen", "scale_calibration", 0, 42},
-        {"Gefäße verwalten", "anzeigen / löschen", "0/3 eingemessen", "vessels_manage", 274, 42},
+        {"Gefäße verwalten", "anzeigen / löschen", "0/3 eingemessen", "vessels_manage", 277, 42},
         {"Gesamtwerte", "Shots und Mahlgut", "korrigieren", "totals_edit", 0, 142},
     };
 
     for (const auto &card : cards) {
         lv_obj_t *btn = lv_btn_create(panel);
         style_button(btn);
-        lv_obj_set_size(btn, 260, 88);
+        lv_obj_set_size(btn, 264, 88);
         lv_obj_align(btn, LV_ALIGN_TOP_LEFT, card.x, card.y);
         lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
 
@@ -4110,14 +4137,14 @@ void create_settings_waage_page(lv_obj_t *screen)
 
         lv_obj_t *line1 = lv_label_create(btn);
         lv_label_set_text(line1, card.line1);
-        lv_obj_set_width(line1, 220);
+        lv_obj_set_width(line1, 224);
         lv_label_set_long_mode(line1, LV_LABEL_LONG_DOT);
         style_label(line1, COLOR_WHITE);
         lv_obj_align(line1, LV_ALIGN_TOP_LEFT, 0, 30);
 
         lv_obj_t *line2 = lv_label_create(btn);
         lv_label_set_text(line2, card.line2);
-        lv_obj_set_width(line2, 220);
+        lv_obj_set_width(line2, 224);
         lv_label_set_long_mode(line2, LV_LABEL_LONG_DOT);
         style_label(line2, COLOR_MUTED);
         lv_obj_align(line2, LV_ALIGN_TOP_LEFT, 0, 54);
@@ -4138,8 +4165,8 @@ void create_settings_wartung_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -4203,8 +4230,8 @@ void create_settings_system_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -4265,8 +4292,8 @@ void create_settings_page(lv_obj_t *screen)
 {
     lv_obj_t *panel = lv_obj_create(screen);
     style_panel(panel);
-    lv_obj_set_size(panel, 564, 258);
-    lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 54);
+    lv_obj_set_size(panel, 571, 258);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, 18, 54);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_OFF);
 
@@ -4283,15 +4310,15 @@ void create_settings_page(lv_obj_t *screen)
 
     const SettingsCard cards[] = {
         {"Wartung", "Reinigung / Filterwechsel", "Zeit bis oder seit Wartung", "settings_wartung", 0, 36},
-        {"Waage / Gefäße", "Kalibrieren, einmessen", "Gesamtwerte korrigieren", "settings_waage", 274, 36},
-        {"WLAN", "SSID, IP, Signal", "später Setup-WLAN", "settings_wlan", 0, 138},
-        {"System", "Timeout, Neustart", "Logs / Diagnose", "settings_system", 274, 138},
+        {"Waage / Gefäße", "Kalibrieren, einmessen", "Gesamtwerte korrigieren", "settings_waage", 277, 36},
+        {"WLAN", "SSID, IP, Signal", "Setup-WLAN", "settings_wlan", 0, 138},
+        {"System", "Timeout, Neustart", "Logs / Diagnose", "settings_system", 277, 138},
     };
 
     for (const auto &card : cards) {
         lv_obj_t *btn = lv_btn_create(panel);
         style_button(btn);
-        lv_obj_set_size(btn, 260, 88);
+        lv_obj_set_size(btn, 264, 88);
         lv_obj_align(btn, LV_ALIGN_TOP_LEFT, card.x, card.y);
         lv_obj_add_event_cb(btn, button_event_cb, LV_EVENT_CLICKED, const_cast<char *>(card.action));
 
@@ -4302,14 +4329,14 @@ void create_settings_page(lv_obj_t *screen)
 
         lv_obj_t *line1 = lv_label_create(btn);
         lv_label_set_text(line1, card.line1);
-        lv_obj_set_width(line1, 220);
+        lv_obj_set_width(line1, 224);
         lv_label_set_long_mode(line1, LV_LABEL_LONG_DOT);
         style_label(line1, COLOR_WHITE);
         lv_obj_align(line1, LV_ALIGN_TOP_LEFT, 0, 30);
 
         lv_obj_t *line2 = lv_label_create(btn);
         lv_label_set_text(line2, card.line2);
-        lv_obj_set_width(line2, 220);
+        lv_obj_set_width(line2, 224);
         lv_label_set_long_mode(line2, LV_LABEL_LONG_DOT);
         style_label(line2, COLOR_MUTED);
         lv_obj_align(line2, LV_ALIGN_TOP_LEFT, 0, 54);
