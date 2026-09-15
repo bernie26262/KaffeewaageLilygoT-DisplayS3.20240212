@@ -325,7 +325,9 @@ const char* coffeeWifiSetupApSsid()
 bool coffeeWifiStartSetupAp()
 {
   WiFi.mode(WIFI_AP_STA);
-  WiFi.setSleep(false);
+
+  // WiFi sleep is already disabled by coffeeWifiBegin(). Do not re-apply
+  // WiFi.setSleep(false) directly after switching into AP+STA mode.
   const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
   setupApActive = ok;
   return ok;
@@ -342,7 +344,6 @@ bool coffeeWifiStopSetupAp()
   delay(50);
   setupApActive = false;
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
   return true;
 }
 
