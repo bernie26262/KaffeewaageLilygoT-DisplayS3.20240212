@@ -138,6 +138,7 @@ lv_obj_t *systemUptimeLabel = nullptr;
 lv_obj_t *systemDataSsidLabel = nullptr;
 lv_obj_t *systemDataIpLabel = nullptr;
 lv_obj_t *systemDataSignalLabel = nullptr;
+lv_obj_t *headerSetupApBadge = nullptr;
 lv_obj_t *headerBleBadge = nullptr;
 lv_obj_t *headerBleIconLines[3] = {nullptr, nullptr, nullptr};
 lv_obj_t *systemHx711RawLabel = nullptr;
@@ -149,6 +150,8 @@ lv_obj_t *wlanIpLabel = nullptr;
 lv_obj_t *wlanSignalLabel = nullptr;
 lv_obj_t *wlanSetupApLabel = nullptr;
 lv_obj_t *wlanWebUiLabel = nullptr;
+lv_obj_t *wlanSetupButton = nullptr;
+lv_obj_t *wlanSetupButtonLabel = nullptr;
 lv_obj_t *wlanQualityBars[4] = {nullptr, nullptr, nullptr, nullptr};
 lv_obj_t *maintenanceWarningButton = nullptr;
 lv_obj_t *saveButton = nullptr;
@@ -335,6 +338,7 @@ void reset_dynamic_labels()
     systemDataSsidLabel = nullptr;
     systemDataIpLabel = nullptr;
     systemDataSignalLabel = nullptr;
+    headerSetupApBadge = nullptr;
     headerBleBadge = nullptr;
     headerBleIconLines[0] = nullptr;
     headerBleIconLines[1] = nullptr;
@@ -360,6 +364,8 @@ void reset_dynamic_labels()
     wlanSignalLabel = nullptr;
     wlanSetupApLabel = nullptr;
     wlanWebUiLabel = nullptr;
+    wlanSetupButton = nullptr;
+    wlanSetupButtonLabel = nullptr;
     for (uint8_t i = 0; i < 4; ++i) {
         headerWifiBars[i] = nullptr;
         wlanQualityBars[i] = nullptr;
@@ -2767,8 +2773,15 @@ static void button_event_cb(lv_event_t *event)
         close_totals_edit_overlay(true);
     } else if (strcmp(action, "settings_wlan") == 0) {
         navigate_to(Page::SettingsWlan);
-    } else if (strcmp(action, "wlan_start_setup") == 0) {
-        if (t4s3_wifi_start_setup_ap()) {
+    } else if (strcmp(action, "wlan_setup_toggle") == 0) {
+        if (coffeeWifiSetupApActive()) {
+            if (coffeeWifiStopSetupAp()) {
+                update_wlan_page_display();
+                update_status("Setup-WLAN gestoppt");
+            } else {
+                update_status("Setup-AP konnte nicht gestoppt werden");
+            }
+        } else if (t4s3_wifi_start_setup_ap()) {
             update_wlan_page_display();
             open_wlan_setup_overlay(coffeeWifiSetupCredentialsSavedPendingRestart());
         } else {
@@ -3375,6 +3388,17 @@ void update_header_wifi_display()
     T4S3WifiStatus wifi;
     t4s3_wifi_get_status(wifi);
     update_wifi_bars(headerWifiBars, wifi.qualityBars);
+
+    if (headerSetupApBadge && !lv_obj_is_valid(headerSetupApBadge)) {
+        headerSetupApBadge = nullptr;
+    }
+    if (headerSetupApBadge) {
+        if (wifi.setupApActive) {
+            lv_obj_clear_flag(headerSetupApBadge, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(headerSetupApBadge, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 
 void update_header_ble_display()
@@ -3413,38 +3437,64 @@ void update_wlan_page_display()
     set_text(wlanSsidLabel, wifi.ssid);
     set_text(wlanIpLabel, wifi.ip);
     set_text(wlanSignalLabel, wifi.signal);
-    set_text(wlanSetupApLabel, wifi.setupApSsid);
+    set_text(wlanSetupApLabel, wifi.setupApActive ? wifi.setupApSsid : "aus");
     set_text(wlanWebUiLabel, wifi.webUiAddress);
     update_wifi_bars(wlanQualityBars, wifi.qualityBars);
+
+    if (wlanSetupButton && !lv_obj_is_valid(wlanSetupButton)) {
+        wlanSetupButton = nullptr;
+        wlanSetupButtonLabel = nullptr;
+    }
+    if (wlanSetupButtonLabel && lv_obj_is_valid(wlanSetupButtonLabel)) {
+        lv_label_set_text(wlanSetupButtonLabel,
+                          wifi.setupApActive ? "Setup-AP stoppen" : "Setup-AP starten");
+    }
 }
 
 void create_header(lv_obj_t *screen)
 {
-    lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "Single-Dose-Waage");
-    style_label(title, COLOR_GREEN);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 18, 12);
-
     clockDateLabel = lv_label_create(screen);
     // Date changes only once per day, so keep the natural Montserrat spacing.
     // It has its own fixed box and therefore cannot move with the seconds.
     lv_obj_set_width(clockDateLabel, 84);
-    lv_obj_set_style_text_align(clockDateLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(clockDateLabel, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_text_letter_space(clockDateLabel, 0, 0);
     style_label(clockDateLabel, COLOR_WHITE);
     lv_obj_set_style_text_font(clockDateLabel, coffee_ui_font(), 0);
-    lv_obj_align(clockDateLabel, LV_ALIGN_TOP_RIGHT, -198, 12);
+    lv_obj_align(clockDateLabel, LV_ALIGN_TOP_LEFT, 18, 12);
 
     clockTimeLabel = lv_label_create(screen);
     // The time uses normal Montserrat spacing as well. Keeping date and time
     // in separate fixed boxes prevents the changing seconds from moving the date.
     lv_obj_set_width(clockTimeLabel, 90);
-    lv_obj_set_style_text_align(clockTimeLabel, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_align(clockTimeLabel, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_set_style_text_letter_space(clockTimeLabel, 0, 0);
     style_label(clockTimeLabel, COLOR_WHITE);
     lv_obj_set_style_text_font(clockTimeLabel, coffee_ui_font(), 0);
-    lv_obj_align(clockTimeLabel, LV_ALIGN_TOP_RIGHT, -96, 12);
+    lv_obj_align(clockTimeLabel, LV_ALIGN_TOP_LEFT, 112, 12);
     update_clock_display();
+
+    // Setup-AP indicator: visible on every HMI page while Waagen-Setup is active.
+    // Date/time form a left-aligned group; AP, Bluetooth and WLAN form an
+    // evenly spaced status group on the right.
+    headerSetupApBadge = lv_obj_create(screen);
+    lv_obj_clear_flag(headerSetupApBadge, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(headerSetupApBadge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(headerSetupApBadge, 34, 22);
+    lv_obj_set_style_bg_color(headerSetupApBadge, lv_color_hex(COLOR_GREEN_DARK), 0);
+    lv_obj_set_style_bg_opa(headerSetupApBadge, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(headerSetupApBadge, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_border_width(headerSetupApBadge, 1, 0);
+    lv_obj_set_style_radius(headerSetupApBadge, 7, 0);
+    lv_obj_set_style_pad_all(headerSetupApBadge, 0, 0);
+    lv_obj_align(headerSetupApBadge, LV_ALIGN_TOP_RIGHT, -96, 9);
+
+    lv_obj_t *setupApBadgeLabel = lv_label_create(headerSetupApBadge);
+    lv_label_set_text(setupApBadgeLabel, "AP");
+    style_label(setupApBadgeLabel, COLOR_WHITE);
+    lv_obj_set_style_text_font(setupApBadgeLabel, coffee_ui_font(), 0);
+    lv_obj_center(setupApBadgeLabel);
+    lv_obj_add_flag(headerSetupApBadge, LV_OBJ_FLAG_HIDDEN);
 
     headerBleBadge = lv_obj_create(screen);
     lv_obj_clear_flag(headerBleBadge, LV_OBJ_FLAG_SCROLLABLE);
@@ -3452,7 +3502,7 @@ void create_header(lv_obj_t *screen)
     lv_obj_set_style_bg_opa(headerBleBadge, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(headerBleBadge, 0, 0);
     lv_obj_set_style_pad_all(headerBleBadge, 0, 0);
-    lv_obj_align(headerBleBadge, LV_ALIGN_TOP_RIGHT, -62, 9);
+    lv_obj_align(headerBleBadge, LV_ALIGN_TOP_RIGHT, -56, 9);
 
     headerBleIconLines[0] = lv_line_create(headerBleBadge);
     lv_line_set_points(headerBleIconLines[0], HEADER_BLE_SPINE_POINTS,
@@ -4035,8 +4085,9 @@ void create_settings_wlan_page(lv_obj_t *screen)
     create_wlan_info_row(panel, "Setup-AP:", "Waagen-Setup", 168, &wlanSetupApLabel);
     create_wlan_info_row(panel, "WebUI:", "192.168.4.1", 200, &wlanWebUiLabel);
 
-    lv_obj_t *setupBtn = create_button(panel, "Setup-AP starten", "wlan_start_setup", 150, 52);
-    lv_obj_align(setupBtn, LV_ALIGN_TOP_RIGHT, 0, 86);
+    wlanSetupButton = create_button(panel, "Setup-AP starten", "wlan_setup_toggle", 150, 52);
+    wlanSetupButtonLabel = lv_obj_get_child(wlanSetupButton, 0);
+    lv_obj_align(wlanSetupButton, LV_ALIGN_TOP_RIGHT, 0, 86);
 
     update_wlan_page_display();
 

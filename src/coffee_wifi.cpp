@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_attr.h>
+#include <esp_system.h>
 
 #include "wifi_secrets.h"
 
@@ -12,6 +14,23 @@ constexpr const char* WIFI_PREF_KEY_SSID = "ssid";
 constexpr const char* WIFI_PREF_KEY_PASS = "pass";
 constexpr const char* WIFI_PREF_KEY_ACTIVE = "active";
 constexpr const char* WIFI_SETUP_AP_SSID = "Waagen-Setup";
+constexpr uint32_t SETUP_AP_DIAG_MAGIC = 0x57494649UL;  // "WIFI"
+
+enum class SetupApDiagPhase : uint8_t {
+  None = 0,
+  Requested = 1,
+  ModeApSta = 2,
+  ModeApStaDone = 3,
+  SleepOff = 4,
+  SleepOffDone = 5,
+  SoftApStart = 6,
+  SoftApOk = 7,
+  SoftApFailed = 8
+};
+
+RTC_NOINIT_ATTR volatile uint32_t setupApDiagMagicRtc;
+RTC_NOINIT_ATTR volatile uint8_t setupApDiagPhaseRtc;
+RTC_NOINIT_ATTR volatile uint8_t setupApDiagInterruptedRtc;
 
 CoffeeWifiCredentials activeCredentials;
 bool activeCredentialsLoaded = false;
@@ -26,6 +45,49 @@ uint32_t storedCredentialsRevision = 0;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
 uint8_t activeCredentialsDisconnects = 0;
+
+void ensureSetupApDiagRtcInitialized()
+{
+  if (setupApDiagMagicRtc == SETUP_AP_DIAG_MAGIC) {
+    return;
+  }
+
+  setupApDiagMagicRtc = SETUP_AP_DIAG_MAGIC;
+  setupApDiagPhaseRtc = static_cast<uint8_t>(SetupApDiagPhase::None);
+  setupApDiagInterruptedRtc = 0;
+}
+
+void markSetupApDiag(SetupApDiagPhase phase, bool interrupted)
+{
+  ensureSetupApDiagRtcInitialized();
+  setupApDiagPhaseRtc = static_cast<uint8_t>(phase);
+  setupApDiagInterruptedRtc = interrupted ? 1 : 0;
+}
+
+const char* setupApDiagPhaseLabel(uint8_t phase)
+{
+  switch (static_cast<SetupApDiagPhase>(phase)) {
+    case SetupApDiagPhase::Requested:
+      return "Start angefordert";
+    case SetupApDiagPhase::ModeApSta:
+      return "vor WiFi.mode(WIFI_AP_STA)";
+    case SetupApDiagPhase::ModeApStaDone:
+      return "WiFi.mode(WIFI_AP_STA) abgeschlossen";
+    case SetupApDiagPhase::SleepOff:
+      return "vor WiFi.setSleep(false)";
+    case SetupApDiagPhase::SleepOffDone:
+      return "WiFi.setSleep(false) abgeschlossen";
+    case SetupApDiagPhase::SoftApStart:
+      return "vor WiFi.softAP()";
+    case SetupApDiagPhase::SoftApOk:
+      return "Setup-AP erfolgreich gestartet";
+    case SetupApDiagPhase::SoftApFailed:
+      return "WiFi.softAP() fehlgeschlagen";
+    case SetupApDiagPhase::None:
+    default:
+      return "kein Setup-AP-Versuch gespeichert";
+  }
+}
 
 void resetActiveConnectionAttempt()
 {
@@ -317,6 +379,48 @@ bool coffeeWifiUsingStoredCredentials()
   return ensureActiveCredentials().fromPreferences;
 }
 
+String coffeeWifiResetReasonLabel()
+{
+  const int reason = static_cast<int>(esp_reset_reason());
+  switch (reason) {
+    case 0:
+      return "unbekannt";
+    case 1:
+      return "Power-On";
+    case 2:
+      return "externer Reset";
+    case 3:
+      return "Software-Neustart";
+    case 4:
+      return "Panic / Exception";
+    case 5:
+      return "Interrupt-Watchdog";
+    case 6:
+      return "Task-Watchdog";
+    case 7:
+      return "Watchdog";
+    case 8:
+      return "Deep-Sleep";
+    case 9:
+      return "Brownout";
+    case 10:
+      return "SDIO-Reset";
+    default:
+      return String("anderer Reset (") + String(reason) + ")";
+  }
+}
+
+String coffeeWifiSetupApDiagPhaseLabel()
+{
+  ensureSetupApDiagRtcInitialized();
+  return String(setupApDiagPhaseLabel(setupApDiagPhaseRtc));
+}
+
+bool coffeeWifiSetupApDiagInterrupted()
+{
+  ensureSetupApDiagRtcInitialized();
+  return setupApDiagInterruptedRtc != 0;
+}
 
 const char* coffeeWifiSetupApSsid()
 {
@@ -326,10 +430,20 @@ const char* coffeeWifiSetupApSsid()
 bool coffeeWifiStartSetupAp()
 {
   setupCredentialsSavedPendingRestart = false;
+
+  markSetupApDiag(SetupApDiagPhase::Requested, true);
+  markSetupApDiag(SetupApDiagPhase::ModeApSta, true);
   WiFi.mode(WIFI_AP_STA);
-  WiFi.setSleep(false);
+  markSetupApDiag(SetupApDiagPhase::ModeApStaDone, true);
+
+  // WiFi sleep is already disabled during the normal STA startup in
+  // coffeeWifiBegin(). Re-applying WiFi.setSleep(false) immediately after
+  // switching from WIFI_STA to WIFI_AP_STA triggers a panic on the tested
+  // ESP32-S3/Arduino-ESP32 2.0.17 setup, so do not touch the PS state here.
+  markSetupApDiag(SetupApDiagPhase::SoftApStart, true);
   const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
   setupApActive = ok;
+  markSetupApDiag(ok ? SetupApDiagPhase::SoftApOk : SetupApDiagPhase::SoftApFailed, false);
   return ok;
 }
 
@@ -344,7 +458,6 @@ bool coffeeWifiStopSetupAp()
   delay(50);
   setupApActive = false;
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
   return true;
 }
 
