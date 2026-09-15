@@ -28,7 +28,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260626b">
+  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260915wifi1">
 </head>
 <body>
 <main>
@@ -266,6 +266,10 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <div>Setup-WLAN: <b id="wifiSetupApStatus">aus</b></div>
         <div>Setup-Adresse: <b class="mono" id="wifiSetupApAddress">---</b></div>
       </div>
+      <div id="wifiSetupApActiveHint" class="wifi-setup-active" role="status" aria-live="polite">
+        <span class="wifi-setup-active-dot" aria-hidden="true"></span>
+        <span id="wifiSetupApActiveHintText">Setup-WLAN aktiv</span>
+      </div>
       <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, nutzt die Waage automatisch wieder das Standard-WLAN aus der Firmware.</div>
       <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
         <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
@@ -281,7 +285,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="deactivateWifiCredentials" class="secondary">Standard-WLAN verwenden</button>
         <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
         <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
-        <button id="stopWifiSetupAp" class="secondary">Setup-WLAN stoppen</button>
+        <button id="stopWifiSetupAp" class="secondary" disabled>Setup-WLAN stoppen</button>
       </div>
     </section>
   </div>
@@ -357,9 +361,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=legacy-shot-20260626b"></script>
-<script src="/coffee_render.js?v=legacy-shot-20260626b"></script>
-<script src="/coffee_events.js?v=legacy-shot-20260626b"></script>
+<script src="/coffee_core.js?v=legacy-shot-20260915wifi1"></script>
+<script src="/coffee_render.js?v=legacy-shot-20260915wifi1"></script>
+<script src="/coffee_events.js?v=legacy-shot-20260915wifi1"></script>
 </body>
 </html>)rawliteral";
 
@@ -640,6 +644,16 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .wifi-form label { display: grid; gap: 5px; color: var(--muted); font-size: .9rem; }
     .wifi-form input { width: 100%; box-sizing: border-box; }
     .wifi-form-note { color: var(--muted); font-size: .86rem; line-height: 1.35; }
+    .wifi-setup-active {
+      display: none; align-items: center; gap: 9px; margin-top: 12px; padding: 10px 12px;
+      border: 1px solid rgba(85,195,66,.58); border-radius: 14px;
+      background: rgba(85,195,66,.12); color: #bbf7d0; font-weight: 750;
+    }
+    .wifi-setup-active.show { display: flex; }
+    .wifi-setup-active-dot {
+      width: 10px; height: 10px; border-radius: 999px; background: #22c55e;
+      box-shadow: 0 0 10px rgba(34,197,94,.55); flex: 0 0 10px;
+    }
     .bt-icon {
       width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
       border-radius: 999px; border: 1px solid rgba(148,163,184,.28); background: rgba(15,23,42,.65);
@@ -1906,8 +1920,13 @@ function renderStatsAndSystem(s) {
   setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
   setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
   setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
-  setText('wifiSetupApStatus', s.system?.wifi_setup_ap_active ? 'an' : 'aus');
-  setText('wifiSetupApAddress', s.system?.wifi_setup_ap_active ? `WLAN: ${s.system?.wifi_setup_ap_ssid || 'Waagen-Setup'} / ${s.system?.wifi_setup_ap_ip || '192.168.4.1'}` : '---');
+  const setupApActive = !!s.system?.wifi_setup_ap_active;
+  const setupApSsid = s.system?.wifi_setup_ap_ssid || 'Waagen-Setup';
+  const setupApIp = s.system?.wifi_setup_ap_ip || '192.168.4.1';
+  setText('wifiSetupApStatus', setupApActive ? 'an' : 'aus');
+  setText('wifiSetupApAddress', setupApActive ? `WLAN: ${setupApSsid} / ${setupApIp}` : '---');
+  updateWifiSetupApIndicator(setupApActive, setupApSsid, setupApIp);
+  updateWifiSetupApButtons(setupApActive);
 
   const storedSsid = s.system?.wifi_stored_ssid || '';
   const storedPassword = !!s.system?.wifi_stored_password;
@@ -2137,7 +2156,28 @@ async function setWifiCredentialsActive(active) {
   }
 }
 
+function updateWifiSetupApIndicator(active, ssid = 'Waagen-Setup', ip = '192.168.4.1') {
+  const hint = el('wifiSetupApActiveHint');
+  if (hint) hint.classList.toggle('show', !!active);
+  if (active) {
+    setText('wifiSetupApActiveHintText', `Setup-WLAN aktiv · ${ssid} · ${ip}`);
+  }
+}
+
+function updateWifiSetupApButtons(active) {
+  const startButton = el('startWifiSetupAp');
+  const stopButton = el('stopWifiSetupAp');
+  if (startButton) startButton.disabled = !!active;
+  if (stopButton) stopButton.disabled = !active;
+}
+
 async function setWifiSetupApEnabled(enabled) {
+  const activeBefore = !enabled;
+  const startButton = el('startWifiSetupAp');
+  const stopButton = el('stopWifiSetupAp');
+  if (startButton) startButton.disabled = true;
+  if (stopButton) stopButton.disabled = true;
+
   try {
     addLog(enabled ? 'Setup-WLAN starten …' : 'Setup-WLAN stoppen …');
     const response = await fetch(enabled ? '/api/wifi/setup-ap/start' : '/api/wifi/setup-ap/stop', { method: 'POST' });
@@ -2145,6 +2185,7 @@ async function setWifiSetupApEnabled(enabled) {
       const message = `Fehler beim ${enabled ? 'Starten' : 'Stoppen'} des Setup-WLANs: HTTP ${response.status}`;
       addLog(message);
       openInfoOverlay('Setup-WLAN Fehler', message);
+      updateWifiSetupApButtons(activeBefore);
       return;
     }
     const data = await response.json();
@@ -2154,10 +2195,15 @@ async function setWifiSetupApEnabled(enabled) {
       const ip = data.ip || '192.168.4.1';
       setText('wifiSetupApStatus', data.active ? 'an' : 'aus');
       setText('wifiSetupApAddress', data.active ? `WLAN: ${ssid} / ${ip}` : '---');
+      updateWifiSetupApIndicator(data.active, ssid, ip);
+      updateWifiSetupApButtons(data.active);
       if (data.active) {
         openInfoOverlay('Setup-WLAN gestartet', `WLAN: ${ssid}
 Adresse: ${ip}
-Normale WebUI bleibt im Heim-WLAN erreichbar.`);
+Normale WebUI bleibt im Heim-WLAN erreichbar.
+
+Hinweis: Das Schließen dieses Fensters beendet das Setup-WLAN nicht.
+Zum Beenden bitte „Setup-WLAN stoppen“ verwenden.`);
       } else {
         openInfoOverlay('Setup-WLAN gestoppt', 'Das Setup-WLAN wurde beendet. Die normale WebUI bleibt im Heim-WLAN erreichbar.');
       }
@@ -2166,6 +2212,7 @@ Normale WebUI bleibt im Heim-WLAN erreichbar.`);
     const message = enabled ? 'Fehler beim Starten des Setup-WLANs' : 'Fehler beim Stoppen des Setup-WLANs';
     addLog(message);
     openInfoOverlay('Setup-WLAN Fehler', message);
+    updateWifiSetupApButtons(activeBefore);
   }
 }
 

@@ -347,7 +347,7 @@ const String headerOfPageID[] =
   "Anzahl Shots             ",   // 21
   "WLAN / Netzwerk          ",   // 22
   "Gefaess messen 4/4       ",   // 23
-  "WLAN neu verbinden       ",   // 24
+  "WLAN-Setup aktiv         ",   // 24
   "WLAN-Setup aktiv         ",   // 25
   "WLAN gespeichert         "    // 26
 };
@@ -378,7 +378,7 @@ String menuItemsOfPage[HMI_PAGE_COUNT][4] =
   {"Gesamt               ",      "Seit Reinigung                    ",  "OK                         ",    "                            "},      //21
   {"SSID:                 ",     "                           ",        "IP:                         ",       "Setup starten          "},      //22
   {gefaess[selectedGefaess],     "Gefaess gemessen        ",            "OK                         ",    "                            "},      //23
-  {"Mit WLAN Waagen-      ",      "Setup verbinden          ",             "IP: 192.168.4.1        ",       "aufrufen                "},      //24
+  {"WLAN-Setup aktiv        ",      "WLAN: Waagen-Setup     ",             "Browser:192.168.4.1   ",       "Zurueck/Home: stoppen  "},      //24
   {"Mit Handy verbinden:",       "WLAN: Waagen-Setup     ",             "Browser: 192.168.4.1   ",       "Weiter                 "},      //25
   {"WLAN-Daten gespeich.",       "Neustart noetig        ",             "Neues WLAN aktiv       ",       "Beenden + Neustart     "},      //26
   
@@ -474,6 +474,8 @@ static bool oldBleStartedDisplayed = false;
 static bool oldBleAdvertisingDisplayed = false;
 static bool oldBleConnectedDisplayed = false;
 static bool bleHeaderStatusInitialised = false;
+static bool oldSetupApActiveDisplayed = false;
+static bool setupApHeaderStatusInitialised = false;
 
 static uint32_t oldShotDisplayTenths = UINT32_MAX;
 static int32_t oldShotDisplayWeightTenths = INT32_MIN;
@@ -3345,6 +3347,28 @@ void RefreshTFTWLANDisconnected()
    tft.drawBitmap(284, 0,wlandisconnected16x16, 16, 16, TFT_WHITE, TFT_BLACK);
 }
 
+void RefreshTFTSetupApStatus()
+{
+  const bool active = coffeeWifiSetupApActive();
+  constexpr int setupApX = 192;
+  constexpr int setupApWidth = 28;
+
+  // Kleines Statusfeld zwischen Seitentitel und "Auto". Die komplette
+  // Headerhoehe wird geloescht, damit nach dem Stop keine Glyphenreste bleiben.
+  tft.fillRect(setupApX, 0, setupApWidth, 24, TFT_BLACK);
+
+  if (active) {
+    tft.setTextDatum(TL_DATUM);
+    tft.setFreeFont(FSS9);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    tft.drawString("AP", setupApX + 2, 2, GFXFF);
+  }
+
+  oldSetupApActiveDisplayed = active;
+  setupApHeaderStatusInitialised = true;
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+}
+
 void stringifySetWeight()
 {
     dtostrf(setWeightST[selectedST],7,1,setWeightSTAsChar);
@@ -3560,16 +3584,17 @@ static void updateHmiWifiMenuItems()
 
     menuItemsOfPage[PAGE_WIFI_NETWORK][0] = fitHmiText("SSID:");
     menuItemsOfPage[PAGE_WIFI_NETWORK][1] = fitHmiText(ssid);
-    menuItemsOfPage[PAGE_WIFI_NETWORK][2] = fitHmiText("IP: " + ip);
-    menuItemsOfPage[PAGE_WIFI_NETWORK][3] = fitHmiText("Setup starten");
+    const bool setupApActive = coffeeWifiSetupApActive();
+    menuItemsOfPage[PAGE_WIFI_NETWORK][2] = fitHmiText(setupApActive ? "AP: 192.168.4.1" : "IP: " + ip);
+    menuItemsOfPage[PAGE_WIFI_NETWORK][3] = fitHmiText(setupApActive ? "Setup stoppen" : "Setup starten");
     return;
   }
 
   if (pageID == PAGE_WIFI_SETUP_START) {
-    menuItemsOfPage[PAGE_WIFI_SETUP_START][0] = fitHmiText("Mit WLAN Waagen-");
-    menuItemsOfPage[PAGE_WIFI_SETUP_START][1] = fitHmiText("Setup verbinden");
-    menuItemsOfPage[PAGE_WIFI_SETUP_START][2] = fitHmiText("IP: 192.168.4.1");
-    menuItemsOfPage[PAGE_WIFI_SETUP_START][3] = fitHmiText("aufrufen");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][0] = fitHmiText("WLAN-Setup aktiv");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][1] = fitHmiText("WLAN: Waagen-Setup");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][2] = fitHmiText("Browser:192.168.4.1");
+    menuItemsOfPage[PAGE_WIFI_SETUP_START][3] = fitHmiText("Zurueck/Home: stoppen");
     return;
   }
 
@@ -3600,6 +3625,17 @@ static void checkHmiWifiSetupSaved()
       coffeeWifiStoredCredentialsAreActive()) {
     hmiWifiSetupWaitingForSave = false;
     pageID = PAGE_WIFI_SETUP_SAVED;
+    newPageID = PAGE_WIFI_SETUP_SAVED;
+    pageEntered = true;
+    return;
+  }
+
+  // The setup AP can also be stopped from the WebUI. Do not leave the HMI
+  // on the setup instructions when the AP is no longer available.
+  if (!coffeeWifiSetupApActive()) {
+    hmiWifiSetupWaitingForSave = false;
+    pageID = PAGE_WIFI_NETWORK;
+    newPageID = PAGE_WIFI_NETWORK;
     pageEntered = true;
   }
 }
@@ -3809,6 +3845,7 @@ void RefreshTFTDisplay()
     tft.drawString(String("         "),258,2,GFXFF);
   }
   RefreshTFTBluetoothStatus();
+  RefreshTFTSetupApStatus();
   tft.drawLine(1, 24, 319, 24, TFT_GREEN);
 
   if (shotBackgroundLock)
@@ -3866,7 +3903,7 @@ void RefreshTFTDisplay()
     tft.setTextDatum(TL_DATUM);
     tft.setFreeFont(FSS9);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString(fitHmiText("Warten..."), 24, 112, GFXFF);
+    tft.drawString(fitHmiText("Warten auf Speichern..."), 24, 112, GFXFF);
   }
   // Nach dem allgemeinen Loeschen des Inhaltsbereichs muessen Datum
   // und Uhrzeit auf Seiten mit Datums-/Uhrzeitanzeige komplett neu
@@ -5113,10 +5150,27 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
   if (callFunctionOfPage[22] == 1)
   {
     callFunctionOfPage[22] = 0;
-    hmiWifiSetupRevisionAtStart = coffeeWifiStoredCredentialsRevision();
-    hmiWifiSetupWaitingForSave = true;
-    coffeeWifiStartSetupAp();
-    callOfFunctionTerminated = 1;
+
+    if (coffeeWifiSetupApActive()) {
+      coffeeWifiStopSetupAp();
+      hmiWifiSetupWaitingForSave = false;
+    } else {
+      hmiWifiSetupRevisionAtStart = coffeeWifiStoredCredentialsRevision();
+      const bool setupStarted = coffeeWifiStartSetupAp();
+      hmiWifiSetupWaitingForSave = setupStarted;
+
+      // Only show the setup instructions when the AP actually started.
+      // Handle the page transition here so the generic menu mechanism cannot
+      // trigger the setup action a second time on the following loop pass.
+      if (setupStarted) {
+        pageID = PAGE_WIFI_SETUP_START;
+        newPageID = PAGE_WIFI_SETUP_START;
+      }
+    }
+
+    buttonPressedRotarySW = 0;
+    callOfFunctionTerminated = 0;
+    pageEntered = true;
   }
 
   if (callFunctionOfPage[24] == 1)
@@ -5414,6 +5468,16 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
       bleHeader.connected != oldBleConnectedDisplayed)
   {
     RefreshTFTBluetoothStatus();
+  }
+
+  const bool setupApActiveNow = coffeeWifiSetupApActive();
+  if (!setupApHeaderStatusInitialised || setupApActiveNow != oldSetupApActiveDisplayed)
+  {
+    RefreshTFTSetupApStatus();
+    if (pageID == PAGE_WIFI_NETWORK) {
+      RefreshTFTDisplay();
+      RefreshTFTCursor();
+    }
   }
  }
 
