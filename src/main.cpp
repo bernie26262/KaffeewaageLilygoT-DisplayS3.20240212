@@ -662,6 +662,17 @@ float lastDoseWeightCandidate = 0.0f;
 
 tm timeinfo;
 time_t now;
+static constexpr time_t MIN_VALID_EPOCH = 1700000000;
+
+static bool readLocalTimeStable(tm& out)
+{
+  const time_t currentEpoch = time(nullptr);
+  if (currentEpoch < MIN_VALID_EPOCH) {
+    return false;
+  }
+
+  return localtime_r(&currentEpoch, &out) != nullptr;
+}
 const char* NTP_SERVER = "de.pool.ntp.org";
 const char* TZ_INFO    = "CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00";  // enter your time zone (https://remotemonitoringsystems.ca/time-zone-abbreviations.php)
 //const long  gmtOffset_sec = 7200;
@@ -1064,7 +1075,7 @@ static void addCoffeeStatsDose(float dose_g)
 
 static bool resetMuehlenReinigungCore()
 {
-  if (!getLocalTime(&timeinfo, 0)) {
+  if (!readLocalTimeStable(timeinfo)) {
     debugln("Failed to obtain time");
     return false;
   }
@@ -1088,7 +1099,7 @@ static bool resetMuehlenReinigungCore()
 
 static bool resetKaffeemReinigungCore()
 {
-  if (!getLocalTime(&timeinfo, 0)) {
+  if (!readLocalTimeStable(timeinfo)) {
     debugln("Failed to obtain time");
     return false;
   }
@@ -1112,7 +1123,7 @@ static bool resetKaffeemReinigungCore()
 
 static bool resetFilterWechselCore()
 {
-  if (!getLocalTime(&timeinfo, 0)) {
+  if (!readLocalTimeStable(timeinfo)) {
     debugln("Failed to obtain time");
     return false;
   }
@@ -1136,7 +1147,7 @@ static bool resetFilterWechselCore()
 
 static bool debugForceMaintenanceDue(uint32_t& lastTime, unsigned long delaySeconds, const char* prefKey)
 {
-  if (!getLocalTime(&timeinfo, 0)) {
+  if (!readLocalTimeStable(timeinfo)) {
     debugln("Failed to obtain time");
     return false;
   }
@@ -2252,7 +2263,7 @@ void initWebServer() {
 
 void printLocalTime()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2506,7 +2517,7 @@ void RefreshTFTShotPage()
 
 void RedrawTFTTimeToCleanMuehle()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2563,7 +2574,7 @@ void RedrawTFTTimeToCleanMuehle()
 
 void RedrawTFTTimeToCleanKaffeem()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2618,7 +2629,7 @@ void RedrawTFTTimeToCleanKaffeem()
 
 void RedrawTFTTimeToChangeFilter()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2674,7 +2685,7 @@ void RedrawTFTTimeToChangeFilter()
 
 void RefreshTFTTimeToCleanMuehle()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2778,7 +2789,7 @@ void RefreshTFTTimeToCleanMuehle()
 
 void RefreshTFTTimeToCleanKaffeem()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2881,7 +2892,7 @@ void RefreshTFTTimeToCleanKaffeem()
 
 void RefreshTFTTimeToChangeFilter()
 {
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -2995,7 +3006,7 @@ void RedrawTFTTime()
     return;
   }
 
-  if(!getLocalTime(&timeinfo, 0)){
+  if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -3050,7 +3061,7 @@ void RefreshTFTTime()
 
     if (dateTimeDisplayed[pageID]==1)
     {
-    if(!getLocalTime(&timeinfo, 0)){
+    if(!readLocalTimeStable(timeinfo)){
     debugln("Failed to obtain time");
     return;
   }
@@ -5484,7 +5495,7 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
 //##############################################
 // Warnungen
 //##############################################
- bool timeAvailableForWarnings = getLocalTime(&timeinfo, 0);
+ bool timeAvailableForWarnings = readLocalTimeStable(timeinfo);
  if(!timeAvailableForWarnings){
     debugln("Time not available yet");
   }
