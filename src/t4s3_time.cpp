@@ -20,9 +20,16 @@ bool ntpConfigured = false;
 bool timeWasValid = false;
 uint32_t lastSyncCheckMs = 0;
 
-bool read_local_time(tm& out, uint32_t timeoutMs = 0)
+constexpr time_t MIN_VALID_EPOCH = 1700000000;
+
+bool read_local_time(tm& out)
 {
-    return getLocalTime(&out, timeoutMs);
+    const time_t now = time(nullptr);
+    if (now < MIN_VALID_EPOCH) {
+        return false;
+    }
+
+    return localtime_r(&now, &out) != nullptr;
 }
 
 void configure_ntp()
@@ -61,7 +68,7 @@ void t4s3_time_tick()
     lastSyncCheckMs = now;
 
     tm timeinfo;
-    const bool valid = read_local_time(timeinfo, 0);
+    const bool valid = read_local_time(timeinfo);
     if (valid && !timeWasValid) {
         char buf[32];
         strftime(buf, sizeof(buf), "%d.%m.%Y %H:%M:%S", &timeinfo);
@@ -77,7 +84,7 @@ bool t4s3_time_is_valid()
     }
 
     tm timeinfo;
-    return read_local_time(timeinfo, 0);
+    return read_local_time(timeinfo);
 }
 
 const char *t4s3_time_zone_label()
@@ -97,7 +104,7 @@ void t4s3_time_format_header(char *buf, size_t len)
     }
 
     tm timeinfo;
-    if (!ntpConfigured || !read_local_time(timeinfo, 0)) {
+    if (!ntpConfigured || !read_local_time(timeinfo)) {
         strlcpy(buf, "--.--.--  --:--:--", len);
         return;
     }
@@ -112,7 +119,7 @@ void t4s3_time_format_local(char *buf, size_t len)
     }
 
     tm timeinfo;
-    if (!ntpConfigured || !read_local_time(timeinfo, 0)) {
+    if (!ntpConfigured || !read_local_time(timeinfo)) {
         strlcpy(buf, "--.--.---- --:--:--", len);
         return;
     }
@@ -127,7 +134,7 @@ uint32_t t4s3_time_now_epoch()
     }
 
     time_t now = time(nullptr);
-    if (now < 1700000000) {
+    if (now < MIN_VALID_EPOCH) {
         return 0;
     }
 
