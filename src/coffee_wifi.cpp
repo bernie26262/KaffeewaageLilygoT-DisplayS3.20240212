@@ -94,11 +94,14 @@ const CoffeeWifiCredentials& ensureActiveCredentials()
 bool enterAutomaticRecoveryMode()
 {
   automaticRecoveryMode = true;
-  if (setupApActive) {
-    return true;
-  }
 
-  const bool ok = coffeeWifiStartSetupAp();
+  // Im automatischen Recovery-Fall ist keine funktionierende STA-Verbindung
+  // vorhanden. WIFI_AP beendet den laufenden STA-Verbindungsversuch vollstaendig
+  // und verhindert, dass weitere Scans/Reconnects die AP-Beacons stoeren.
+  // Der manuell gestartete Setup-AP bleibt dagegen bewusst WIFI_AP_STA.
+  WiFi.mode(WIFI_AP);
+  const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
+  setupApActive = ok;
   if (!ok) {
     automaticRecoveryMode = false;
   }
