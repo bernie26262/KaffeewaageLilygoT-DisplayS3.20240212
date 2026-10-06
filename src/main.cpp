@@ -5352,6 +5352,7 @@ void setup()
 void loop(void)
 { 
   coffeeWebLoop();
+  coffeeWifiLoop();
   coffeeOtaLoop();
   //ws.cleanupClients();
   rotaryMenu();

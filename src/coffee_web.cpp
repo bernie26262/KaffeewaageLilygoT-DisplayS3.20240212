@@ -28,7 +28,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20260915wifi1">
+  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20261006recovery1">
 </head>
 <body>
 <main>
@@ -270,7 +270,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <span class="wifi-setup-active-dot" aria-hidden="true"></span>
         <span id="wifiSetupApActiveHintText">Setup-WLAN aktiv</span>
       </div>
-      <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, nutzt die Waage automatisch wieder das Standard-WLAN aus der Firmware.</div>
+      <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls keine aktive Verbindung zustande kommt, startet die Waage automatisch das Recovery-WLAN Waagen-Setup.</div>
       <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
         <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
         <div class="wifi-form-note">Speichert SSID und Passwort in der Waage. Die Daten werden erst verwendet, wenn sie danach bewusst aktiviert werden.</div>
@@ -282,7 +282,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       </form>
       <div class="settings-actions" style="margin-top: 12px;">
         <button id="activateWifiCredentials" class="secondary">Gespeicherte WLAN-Daten verwenden</button>
-        <button id="deactivateWifiCredentials" class="secondary">Standard-WLAN verwenden</button>
+        <button id="deactivateWifiCredentials" class="secondary">Automatische Verbindung deaktivieren</button>
         <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
         <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
         <button id="stopWifiSetupAp" class="secondary" disabled>Setup-WLAN stoppen</button>
@@ -361,9 +361,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=legacy-shot-20260915wifi1"></script>
-<script src="/coffee_render.js?v=legacy-shot-20260915wifi1"></script>
-<script src="/coffee_events.js?v=legacy-shot-20260915wifi1"></script>
+<script src="/coffee_core.js?v=legacy-shot-20261006recovery1"></script>
+<script src="/coffee_render.js?v=legacy-shot-20261006recovery1"></script>
+<script src="/coffee_events.js?v=legacy-shot-20261006recovery1"></script>
 </body>
 </html>)rawliteral";
 
@@ -2131,7 +2131,7 @@ async function clearWifiCredentials() {
 
 async function setWifiCredentialsActive(active) {
   try {
-    addLog(active ? 'Gespeicherte WLAN-Daten verwenden …' : 'Standard-WLAN verwenden …');
+    addLog(active ? 'Gespeicherte WLAN-Daten verwenden …' : 'Automatische WLAN-Verbindung deaktivieren …');
     const response = await fetch(active ? '/api/wifi/credentials/activate' : '/api/wifi/credentials/deactivate', { method: 'POST' });
     if (!response.ok) {
       addLog(`Fehler beim Ändern der WLAN-Auswahl: HTTP ${response.status}`);
@@ -2367,15 +2367,15 @@ function bindSettingsHandlers() {
   el('wifiCredentialsForm').addEventListener('submit', saveWifiCredentials);
   el('activateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
     'Gespeicherte WLAN-Daten verwenden?',
-    'Beim nächsten Neustart versucht die Waage, die gespeicherten WLAN-Daten zu verwenden. Wenn das fehlschlägt, nutzt sie automatisch wieder das Standard-WLAN aus der Firmware.',
+    'Beim nächsten Neustart versucht die Waage, die gespeicherten WLAN-Daten zu verwenden. Wenn keine Verbindung zustande kommt, startet automatisch das Recovery-WLAN Waagen-Setup.',
     'activate_wifi_credentials_webui',
     'Gespeicherte WLAN-Daten verwenden …'
   ));
   el('deactivateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
-    'Standard-WLAN verwenden?',
-    'Beim nächsten Neustart nutzt die Waage wieder das Standard-WLAN aus der Firmware. Gespeicherte WLAN-Daten bleiben erhalten.',
+    'Automatische WLAN-Verbindung deaktivieren?',
+    'Beim nächsten Neustart wird keine gespeicherte WLAN-Verbindung automatisch gestartet. Stattdessen steht Waagen-Setup zur Verfügung. Die gespeicherten WLAN-Daten bleiben erhalten.',
     'deactivate_wifi_credentials_webui',
-    'Standard-WLAN verwenden …'
+    'Automatische WLAN-Verbindung deaktivieren …'
   ));
   el('clearWifiCredentials').addEventListener('click', () => openConfirmOverlay(
     'Gespeicherte WLAN-Daten löschen?',
@@ -2527,7 +2527,7 @@ static const char WIFI_SETUP_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <button type="submit">Speichern und verwenden</button>
     </form>
     <button id="reboot" class="secondary" type="button">ESP32 neu starten</button>
-    <p class="hint">Nach dem Speichern werden die Daten aktiviert. Starte die Waage danach neu. Wenn die Verbindung scheitert, nutzt sie automatisch wieder das Standard-WLAN aus der Firmware.</p>
+    <p class="hint">Nach dem Speichern werden die Daten aktiviert. Starte die Waage danach neu. Wenn die Verbindung nicht zustande kommt, startet automatisch wieder Waagen-Setup.</p>
     <div id="log" class="log"></div>
   </section>
 </main>
@@ -2919,8 +2919,8 @@ void coffeeWebBegin(AsyncWebServer& server)
       StaticJsonDocument<224> doc;
       doc["ok"] = ok;
       doc["message"] = ok
-                         ? "Standard-WLAN wird beim nächsten Neustart verwendet."
-                         : "Standard-WLAN konnte nicht aktiviert werden.";
+                         ? "Automatische WLAN-Verbindung deaktiviert. Beim nächsten Neustart startet Waagen-Setup."
+                         : "Automatische WLAN-Verbindung konnte nicht deaktiviert werden.";
       doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
       doc["active"] = coffeeWifiStoredCredentialsAreActive();
       doc["stored_ssid"] = coffeeWifiStoredSsid();
@@ -2986,8 +2986,8 @@ void coffeeWebBegin(AsyncWebServer& server)
     StaticJsonDocument<224> doc;
     doc["ok"] = ok;
     doc["message"] = ok
-                       ? "Standard-WLAN wird beim nächsten Neustart verwendet."
-                       : "Standard-WLAN konnte nicht aktiviert werden.";
+                       ? "Automatische WLAN-Verbindung deaktiviert. Beim nächsten Neustart startet Waagen-Setup."
+                       : "Automatische WLAN-Verbindung konnte nicht deaktiviert werden.";
     doc["stored_credentials"] = coffeeWifiHasStoredCredentials();
     doc["active"] = coffeeWifiStoredCredentialsAreActive();
     doc["stored_ssid"] = coffeeWifiStoredSsid();

@@ -4,7 +4,6 @@
 #include <Preferences.h>
 #include <WiFi.h>
 
-#include "wifi_secrets.h"
 
 namespace {
 constexpr const char* WIFI_PREF_NAMESPACE = "coffee_wifi";
@@ -21,6 +20,7 @@ bool storedCredentialsActive = false;
 String storedCredentialsSsid;
 bool storedCredentialsPasswordAvailable = false;
 bool setupApActive = false;
+bool automaticRecoveryMode = false;
 uint32_t storedCredentialsRevision = 0;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
@@ -82,18 +82,6 @@ bool readStoredCredentials(CoffeeWifiCredentials& credentials)
   return true;
 }
 
-CoffeeWifiCredentials fallbackCredentials()
-{
-  CoffeeWifiCredentials credentials;
-  credentials.ssid = WIFI_SSID;
-  credentials.password = WIFI_PASS;
-  credentials.fromPreferences = false;
-  credentials.source = credentials.ssid.length() > 0
-                         ? CoffeeWifiCredentialSource::WifiSecrets
-                         : CoffeeWifiCredentialSource::None;
-  return credentials;
-}
-
 const CoffeeWifiCredentials& ensureActiveCredentials()
 {
   if (!activeCredentialsLoaded) {
@@ -101,6 +89,20 @@ const CoffeeWifiCredentials& ensureActiveCredentials()
     activeCredentialsLoaded = true;
   }
   return activeCredentials;
+}
+
+bool enterAutomaticRecoveryMode()
+{
+  automaticRecoveryMode = true;
+  if (setupApActive) {
+    return true;
+  }
+
+  const bool ok = coffeeWifiStartSetupAp();
+  if (!ok) {
+    automaticRecoveryMode = false;
+  }
+  return ok;
 }
 }  // namespace
 
@@ -110,8 +112,8 @@ bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials)
     return true;
   }
 
-  credentials = fallbackCredentials();
-  return credentials.ssid.length() > 0;
+  credentials = CoffeeWifiCredentials{};
+  return false;
 }
 
 bool coffeeWifiHasStoredCredentials()
@@ -244,7 +246,7 @@ const char* coffeeWifiCredentialSourceLabel()
     case CoffeeWifiCredentialSource::Preferences:
       return "gespeicherte WLAN-Daten";
     case CoffeeWifiCredentialSource::WifiSecrets:
-      return "Standard-WLAN aus Firmware";
+      return "nicht verwendet";
     case CoffeeWifiCredentialSource::None:
     default:
       return "keine Quelle";
@@ -264,10 +266,38 @@ String coffeeWifiStatusSummary()
 void coffeeWifiBegin()
 {
   const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-  WiFi.mode(setupApActive ? WIFI_AP_STA : WIFI_STA);
+
+  // WiFi sleep is configured once in normal STA mode. Do not call
+  // WiFi.setSleep(false) directly after switching to WIFI_AP_STA.
+  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+
+  automaticRecoveryMode = false;
   resetActiveConnectionAttempt();
+
+  if (credentials.ssid.length() == 0) {
+    enterAutomaticRecoveryMode();
+    return;
+  }
+
   WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+}
+
+void coffeeWifiLoop()
+{
+  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
+  if (automaticRecoveryMode || activeCredentialsGotIp || credentials.ssid.length() == 0) {
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    coffeeWifiMarkConnected();
+    return;
+  }
+
+  if (millis() - activeCredentialsConnectStartedMs >= 20000UL) {
+    enterAutomaticRecoveryMode();
+  }
 }
 
 void coffeeWifiMarkConnected()
@@ -280,26 +310,20 @@ void coffeeWifiReconnect()
 {
   const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
 
-  // Sicherheitsnetz fuer Phase 2c:
-  // Aktivierte NVS-Daten werden nicht mehr beim ersten Disconnect sofort
-  // deaktiviert. Einige ESP32-/Router-Kombinationen erzeugen waehrend des
-  // frischen Verbindungsaufbaus kurze Disconnect-Events, obwohl die Daten
-  // korrekt sind. Erst wenn innerhalb eines Zeitfensters gar keine IP geholt
-  // wurde, wird der Active-Marker geloescht und dauerhaft auf wifi_secrets.h
-  // zurueckgefallen.
-  if (credentials.source == CoffeeWifiCredentialSource::Preferences) {
-    activeCredentialsDisconnects++;
-    const uint32_t elapsedMs = millis() - activeCredentialsConnectStartedMs;
-    if (!activeCredentialsGotIp && elapsedMs >= 20000UL) {
-      coffeeWifiSetStoredCredentialsActive(false);
-      activeCredentials = fallbackCredentials();
-      activeCredentialsLoaded = true;
-      resetActiveConnectionAttempt();
-      WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
-      return;
-    }
+  if (automaticRecoveryMode || credentials.ssid.length() == 0) {
+    return;
+  }
 
-    WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+  // Nach einer zuvor erfolgreichen Verbindung beginnt bei einem Disconnect
+  // ein neues 20-s-Fenster. Bleibt die Verbindung weg, uebernimmt der
+  // Recovery-AP. Gespeicherte Credentials werden dabei nie deaktiviert.
+  if (activeCredentialsGotIp) {
+    resetActiveConnectionAttempt();
+  }
+
+  activeCredentialsDisconnects++;
+  if (!activeCredentialsGotIp && millis() - activeCredentialsConnectStartedMs >= 20000UL) {
+    enterAutomaticRecoveryMode();
     return;
   }
 
@@ -337,19 +361,31 @@ bool coffeeWifiStopSetupAp()
 {
   // softAPdisconnect(true) kann auf manchen ESP32-Arduino-Versionen false
   // liefern, obwohl der AP danach bereits beendet bzw. nicht mehr aktiv ist.
-  // Stoppen soll daher idempotent sein: Der Bediener erwartet, dass der
-  // Setup-AP danach aus ist, nicht dass ein bereits deaktivierter AP als
-  // Fehler gemeldet wird.
+  // Stoppen soll daher idempotent sein.
+  const bool wasAutomaticRecovery = automaticRecoveryMode;
   WiFi.softAPdisconnect(true);
   delay(50);
   setupApActive = false;
+  automaticRecoveryMode = false;
   WiFi.mode(WIFI_STA);
+
+  // Wird ein automatisch gestarteter Recovery-AP bewusst beendet, darf die
+  // Station das gespeicherte WLAN erneut versuchen.
+  if (wasAutomaticRecovery && activeCredentialsLoaded && activeCredentials.ssid.length() > 0) {
+    resetActiveConnectionAttempt();
+    WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+  }
   return true;
 }
 
 bool coffeeWifiSetupApActive()
 {
   return setupApActive;
+}
+
+bool coffeeWifiRecoveryModeActive()
+{
+  return automaticRecoveryMode && setupApActive;
 }
 
 String coffeeWifiSetupApIp()

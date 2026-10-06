@@ -16,9 +16,9 @@ struct CoffeeWifiCredentials {
 };
 
 // WLAN-Zugangsdaten zentral verwalten.
-// Sicherheitsstand nach Phase-2a-Test:
-// - gespeicherte NVS-Daten nur verwenden, wenn sie explizit als aktiv markiert sind
-// - sonst unverändert auf wifi_secrets.h zurückfallen
+// Gespeicherte NVS-Daten nur verwenden, wenn sie explizit als aktiv markiert sind.
+// Wenn keine aktiven Daten vorhanden sind oder die Verbindung scheitert,
+// startet automatisch der Recovery-AP "Waagen-Setup".
 bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials);
 bool coffeeWifiHasStoredCredentials();
 bool coffeeWifiStoredCredentialsAreActive();
@@ -32,6 +32,7 @@ CoffeeWifiCredentialSource coffeeWifiCredentialSource();
 const char* coffeeWifiCredentialSourceLabel();
 String coffeeWifiStatusSummary();
 void coffeeWifiBegin();
+void coffeeWifiLoop();
 void coffeeWifiMarkConnected();
 void coffeeWifiReconnect();
 String coffeeWifiCurrentSsid();
@@ -40,4 +41,5 @@ const char* coffeeWifiSetupApSsid();
 bool coffeeWifiStartSetupAp();
 bool coffeeWifiStopSetupAp();
 bool coffeeWifiSetupApActive();
+bool coffeeWifiRecoveryModeActive();
 String coffeeWifiSetupApIp();
