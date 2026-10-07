@@ -15,15 +15,27 @@ struct CoffeeWifiCredentials {
   CoffeeWifiCredentialSource source = CoffeeWifiCredentialSource::None;
 };
 
-// WLAN-Zugangsdaten zentral verwalten.
-// Gespeicherte NVS-Daten nur verwenden, wenn sie explizit als aktiv markiert sind.
-// Wenn keine aktiven Daten vorhanden sind oder die Verbindung scheitert,
-// startet automatisch der Recovery-AP "Waagen-Setup".
+// WLAN-Zugangsdaten zentral verwalten. NVS schema v1 supports two stored
+// profiles plus a preferred profile. Existing single-profile data is migrated
+// once to WLAN 1. Automatic connection can be disabled independently.
 bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials);
 bool coffeeWifiHasStoredCredentials();
 bool coffeeWifiStoredCredentialsAreActive();
 String coffeeWifiStoredSsid();
 bool coffeeWifiStoredPasswordAvailable();
+
+// Two-profile backend. Profile numbers are 1 and 2.
+bool coffeeWifiProfileAvailable(uint8_t profile);
+String coffeeWifiProfileSsid(uint8_t profile);
+bool coffeeWifiProfilePasswordAvailable(uint8_t profile);
+bool coffeeWifiSaveProfile(uint8_t profile, const String& ssid, const String& password);
+bool coffeeWifiClearProfile(uint8_t profile);
+uint8_t coffeeWifiPreferredProfile();
+bool coffeeWifiSetPreferredProfile(uint8_t profile);
+bool coffeeWifiAutomaticConnectionEnabled();
+bool coffeeWifiSetAutomaticConnectionEnabled(bool enabled);
+
+// Compatibility API for the current single-profile WebUI (maps to WLAN 1).
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password);
 bool coffeeWifiSetStoredCredentialsActive(bool active);
 bool coffeeWifiClearCredentials();
