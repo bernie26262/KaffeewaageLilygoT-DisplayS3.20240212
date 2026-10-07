@@ -1,4 +1,5 @@
 #include "coffee_ota.h"
+#include "ble_scale.h"
 
 #include <Arduino.h>
 #include <SPIFFS.h>
@@ -274,6 +275,8 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
       return;
     }
 
+    coffeeBleScaleStopForOta();
+
     Serial.print("Firmware update started: ");
     Serial.println(filename);
     if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
@@ -311,6 +314,8 @@ static void handleFilesystemUpload(AsyncWebServerRequest *request, const String&
       rejectOtaUpload(filename, "spiffs.bin oder littlefs.bin");
       return;
     }
+
+    coffeeBleScaleStopForOta();
 
     Serial.print("SPIFFS update started: ");
     Serial.println(filename);

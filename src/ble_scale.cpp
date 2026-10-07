@@ -45,6 +45,7 @@ BLE2902* g_weightDescriptor = nullptr;
 bool g_started = false;
 bool g_connected = false;
 bool g_advertising = false;
+bool g_stoppedForOta = false;
 uint32_t g_lastNotifyMs = 0;
 uint32_t g_lastNotifyAgeReferenceMs = 0;
 uint32_t g_packetsSent = 0;
@@ -162,6 +163,11 @@ class ServerCallbacks : public BLEServerCallbacks {
     const bool wasConnected = g_connected;
     g_connected = false;
     g_lastNotifyMs = 0;
+    if (g_stoppedForOta) {
+      g_advertising = false;
+      return;
+    }
+
     if (wasConnected) {
       appendLogFormatted("Verbindung getrennt - Advertising neu");
       BLE_VERBOSE_PRINTLN("[BLE] client disconnected, restart advertising");
@@ -244,6 +250,11 @@ void coffeeBleScaleCopyLog(char* destination, size_t destinationSize)
 
 void coffeeBleScaleBegin(const char* deviceName)
 {
+  if (g_stoppedForOta) {
+    BLE_VERBOSE_PRINTLN("[BLE] start skipped: disabled for OTA");
+    return;
+  }
+
   if (g_started) {
     BLE_VERBOSE_PRINTLN("[BLE] start skipped: already active");
     return;
@@ -296,6 +307,43 @@ void coffeeBleScaleBegin(const char* deviceName)
   g_rateWindowStartMs = millis();
   appendLogFormatted("%s aktiv - Advertising läuft", name);
   BLE_VERBOSE_PRINTF("[BLE] %s started as '%s'\n", kModeName, name);
+}
+
+void coffeeBleScaleStopForOta()
+{
+  g_stoppedForOta = true;
+
+  if (!g_started) {
+    return;
+  }
+
+  BLE_VERBOSE_PRINTLN("[BLE] stopping for OTA");
+
+  const bool wasAdvertising = g_advertising;
+
+  // Laufende Tick-/Notify-Pfade zuerst sperren, bevor der BT-Stack
+  // deinitialisiert wird. Der OTA-Handler laeuft im Async-Webserver-Kontext.
+  g_started = false;
+  g_connected = false;
+  g_advertising = false;
+  g_lastNotifyMs = 0;
+
+  portENTER_CRITICAL(&g_commandMux);
+  g_pendingCommand = CoffeeBleScaleCommand::None;
+  portEXIT_CRITICAL(&g_commandMux);
+
+  if (wasAdvertising) {
+    BLEDevice::stopAdvertising();
+  }
+  BLEDevice::deinit(false);
+
+  g_server = nullptr;
+  g_weightCharacteristic = nullptr;
+  g_beanConquerorWeightCharacteristic = nullptr;
+  g_commandCharacteristic = nullptr;
+  g_weightDescriptor = nullptr;
+
+  appendLogFormatted("BLE fuer OTA deaktiviert");
 }
 
 void coffeeBleScaleTick(uint32_t nowMs, float weightG, bool stable)
@@ -384,6 +432,7 @@ const char* coffeeBleScaleCommandName(CoffeeBleScaleCommand command)
 #else
 
 void coffeeBleScaleBegin(const char*) {}
+void coffeeBleScaleStopForOta() {}
 void coffeeBleScaleTick(uint32_t, float, bool) {}
 bool coffeeBleScalePopCommand(CoffeeBleScaleCommand& command)
 {

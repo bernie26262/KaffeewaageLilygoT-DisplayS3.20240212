@@ -30,6 +30,7 @@ enum class CoffeeBleScaleCommand : uint8_t {
 };
 
 void coffeeBleScaleBegin(const char* deviceName);
+void coffeeBleScaleStopForOta();
 void coffeeBleScaleTick(uint32_t nowMs, float weightG, bool stable);
 bool coffeeBleScalePopCommand(CoffeeBleScaleCommand& command);
 CoffeeBleScaleStatus coffeeBleScaleStatus();
