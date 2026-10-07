@@ -21,6 +21,7 @@ constexpr const char* WIFI_PREF_KEY_P2_PASS = "p2_pass";
 constexpr const char* WIFI_PREF_KEY_PREFERRED = "pref";
 constexpr const char* WIFI_PREF_KEY_AUTO = "auto";
 constexpr const char* WIFI_SETUP_AP_SSID = "Waagen-Setup";
+constexpr uint32_t WIFI_PROFILE_CONNECT_TIMEOUT_MS = 15000UL;
 
 CoffeeWifiCredentials activeCredentials;
 bool activeCredentialsLoaded = false;
@@ -40,6 +41,9 @@ uint32_t storedCredentialsRevision = 0;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
 uint8_t activeCredentialsDisconnects = 0;
+uint8_t activeConnectionProfile = 0;
+uint8_t fallbackConnectionProfile = 0;
+bool fallbackConnectionStarted = false;
 
 void resetActiveConnectionAttempt()
 {
@@ -216,6 +220,89 @@ bool enterAutomaticRecoveryMode()
     automaticRecoveryMode = false;
   }
   return ok;
+}
+
+bool profileAvailableForAutomaticConnection(uint8_t profile)
+{
+  if (!profileNumberValid(profile)) {
+    return false;
+  }
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return automaticConnectionEnabled && profileAvailable[profile - 1];
+}
+
+bool beginProfileConnection(uint8_t profile)
+{
+  CoffeeWifiCredentials credentials;
+  if (!profileAvailableForAutomaticConnection(profile) ||
+      !readProfileCredentials(profile, credentials)) {
+    return false;
+  }
+
+  activeCredentials = credentials;
+  activeCredentialsLoaded = true;
+  activeConnectionProfile = profile;
+  resetActiveConnectionAttempt();
+  WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+  return true;
+}
+
+void advanceAutomaticConnectionCycle()
+{
+  if (!fallbackConnectionStarted && fallbackConnectionProfile != 0) {
+    fallbackConnectionStarted = true;
+    if (beginProfileConnection(fallbackConnectionProfile)) {
+      return;
+    }
+  }
+
+  enterAutomaticRecoveryMode();
+}
+
+void beginAutomaticConnectionCycle(uint8_t firstProfile = 0)
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+
+  automaticRecoveryMode = false;
+  fallbackConnectionProfile = 0;
+  fallbackConnectionStarted = false;
+
+  if (!automaticConnectionEnabled) {
+    activeConnectionProfile = 0;
+    enterAutomaticRecoveryMode();
+    return;
+  }
+
+  uint8_t selectedFirstProfile = 0;
+  if (profileAvailableForAutomaticConnection(firstProfile)) {
+    selectedFirstProfile = firstProfile;
+  } else if (profileAvailableForAutomaticConnection(preferredProfile)) {
+    selectedFirstProfile = preferredProfile;
+  } else {
+    const uint8_t otherProfile = preferredProfile == 1 ? 2 : 1;
+    if (profileAvailableForAutomaticConnection(otherProfile)) {
+      selectedFirstProfile = otherProfile;
+    }
+  }
+
+  if (selectedFirstProfile == 0) {
+    activeConnectionProfile = 0;
+    enterAutomaticRecoveryMode();
+    return;
+  }
+
+  const uint8_t otherProfile = selectedFirstProfile == 1 ? 2 : 1;
+  if (profileAvailableForAutomaticConnection(otherProfile)) {
+    fallbackConnectionProfile = otherProfile;
+  }
+
+  if (!beginProfileConnection(selectedFirstProfile)) {
+    advanceAutomaticConnectionCycle();
+  }
 }
 }  // namespace
 
@@ -482,28 +569,18 @@ String coffeeWifiStatusSummary()
 
 void coffeeWifiBegin()
 {
-  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-
   // WiFi sleep is configured once in normal STA mode. Do not call
   // WiFi.setSleep(false) directly after switching to WIFI_AP_STA.
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
 
   automaticRecoveryMode = false;
-  resetActiveConnectionAttempt();
-
-  if (credentials.ssid.length() == 0) {
-    enterAutomaticRecoveryMode();
-    return;
-  }
-
-  WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+  beginAutomaticConnectionCycle();
 }
 
 void coffeeWifiLoop()
 {
-  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-  if (automaticRecoveryMode || activeCredentialsGotIp || credentials.ssid.length() == 0) {
+  if (automaticRecoveryMode || activeCredentialsGotIp || activeConnectionProfile == 0) {
     return;
   }
 
@@ -512,8 +589,8 @@ void coffeeWifiLoop()
     return;
   }
 
-  if (millis() - activeCredentialsConnectStartedMs >= 20000UL) {
-    enterAutomaticRecoveryMode();
+  if (millis() - activeCredentialsConnectStartedMs >= WIFI_PROFILE_CONNECT_TIMEOUT_MS) {
+    advanceAutomaticConnectionCycle();
   }
 }
 
@@ -525,26 +602,27 @@ void coffeeWifiMarkConnected()
 
 void coffeeWifiReconnect()
 {
-  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-
-  if (automaticRecoveryMode || credentials.ssid.length() == 0) {
+  if (automaticRecoveryMode) {
     return;
-  }
-
-  // Nach einer zuvor erfolgreichen Verbindung beginnt bei einem Disconnect
-  // ein neues 20-s-Fenster. Bleibt die Verbindung weg, uebernimmt der
-  // Recovery-AP. Gespeicherte Credentials werden dabei nie deaktiviert.
-  if (activeCredentialsGotIp) {
-    resetActiveConnectionAttempt();
   }
 
   activeCredentialsDisconnects++;
-  if (!activeCredentialsGotIp && millis() - activeCredentialsConnectStartedMs >= 20000UL) {
-    enterAutomaticRecoveryMode();
+
+  // Nach einer zuvor erfolgreichen Verbindung beginnt ein neuer Zyklus mit
+  // dem zuletzt verwendeten Profil. Waehrend eines laufenden Verbindungs-
+  // versuchs steuert coffeeWifiLoop() Timeout und Profilwechsel.
+  if (activeCredentialsGotIp) {
+    beginAutomaticConnectionCycle(activeConnectionProfile);
     return;
   }
 
-  WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+  // Waehrend des laufenden 15-s-Fensters das aktuelle Profil wie bisher nach
+  // einem Disconnect erneut anstossen. Der Profilwechsel selbst bleibt allein
+  // Aufgabe von coffeeWifiLoop(), damit der Timeout deterministisch bleibt.
+  if (activeConnectionProfile != 0 &&
+      millis() - activeCredentialsConnectStartedMs < WIFI_PROFILE_CONNECT_TIMEOUT_MS) {
+    WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+  }
 }
 
 String coffeeWifiCurrentSsid()
@@ -586,11 +664,10 @@ bool coffeeWifiStopSetupAp()
   automaticRecoveryMode = false;
   WiFi.mode(WIFI_STA);
 
-  // Wird ein automatisch gestarteter Recovery-AP bewusst beendet, darf die
-  // Station das gespeicherte WLAN erneut versuchen.
-  if (wasAutomaticRecovery && activeCredentialsLoaded && activeCredentials.ssid.length() > 0) {
-    resetActiveConnectionAttempt();
-    WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+  // Wird ein automatischer Recovery-AP bewusst beendet, beginnt bei aktivierter
+  // Automatik ein frischer Zyklus: bevorzugtes Profil, zweites Profil, Recovery.
+  if (wasAutomaticRecovery && automaticConnectionEnabled) {
+    beginAutomaticConnectionCycle();
   }
   return true;
 }
