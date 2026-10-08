@@ -627,6 +627,9 @@ void coffeeWifiReconnect()
 
 String coffeeWifiCurrentSsid()
 {
+  if (WiFi.status() == WL_CONNECTED) {
+    return WiFi.SSID();
+  }
   return ensureActiveCredentials().ssid;
 }
 
