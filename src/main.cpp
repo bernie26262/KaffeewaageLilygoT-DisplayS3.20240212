@@ -34,7 +34,6 @@
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <SPIFFS.h>
 #include "time.h"
 #include "coffee_wifi.h"
 #include "app_state.h"
@@ -713,23 +712,6 @@ const unsigned long MS_PER_HOUR = 60UL * MS_PER_MIN;
 
 Preferences preferences;
 
-
-
-// ----------------------------------------------------------------------------
-// SPIFFS initialization
-// ----------------------------------------------------------------------------
-
-void initSPIFFS() {
-  if (!SPIFFS.begin()) {
-    debugln("Cannot mount SPIFFS volume...");
-    /*
-    while (1) {
-        //onboard_led.on = millis() % 200 < 50;
-        //onboard_led.update();
-    }
-    */
-  }
-}
 
 // ----------------------------------------------------------------------------
 // Connecting to the WiFi network
@@ -2248,11 +2230,6 @@ void initWebServer() {
     coffeeWebSetCommandHandler(handleCoffeeWebCommand);
     coffeeWebBegin(server);
     coffeeOtaBegin(server);
-
-    // Static-Dateien erst nach den expliziten Handlern registrieren.
-    // Sonst kann der Catch-all-Static-Handler z.B. /manifest.json,
-    // /icon-192.png oder /favicon.ico abfangen, bevor die PWA-Handler greifen.
-    server.serveStatic("/", SPIFFS, "/");
 
     server.begin();
 }
@@ -5328,8 +5305,6 @@ void setup()
   WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
-  initSPIFFS();
-  debugln("Spiffs initialisiert");
   initWiFi();
   debugln("Wifi Initialisiert");
   //initWebSocket();

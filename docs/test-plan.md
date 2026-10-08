@@ -143,18 +143,13 @@ Firmware-Upload:
 4. per Button neu starten
 5. WebUI wieder oeffnen
 
-SPIFFS-Upload:
+Eingebettete Web-Assets:
 
-1. Dateisystem bauen
-
-```powershell
-pio run -e KaffeewaageLilygoT-DisplayS3_20240212 -t buildfs
-```
-
-2. erzeugte SPIFFS-Binary ueber Dateisystem-Upload hochladen
-3. Erfolgsmeldung abwarten
-4. per Button neu starten
-5. Icon-/Manifest-URLs pruefen
+1. Firmware normal bauen und ueber `/update` hochladen
+2. Erfolgsmeldung abwarten
+3. per Button neu starten
+4. `/manifest.json`, `/icon-192.png`, `/icon-512.png` und `/favicon.ico` pruefen
+5. sicherstellen, dass kein separater Dateisystem-Upload erforderlich ist
 
 
 ### OTA-Dateinamen-Schutz
@@ -166,18 +161,11 @@ Falsche Datei im Firmware-Feld:
 3. Upload-Klick
 4. Erwartung: Upload wird clientseitig blockiert
 
-Falsche Datei im SPIFFS-Feld:
-
-1. `firmware.bin` im SPIFFS-/Dateisystem-Feld auswaehlen
-2. Erwartung: Meldung `SPIFFS: falsche Datei gewaehlt. Erwartet: spiffs.bin oder littlefs.bin.`
-3. Upload-Klick
-4. Erwartung: Upload wird clientseitig blockiert
-
 Serverseitiger Schutz:
 
 - Falls ein Upload die WebUI-Pruefung umgehen wuerde, muss der ESP mit HTTP 400 antworten.
 - Firmware-Endpunkt akzeptiert nur `firmware.bin`.
-- Dateisystem-Endpunkt akzeptiert nur `spiffs.bin` oder `littlefs.bin`.
+- Ein Dateisystem-Endpunkt ist nicht mehr vorhanden.
 
 ## Storage-/Preferences-Test
 

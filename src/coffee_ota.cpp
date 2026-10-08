@@ -2,7 +2,6 @@
 #include "ble_scale.h"
 
 #include <Arduino.h>
-#include <SPIFFS.h>
 #include <Update.h>
 
 static bool otaRebootRequested = false;
@@ -43,7 +42,7 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
 <body>
   <div class="panel">
     <h1>Kaffeewaage OTA Update</h1>
-    <p class="hint">Hier koennen Firmware und SPIFFS-Dateisystem getrennt aktualisiert werden.</p>
+    <p class="hint">Hier kann die Firmware der Kaffeewaage aktualisiert werden.</p>
 
     <div class="card">
       <h2>Firmware aktualisieren</h2>
@@ -57,21 +56,9 @@ static const char OTA_UPDATE_PAGE[] PROGMEM = R"rawliteral(
       </form>
     </div>
 
-    <div class="card">
-      <h2>Dateisystem aktualisieren</h2>
-      <p class="hint">Datei: <code>.pio/build/KaffeewaageLilygoT-DisplayS3_20240212/spiffs.bin</code></p>
-      <form class="ota-form" method="POST" action="/update/filesystem" enctype="multipart/form-data" data-label="SPIFFS" data-expected="spiffs.bin,littlefs.bin">
-        <input type="file" name="update" accept=".bin" required>
-        <div class="file-check"></div>
-        <button type="submit">SPIFFS hochladen</button>
-        <progress value="0" max="100" hidden></progress>
-        <div class="status"></div>
-      </form>
-    </div>
-
     <div id="reboot-panel" class="reboot-panel">
       <h2>Neustart erforderlich</h2>
-      <p class="hint">Das Update wurde erfolgreich eingespielt. Bitte starte den ESP32 jetzt neu, damit die neue Firmware bzw. das neue Dateisystem aktiv wird.</p>
+      <p class="hint">Das Firmware-Update wurde erfolgreich eingespielt. Bitte starte den ESP32 jetzt neu, damit die neue Firmware aktiv wird.</p>
       <button id="reboot-button" class="danger" type="button">ESP32 jetzt neu starten</button>
       <div id="reboot-status" class="status"></div>
     </div>
@@ -252,10 +239,10 @@ static void onUpdateRebootRequest(AsyncWebServerRequest *request) {
   coffeeOtaRequestReboot();
 }
 
-static bool isExpectedOtaFilename(const String& filename, const char* expected1, const char* expected2 = nullptr) {
+static bool isExpectedOtaFilename(const String& filename, const char* expected) {
   String lower = filename;
   lower.toLowerCase();
-  return lower == expected1 || (expected2 && lower == expected2);
+  return lower == expected;
 }
 
 static void rejectOtaUpload(const String& filename, const String& expected) {
@@ -304,51 +291,9 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
   }
 }
 
-static void handleFilesystemUpload(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
-  (void)request;
-  if (index == 0) {
-    otaUploadRejected = false;
-    otaUploadRejectReason = String();
-
-    if (!isExpectedOtaFilename(filename, "spiffs.bin", "littlefs.bin")) {
-      rejectOtaUpload(filename, "spiffs.bin oder littlefs.bin");
-      return;
-    }
-
-    coffeeBleScaleStopForOta();
-
-    Serial.print("SPIFFS update started: ");
-    Serial.println(filename);
-    SPIFFS.end();
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
-      Update.printError(Serial);
-    }
-  }
-
-  if (otaUploadRejected) {
-    return;
-  }
-
-  if (!Update.hasError()) {
-    if (Update.write(data, len) != len) {
-      Update.printError(Serial);
-    }
-  }
-
-  if (final) {
-    if (Update.end(true)) {
-      Serial.print("SPIFFS update complete: ");
-      Serial.println(index + len);
-    } else {
-      Update.printError(Serial);
-    }
-  }
-}
-
 void coffeeOtaBegin(AsyncWebServer& server) {
   server.on("/update", HTTP_GET, onUpdateRequest);
   server.on("/update/firmware", HTTP_POST, onUpdateFinished, handleFirmwareUpload);
-  server.on("/update/filesystem", HTTP_POST, onUpdateFinished, handleFilesystemUpload);
   server.on("/update/reboot", HTTP_POST, onUpdateRebootRequest);
 }
 

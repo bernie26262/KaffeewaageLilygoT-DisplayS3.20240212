@@ -44,7 +44,7 @@ Enthaelt:
 - PWA-Manifest-Handler
 - Icon-/Favicon-Routen
 
-Die Hauptseite ist aktuell bewusst noch nicht nach SPIFFS ausgelagert, damit keine groessere WebUI-Umstrukturierung entsteht.
+Die WebUI und die PWA-/Browser-Assets werden vollstaendig aus der Firmware ausgeliefert. Ein separates Flash-Dateisystem ist zur Laufzeit nicht erforderlich.
 
 ### `ble_scale.cpp/.h`
 
@@ -72,10 +72,7 @@ Der Shot-Verlauf wird nicht in NVS gespeichert und ist nach einem Neustart verlo
 
 ### `coffee_ota.cpp/.h`
 
-Enthaelt die Update-Seite `/update` mit getrenntem Upload fuer:
-
-- Firmware (`U_FLASH`)
-- SPIFFS-Dateisystem (`U_SPIFFS`)
+Enthaelt die Update-Seite `/update` fuer das Firmware-Binary (`U_FLASH`). WebUI und eingebettete Assets werden damit gemeinsam aktualisiert.
 
 Der ESP rebootet nach Upload nicht automatisch. Der Neustart erfolgt per Button.
 
@@ -106,10 +103,9 @@ Wichtig ist die Handler-Reihenfolge:
 1. Route `/`
 2. WebUI-/PWA-Handler aus `coffeeWebBegin(server)`
 3. OTA-Handler aus `coffeeOtaBegin(server)`
-4. statische SPIFFS-Auslieferung `server.serveStatic("/", SPIFFS, "/")`
-5. `server.begin()`
+4. `server.begin()`
 
-Der breite Static-Handler darf PWA-/Favicon-Spezialrouten nicht vorzeitig abfangen.
+Alle WebUI-, Manifest- und Icon-Routen sind explizite Handler; ein Dateisystem-Catch-all ist nicht mehr vorhanden.
 
 ## WebUI-Kommunikation
 

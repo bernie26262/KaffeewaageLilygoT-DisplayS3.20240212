@@ -4,13 +4,15 @@
 
 Die Haupt-WebUI ist aktuell in `src/coffee_web.cpp` eingebettet. Das ist historisch gewachsen und soll kurzfristig stabil bleiben.
 
-Bereits ausgelagert ins SPIFFS-Dateisystem sind die PWA-/Homescreen-Icons:
+Die PWA-/Homescreen-Icons und das Favicon liegen als Quelldateien unter:
 
 ```text
-data/kaffeewaage-192.png
-data/kaffeewaage-512.png
-data/kaffeewaage.ico
+assets/kaffeewaage-192.png
+assets/kaffeewaage-512.png
+assets/kaffeewaage.ico
 ```
+
+PlatformIO bettet diese Dateien ueber `board_build.embed_files` direkt in die read-only `.rodata`-Sektion der Firmware ein. Ein SPIFFS-/LittleFS-Dateisystem wird fuer die WebUI nicht mehr benoetigt.
 
 
 ## WebUI-Asset-Split
@@ -25,7 +27,7 @@ Die Haupt-WebUI wird weiterhin aus der Firmware/PROGMEM ausgeliefert. Seit dem P
 /coffee_events.js JavaScript: WebSocket-Verbindung und Event-Handler
 ```
 
-Dadurch bleibt der Betrieb weiterhin ohne zusaetzlichen SPIFFS-/LittleFS-Upload fuer die Haupt-WebUI moeglich, aber die einzelnen HTTP-Antworten sind deutlich kleiner. Das hat die Auslieferung der WebUI auf der Kaffeewaage stabilisiert und stark beschleunigt. Nach weiteren Tests wurde der JavaScript-Teil nochmals in drei kleinere Dateien aufgeteilt, damit kein einzelnes JS-Asset mehr ca. 39 kB gross ist.
+Die einzelnen HTTP-Antworten der Haupt-WebUI bleiben dadurch klein. Das hat die Auslieferung der WebUI auf der Kaffeewaage stabilisiert und stark beschleunigt. Nach weiteren Tests wurde der JavaScript-Teil nochmals in drei kleinere Dateien aufgeteilt, damit kein einzelnes JS-Asset mehr ca. 39 kB gross ist.
 
 Gemessene Referenzwerte nach dem Split:
 
@@ -47,7 +49,7 @@ http://<ip>/coffee_render.js?v=test
 http://<ip>/coffee_events.js?v=test
 ```
 
-Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
+Die binaeren PWA-/Browser-Assets werden zusammen mit der Haupt-WebUI durch dasselbe `firmware.bin` aktualisiert.
 
 ## Shot-Waage und Live-Graph
 
@@ -97,7 +99,7 @@ Die WebUI enthaelt im HTML-`head` die relevanten PWA-/Mobile-Meta-Tags:
 - Apple-Mobile-Web-App-Modus
 - Apple-App-Titel
 
-Das Manifest wird derzeit nicht als Datei aus `data/` ausgeliefert, sondern als JSON aus der Firmware ueber:
+Das Manifest wird als JSON aus der Firmware ueber folgende Route ausgeliefert:
 
 ```text
 /manifest.json
@@ -111,7 +113,7 @@ Die Icons werden ueber stabile URLs bereitgestellt:
 /favicon.ico
 ```
 
-Diese Routen mappen auf die Dateien im SPIFFS.
+Diese Routen liefern die direkt in die Firmware eingebetteten Binaerdaten aus.
 
 ## Cache-Busting
 
@@ -130,7 +132,7 @@ Android aktualisiert Homescreen-Icons oft nicht zuverlaessig nachtraeglich. Bei 
 
 ## Pruef-URLs
 
-Nach Firmware- und SPIFFS-Upload sollten diese URLs getestet werden:
+Nach einem Firmware-Upload sollten diese URLs getestet werden:
 
 ```text
 http://<ip>/manifest.json?v=99
@@ -154,10 +156,7 @@ Die OTA-Seite ist erreichbar unter:
 http://<ip>/update
 ```
 
-Sie bietet getrennte Uploads fuer:
-
-- Firmware
-- SPIFFS-Dateisystem
+Sie bietet genau einen Upload fuer `firmware.bin`. WebUI, Manifest und Icons sind Bestandteil dieses Firmware-Binaries.
 
 Nach erfolgreichem Upload wird kein automatischer Neustart ausgefuehrt. Dadurch kann erst geprueft werden, ob der Upload erfolgreich war. Danach wird per Button neu gestartet.
 
@@ -168,14 +167,13 @@ Die OTA-Seite prueft die ausgewaehlten Dateinamen doppelt:
 1. clientseitig in der WebUI direkt bei der Dateiauswahl und erneut beim Upload-Klick
 2. ESP-seitig im Upload-Handler, bevor `Update.begin(...)` aufgerufen wird
 
-Erlaubte Dateinamen:
+Erlaubter Dateiname:
 
 | Upload-Feld | erlaubte Datei |
 |---|---|
 | Firmware | `firmware.bin` |
-| SPIFFS/Dateisystem | `spiffs.bin` oder `littlefs.bin` |
 
-Bei falschem Dateinamen wird der Upload blockiert. ESP-seitig antwortet der Handler mit HTTP 400 und einer erklaerenden Meldung. Dadurch wird verhindert, dass versehentlich `spiffs.bin` als Firmware oder `firmware.bin` als Dateisystem-Image geschrieben wird.
+Bei falschem Dateinamen wird der Upload blockiert. ESP-seitig antwortet der Handler mit HTTP 400 und einer erklaerenden Meldung.
 
 Details und Testfaelle stehen in:
 
@@ -196,14 +194,6 @@ Die erzeugte Firmware-Binary liegt unter:
 .pio\build\KaffeewaageLilygoT-DisplayS3_20240212\firmware.bin
 ```
 
-## SPIFFS bauen
+## Kein separates Dateisystem-Image
 
-Bei OTA-Projekten nicht `pio run -t uploadfs` verwenden.
-
-Stattdessen:
-
-```powershell
-pio run -e KaffeewaageLilygoT-DisplayS3_20240212 -t buildfs
-```
-
-Danach das erzeugte SPIFFS-Image aus dem Build-Ordner ueber `/update` hochladen.
+Ein `buildfs`-/`uploadfs`-Schritt ist nicht mehr erforderlich. Die Dateien unter `assets/` werden beim normalen Firmware-Build automatisch in `firmware.bin` eingebettet.

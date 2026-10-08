@@ -1,6 +1,5 @@
 #include "coffee_web.h"
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
 
 #include "coffee_wifi.h"
 #include "shot_session.h"
@@ -8,12 +7,22 @@
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
 
+// PlatformIO bettet diese Dateien ueber board_build.embed_files direkt in die
+// Firmware ein. Die Linker-Symbole zeigen auf die unveraenderten Binaerdaten
+// in der read-only .rodata-Sektion im Flash.
+extern const uint8_t coffeeIcon192Start[] asm("_binary_assets_kaffeewaage_192_png_start");
+extern const uint8_t coffeeIcon192End[] asm("_binary_assets_kaffeewaage_192_png_end");
+extern const uint8_t coffeeIcon512Start[] asm("_binary_assets_kaffeewaage_512_png_start");
+extern const uint8_t coffeeIcon512End[] asm("_binary_assets_kaffeewaage_512_png_end");
+extern const uint8_t coffeeFaviconStart[] asm("_binary_assets_kaffeewaage_ico_start");
+extern const uint8_t coffeeFaviconEnd[] asm("_binary_assets_kaffeewaage_ico_end");
+
 // =============================================================================
 // Eingebettete WebUI
 // =============================================================================
-// Aktuell bewusst als PROGMEM-String eingebettet, damit Firmware und WebUI
-// immer zusammenpassen. Falls HTML/CSS/JS spaeter nach LittleFS wandern, sollte
-// die fachliche Logik trotzdem weiterhin im Core/AppState bleiben.
+// Bewusst in der Firmware eingebettet, damit Firmware und WebUI immer
+// zusammenpassen. Auch die binaeren PWA-/Browser-Assets werden direkt in die
+// Firmware gelinkt; die fachliche Logik bleibt weiterhin im Core/AppState.
 
 static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 <html lang="de">
@@ -3262,15 +3271,15 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/kaffeewaage-192.png", "image/png");
+    request->send_P(200, "image/png", coffeeIcon192Start, static_cast<size_t>(coffeeIcon192End - coffeeIcon192Start));
   });
 
   server.on("/icon-512.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/kaffeewaage-512.png", "image/png");
+    request->send_P(200, "image/png", coffeeIcon512Start, static_cast<size_t>(coffeeIcon512End - coffeeIcon512Start));
   });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SPIFFS, "/kaffeewaage.ico", "image/x-icon");
+    request->send_P(200, "image/x-icon", coffeeFaviconStart, static_cast<size_t>(coffeeFaviconEnd - coffeeFaviconStart));
   });
 
   server.addHandler(&ws);

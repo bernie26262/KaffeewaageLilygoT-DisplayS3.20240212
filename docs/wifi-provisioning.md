@@ -204,7 +204,7 @@ Empfehlungen:
 
 ## Bedeutung fuer das HMI
 
-Auf dem lokalen HMI wird OTA nicht benoetigt, weil Firmware- und Dateisystem-Updates vom Computer aus erfolgen.
+Auf dem lokalen HMI wird OTA nicht benoetigt, weil Firmware-Updates vom Computer aus erfolgen.
 
 Stattdessen ist fuer ein eigenstaendiges Geraet ein WLAN-Einrichtungsmodus wichtig.
 
@@ -272,7 +272,7 @@ Das Projekt nutzt bereits:
 - Preferences/NVS
 - AsyncWebServer
 - WebUI
-- SPIFFS/OTA
+- OTA
 
 Damit sind die technischen Voraussetzungen vorhanden.
 
