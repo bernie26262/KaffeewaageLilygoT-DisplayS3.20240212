@@ -13,6 +13,16 @@ constexpr const char* WIFI_PREF_NAMESPACE = "coffee_wifi";
 constexpr const char* WIFI_PREF_KEY_SSID = "ssid";
 constexpr const char* WIFI_PREF_KEY_PASS = "pass";
 constexpr const char* WIFI_PREF_KEY_ACTIVE = "active";
+
+// One-time migration from the original single-profile NVS keys above.
+constexpr const char* WIFI_PREF_KEY_SCHEMA = "schema";
+constexpr uint8_t WIFI_PREF_SCHEMA_PROFILES = 1;
+constexpr const char* WIFI_PREF_KEY_P1_SSID = "p1_ssid";
+constexpr const char* WIFI_PREF_KEY_P1_PASS = "p1_pass";
+constexpr const char* WIFI_PREF_KEY_P2_SSID = "p2_ssid";
+constexpr const char* WIFI_PREF_KEY_P2_PASS = "p2_pass";
+constexpr const char* WIFI_PREF_KEY_PREFERRED = "pref";
+constexpr const char* WIFI_PREF_KEY_AUTO = "auto";
 constexpr const char* WIFI_SETUP_AP_SSID = "Waagen-Setup";
 constexpr uint32_t SETUP_AP_DIAG_MAGIC = 0x57494649UL;  // "WIFI"
 
@@ -39,6 +49,11 @@ bool storedCredentialsAvailable = false;
 bool storedCredentialsActive = false;
 String storedCredentialsSsid;
 bool storedCredentialsPasswordAvailable = false;
+bool profileAvailable[2] = {false, false};
+String profileSsid[2];
+bool profilePasswordAvailable[2] = {false, false};
+uint8_t preferredProfile = 1;
+bool automaticConnectionEnabled = false;
 bool setupApActive = false;
 bool setupCredentialsSavedPendingRestart = false;
 uint32_t storedCredentialsRevision = 0;
@@ -96,45 +111,125 @@ void resetActiveConnectionAttempt()
   activeCredentialsDisconnects = 0;
 }
 
-void refreshStoredCredentialsCache()
+bool profileNumberValid(uint8_t profile)
+{
+  return profile == 1 || profile == 2;
+}
+
+const char* profileSsidKey(uint8_t profile)
+{
+  return profile == 2 ? WIFI_PREF_KEY_P2_SSID : WIFI_PREF_KEY_P1_SSID;
+}
+
+const char* profilePassKey(uint8_t profile)
+{
+  return profile == 2 ? WIFI_PREF_KEY_P2_PASS : WIFI_PREF_KEY_P1_PASS;
+}
+
+bool ensureProfileStorageMigrated()
 {
   Preferences prefs;
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+    return false;
+  }
+
+  const uint8_t schema = prefs.getUChar(WIFI_PREF_KEY_SCHEMA, 0);
+  if (schema >= WIFI_PREF_SCHEMA_PROFILES) {
+    prefs.end();
+    return true;
+  }
+
+  String legacySsid = prefs.getString(WIFI_PREF_KEY_SSID, "");
+  const String legacyPassword = prefs.getString(WIFI_PREF_KEY_PASS, "");
+  const bool legacyActive = prefs.getBool(WIFI_PREF_KEY_ACTIVE, false);
+  legacySsid.trim();
+
+  // Do not erase the old keys: they remain intact for rollback.
+  bool migrated = true;
+  if (legacySsid.length() > 0) {
+    if (!prefs.isKey(WIFI_PREF_KEY_P1_SSID)) {
+      migrated = prefs.putString(WIFI_PREF_KEY_P1_SSID, legacySsid) > 0 && migrated;
+    }
+    if (!prefs.isKey(WIFI_PREF_KEY_P1_PASS)) {
+      migrated = (legacyPassword.length() == 0 ||
+                  prefs.putString(WIFI_PREF_KEY_P1_PASS, legacyPassword) > 0) && migrated;
+    }
+  }
+
+  migrated = prefs.putUChar(WIFI_PREF_KEY_PREFERRED, 1) > 0 && migrated;
+  migrated = prefs.putBool(WIFI_PREF_KEY_AUTO, legacySsid.length() > 0 && legacyActive) > 0 && migrated;
+  if (migrated) {
+    migrated = prefs.putUChar(WIFI_PREF_KEY_SCHEMA, WIFI_PREF_SCHEMA_PROFILES) > 0;
+  }
+  prefs.end();
+  return migrated;
+}
+
+void refreshStoredCredentialsCache()
+{
   storedCredentialsAvailable = false;
   storedCredentialsActive = false;
   storedCredentialsSsid = String();
   storedCredentialsPasswordAvailable = false;
+  profileAvailable[0] = profileAvailable[1] = false;
+  profileSsid[0] = profileSsid[1] = String();
+  profilePasswordAvailable[0] = profilePasswordAvailable[1] = false;
+  preferredProfile = 1;
+  automaticConnectionEnabled = false;
 
+  if (!ensureProfileStorageMigrated()) {
+    storedCredentialsKnown = true;
+    return;
+  }
+
+  Preferences prefs;
   if (!prefs.begin(WIFI_PREF_NAMESPACE, true)) {
     storedCredentialsKnown = true;
     return;
   }
 
-  String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
-  const String password = prefs.getString(WIFI_PREF_KEY_PASS, "");
-  ssid.trim();
-  storedCredentialsSsid = ssid;
-  storedCredentialsAvailable = ssid.length() > 0;
-  storedCredentialsPasswordAvailable = storedCredentialsAvailable && password.length() > 0;
-  storedCredentialsActive = storedCredentialsAvailable && prefs.getBool(WIFI_PREF_KEY_ACTIVE, false);
+  for (uint8_t profile = 1; profile <= 2; ++profile) {
+    String ssid = prefs.getString(profileSsidKey(profile), "");
+    const String password = prefs.getString(profilePassKey(profile), "");
+    ssid.trim();
+    const uint8_t index = profile - 1;
+    profileSsid[index] = ssid;
+    profileAvailable[index] = ssid.length() > 0;
+    profilePasswordAvailable[index] = profileAvailable[index] && password.length() > 0;
+  }
+
+  preferredProfile = prefs.getUChar(WIFI_PREF_KEY_PREFERRED, 1);
+  if (!profileNumberValid(preferredProfile)) {
+    preferredProfile = 1;
+  }
+  automaticConnectionEnabled = prefs.getBool(WIFI_PREF_KEY_AUTO, false);
   prefs.end();
 
+  const uint8_t preferredIndex = preferredProfile - 1;
+  storedCredentialsAvailable = profileAvailable[0] || profileAvailable[1];
+  storedCredentialsSsid = profileSsid[preferredIndex];
+  storedCredentialsPasswordAvailable = profilePasswordAvailable[preferredIndex];
+  storedCredentialsActive = automaticConnectionEnabled && profileAvailable[preferredIndex];
   storedCredentialsKnown = true;
 }
 
-bool readStoredCredentials(CoffeeWifiCredentials& credentials)
+bool readProfileCredentials(uint8_t profile, CoffeeWifiCredentials& credentials)
 {
+  if (!profileNumberValid(profile) || !ensureProfileStorageMigrated()) {
+    return false;
+  }
+
   Preferences prefs;
   if (!prefs.begin(WIFI_PREF_NAMESPACE, true)) {
     return false;
   }
 
-  String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
-  const String password = prefs.getString(WIFI_PREF_KEY_PASS, "");
-  const bool active = prefs.getBool(WIFI_PREF_KEY_ACTIVE, false);
+  String ssid = prefs.getString(profileSsidKey(profile), "");
+  const String password = prefs.getString(profilePassKey(profile), "");
   prefs.end();
 
   ssid.trim();
-  if (ssid.length() == 0 || !active) {
+  if (ssid.length() == 0) {
     return false;
   }
 
@@ -143,6 +238,17 @@ bool readStoredCredentials(CoffeeWifiCredentials& credentials)
   credentials.fromPreferences = true;
   credentials.source = CoffeeWifiCredentialSource::Preferences;
   return true;
+}
+
+bool readStoredCredentials(CoffeeWifiCredentials& credentials)
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  if (!automaticConnectionEnabled || !profileNumberValid(preferredProfile)) {
+    return false;
+  }
+  return readProfileCredentials(preferredProfile, credentials);
 }
 
 CoffeeWifiCredentials fallbackCredentials()
@@ -193,11 +299,64 @@ bool coffeeWifiStoredCredentialsAreActive()
   return storedCredentialsActive;
 }
 
-bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
+bool coffeeWifiProfileAvailable(uint8_t profile)
 {
+  if (!profileNumberValid(profile)) {
+    return false;
+  }
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return profileAvailable[profile - 1];
+}
+
+String coffeeWifiProfileSsid(uint8_t profile)
+{
+  if (!profileNumberValid(profile)) {
+    return String();
+  }
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return profileSsid[profile - 1];
+}
+
+bool coffeeWifiProfilePasswordAvailable(uint8_t profile)
+{
+  if (!profileNumberValid(profile)) {
+    return false;
+  }
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return profilePasswordAvailable[profile - 1];
+}
+
+uint8_t coffeeWifiPreferredProfile()
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return preferredProfile;
+}
+
+bool coffeeWifiAutomaticConnectionEnabled()
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return automaticConnectionEnabled;
+}
+
+bool coffeeWifiSaveProfile(uint8_t profile, const String& ssid, const String& password)
+{
+  if (!profileNumberValid(profile)) {
+    return false;
+  }
+
   String trimmedSsid = ssid;
   trimmedSsid.trim();
-  if (trimmedSsid.length() == 0) {
+  if (trimmedSsid.length() == 0 || !ensureProfileStorageMigrated()) {
     return false;
   }
 
@@ -207,24 +366,103 @@ bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
   }
 
   String passwordToStore = password;
-  if (passwordToStore.length() == 0 && prefs.isKey(WIFI_PREF_KEY_PASS)) {
-    passwordToStore = prefs.getString(WIFI_PREF_KEY_PASS, "");
+  if (passwordToStore.length() == 0 && prefs.isKey(profilePassKey(profile))) {
+    passwordToStore = prefs.getString(profilePassKey(profile), "");
   }
 
-  const size_t ssidBytes = prefs.putString(WIFI_PREF_KEY_SSID, trimmedSsid);
-  const size_t passBytes = prefs.putString(WIFI_PREF_KEY_PASS, passwordToStore);
-
-  // Sicherheitsentscheidung nach Phase-2a-Test:
-  // Neu gespeicherte Credentials werden zunaechst nur abgelegt, aber nicht
-  // automatisch beim Boot bevorzugt. Die Aktivierung kommt erst, wenn eine
-  // saubere Validierungs-/Fallback-Logik vorhanden ist.
-  const size_t activeBytes = prefs.putBool(WIFI_PREF_KEY_ACTIVE, false);
+  const size_t ssidBytes = prefs.putString(profileSsidKey(profile), trimmedSsid);
+  const size_t passBytes = prefs.putString(profilePassKey(profile), passwordToStore);
   prefs.end();
 
   refreshStoredCredentialsCache();
   storedCredentialsRevision++;
+  return ssidBytes > 0 && (passwordToStore.length() == 0 || passBytes > 0);
+}
 
-  return ssidBytes > 0 && (passwordToStore.length() == 0 || passBytes > 0) && activeBytes > 0;
+bool coffeeWifiClearProfile(uint8_t profile)
+{
+  if (!profileNumberValid(profile) || !ensureProfileStorageMigrated()) {
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+    return false;
+  }
+
+  prefs.remove(profileSsidKey(profile));
+  prefs.remove(profilePassKey(profile));
+
+  const uint8_t currentPreferred = prefs.getUChar(WIFI_PREF_KEY_PREFERRED, 1);
+  if (currentPreferred == profile) {
+    const uint8_t other = profile == 1 ? 2 : 1;
+    String otherSsid = prefs.getString(profileSsidKey(other), "");
+    otherSsid.trim();
+    if (otherSsid.length() > 0) {
+      prefs.putUChar(WIFI_PREF_KEY_PREFERRED, other);
+    } else {
+      prefs.putBool(WIFI_PREF_KEY_AUTO, false);
+    }
+  }
+  prefs.end();
+
+  activeCredentialsLoaded = false;
+  activeCredentials = CoffeeWifiCredentials{};
+  refreshStoredCredentialsCache();
+  storedCredentialsRevision++;
+  return true;
+}
+
+bool coffeeWifiSetPreferredProfile(uint8_t profile)
+{
+  if (!profileNumberValid(profile) || !coffeeWifiProfileAvailable(profile) || !ensureProfileStorageMigrated()) {
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+    return false;
+  }
+  const size_t bytes = prefs.putUChar(WIFI_PREF_KEY_PREFERRED, profile);
+  prefs.end();
+
+  activeCredentialsLoaded = false;
+  activeCredentials = CoffeeWifiCredentials{};
+  refreshStoredCredentialsCache();
+  storedCredentialsRevision++;
+  return bytes > 0;
+}
+
+bool coffeeWifiSetAutomaticConnectionEnabled(bool enabled)
+{
+  if (!ensureProfileStorageMigrated()) {
+    return false;
+  }
+  if (enabled && !coffeeWifiProfileAvailable(coffeeWifiPreferredProfile())) {
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+    return false;
+  }
+  const size_t bytes = prefs.putBool(WIFI_PREF_KEY_AUTO, enabled);
+  prefs.end();
+
+  activeCredentialsLoaded = false;
+  activeCredentials = CoffeeWifiCredentials{};
+  refreshStoredCredentialsCache();
+  storedCredentialsRevision++;
+  return bytes > 0;
+}
+
+// Backwards-compatible T4 WebUI: edit WLAN 1, leave inactive until enabled.
+bool coffeeWifiSaveCredentials(const String& ssid, const String& password)
+{
+  if (!coffeeWifiSaveProfile(1, ssid, password)) {
+    return false;
+  }
+  return coffeeWifiSetAutomaticConnectionEnabled(false);
 }
 
 String coffeeWifiStoredSsid()
@@ -245,50 +483,15 @@ bool coffeeWifiStoredPasswordAvailable()
 
 bool coffeeWifiSetStoredCredentialsActive(bool active)
 {
-  Preferences prefs;
-  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
+  if (active && !coffeeWifiSetPreferredProfile(1)) {
     return false;
   }
-
-  String ssid = prefs.getString(WIFI_PREF_KEY_SSID, "");
-  ssid.trim();
-  if (active && ssid.length() == 0) {
-    prefs.end();
-    refreshStoredCredentialsCache();
-    return false;
-  }
-
-  const size_t activeBytes = prefs.putBool(WIFI_PREF_KEY_ACTIVE, active);
-  prefs.end();
-
-  activeCredentialsLoaded = false;
-  activeCredentials = CoffeeWifiCredentials{};
-  refreshStoredCredentialsCache();
-  storedCredentialsRevision++;
-  return activeBytes > 0;
+  return coffeeWifiSetAutomaticConnectionEnabled(active);
 }
 
 bool coffeeWifiClearCredentials()
 {
-  Preferences prefs;
-  if (!prefs.begin(WIFI_PREF_NAMESPACE, false)) {
-    return false;
-  }
-
-  const bool ssidRemoved = prefs.remove(WIFI_PREF_KEY_SSID);
-  const bool passRemoved = prefs.remove(WIFI_PREF_KEY_PASS);
-  const bool activeRemoved = prefs.remove(WIFI_PREF_KEY_ACTIVE);
-  prefs.end();
-
-  activeCredentialsLoaded = false;
-  activeCredentials = CoffeeWifiCredentials{};
-  refreshStoredCredentialsCache();
-  storedCredentialsRevision++;
-
-  (void)ssidRemoved;
-  (void)passRemoved;
-  (void)activeRemoved;
-  return true;
+  return coffeeWifiClearProfile(1);
 }
 
 uint32_t coffeeWifiStoredCredentialsRevision()

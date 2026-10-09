@@ -15,15 +15,27 @@ struct CoffeeWifiCredentials {
   CoffeeWifiCredentialSource source = CoffeeWifiCredentialSource::None;
 };
 
-// WLAN-Zugangsdaten zentral verwalten.
-// Sicherheitsstand nach Phase-2a-Test:
-// - gespeicherte NVS-Daten nur verwenden, wenn sie explizit als aktiv markiert sind
-// - sonst unverändert auf wifi_secrets.h zurückfallen
+// Phase A1: NVS schema v1 supports two stored WLAN profiles.
+// Existing single-profile NVS credentials are migrated once to WLAN 1.
+// The current T4 connection/fallback logic remains unchanged until phase A2.
 bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials);
 bool coffeeWifiHasStoredCredentials();
 bool coffeeWifiStoredCredentialsAreActive();
 String coffeeWifiStoredSsid();
 bool coffeeWifiStoredPasswordAvailable();
+
+// WLAN profiles (1/2), preferred profile and automatic connection switch.
+bool coffeeWifiProfileAvailable(uint8_t profile);
+String coffeeWifiProfileSsid(uint8_t profile);
+bool coffeeWifiProfilePasswordAvailable(uint8_t profile);
+bool coffeeWifiSaveProfile(uint8_t profile, const String& ssid, const String& password);
+bool coffeeWifiClearProfile(uint8_t profile);
+uint8_t coffeeWifiPreferredProfile();
+bool coffeeWifiSetPreferredProfile(uint8_t profile);
+bool coffeeWifiAutomaticConnectionEnabled();
+bool coffeeWifiSetAutomaticConnectionEnabled(bool enabled);
+
+// Compatibility API for the existing T4 single-profile WebUI (WLAN 1).
 bool coffeeWifiSaveCredentials(const String& ssid, const String& password);
 bool coffeeWifiSetStoredCredentialsActive(bool active);
 bool coffeeWifiClearCredentials();
