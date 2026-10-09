@@ -3527,6 +3527,139 @@ void coffeeWebBegin(AsyncWebServer& server)
     request->send((saved && activated) ? 200 : 400, "application/json", out);
   });
 
+  server.on("/api/wifi/profile", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("profile", true) || !request->hasParam("ssid", true)) {
+      StaticJsonDocument<192> doc;
+      doc["ok"] = false;
+      doc["message"] = "Profil oder SSID fehlt.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const int profileValue = request->getParam("profile", true)->value().toInt();
+    if (profileValue != 1 && profileValue != 2) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "Ungueltiges WLAN-Profil.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const uint8_t profile = static_cast<uint8_t>(profileValue);
+    const String ssid = request->getParam("ssid", true)->value();
+    const String password = request->hasParam("password", true)
+                              ? request->getParam("password", true)->value()
+                              : String();
+
+    const bool saved = coffeeWifiSaveProfile(profile, ssid, password);
+    bool preferredOk = saved;
+    if (saved && !coffeeWifiProfileAvailable(coffeeWifiPreferredProfile())) {
+      preferredOk = coffeeWifiSetPreferredProfile(profile);
+    }
+    const bool automaticOk = preferredOk && coffeeWifiSetAutomaticConnectionEnabled(true);
+    const bool ok = saved && preferredOk && automaticOk;
+
+    StaticJsonDocument<256> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok
+                       ? "WLAN-Profil gespeichert. Die Aenderung wirkt beim naechsten Verbindungszyklus oder Neustart."
+                       : "WLAN-Profil konnte nicht gespeichert werden.";
+    doc["preferred_profile"] = coffeeWifiPreferredProfile();
+    doc["automatic_connection"] = coffeeWifiAutomaticConnectionEnabled();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 400, "application/json", out);
+  });
+
+  server.on("/api/wifi/profile", HTTP_DELETE, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("profile")) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "Profil fehlt.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const int profileValue = request->getParam("profile")->value().toInt();
+    if (profileValue != 1 && profileValue != 2) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "Ungueltiges WLAN-Profil.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const uint8_t profile = static_cast<uint8_t>(profileValue);
+    const bool ok = coffeeWifiClearProfile(profile);
+
+    StaticJsonDocument<256> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok
+                       ? "WLAN-Profil geloescht. Die laufende Verbindung bleibt bis zum naechsten Verbindungswechsel bestehen."
+                       : "WLAN-Profil konnte nicht geloescht werden.";
+    doc["preferred_profile"] = coffeeWifiPreferredProfile();
+    doc["automatic_connection"] = coffeeWifiAutomaticConnectionEnabled();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 500, "application/json", out);
+  });
+
+  server.on("/api/wifi/preferred", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("profile", true)) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "Profil fehlt.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const int profileValue = request->getParam("profile", true)->value().toInt();
+    if (profileValue != 1 && profileValue != 2) {
+      StaticJsonDocument<160> doc;
+      doc["ok"] = false;
+      doc["message"] = "Ungueltiges WLAN-Profil.";
+
+      String out;
+      serializeJson(doc, out);
+      request->send(400, "application/json", out);
+      return;
+    }
+
+    const uint8_t profile = static_cast<uint8_t>(profileValue);
+    const bool preferredOk = coffeeWifiSetPreferredProfile(profile);
+    const bool automaticOk = preferredOk && coffeeWifiSetAutomaticConnectionEnabled(true);
+    const bool ok = preferredOk && automaticOk;
+
+    StaticJsonDocument<256> doc;
+    doc["ok"] = ok;
+    doc["message"] = ok
+                       ? "Bevorzugtes WLAN gespeichert. Die Auswahl wirkt beim naechsten Verbindungszyklus oder Neustart."
+                       : "Bevorzugtes WLAN konnte nicht geaendert werden.";
+    doc["preferred_profile"] = coffeeWifiPreferredProfile();
+    doc["automatic_connection"] = coffeeWifiAutomaticConnectionEnabled();
+
+    String out;
+    serializeJson(doc, out);
+    request->send(ok ? 200 : 400, "application/json", out);
+  });
+
   server.on("/api/wifi/credentials", HTTP_POST, [](AsyncWebServerRequest* request) {
     // AsyncWebServer matched this handler also for the longer URLs
     // /api/wifi/credentials/activate and /api/wifi/credentials/deactivate on the device.
@@ -3782,6 +3915,15 @@ static String buildStateJson(const AppState& s)
   doc["system"]["wifi_stored_credentials_active"] = coffeeWifiStoredCredentialsAreActive();
   doc["system"]["wifi_stored_ssid"] = coffeeWifiStoredSsid();
   doc["system"]["wifi_stored_password"] = coffeeWifiStoredPasswordAvailable();
+  doc["system"]["wifi_profile1_available"] = coffeeWifiProfileAvailable(1);
+  doc["system"]["wifi_profile1_ssid"] = coffeeWifiProfileSsid(1);
+  doc["system"]["wifi_profile1_password"] = coffeeWifiProfilePasswordAvailable(1);
+  doc["system"]["wifi_profile2_available"] = coffeeWifiProfileAvailable(2);
+  doc["system"]["wifi_profile2_ssid"] = coffeeWifiProfileSsid(2);
+  doc["system"]["wifi_profile2_password"] = coffeeWifiProfilePasswordAvailable(2);
+  doc["system"]["wifi_preferred_profile"] = coffeeWifiPreferredProfile();
+  doc["system"]["wifi_automatic_connection"] = coffeeWifiAutomaticConnectionEnabled();
+  doc["system"]["wifi_recovery_mode"] = coffeeWifiRecoveryModeActive();
   doc["system"]["wifi_setup_ap_active"] = coffeeWifiSetupApActive();
   doc["system"]["wifi_setup_ap_ssid"] = coffeeWifiSetupApSsid();
   doc["system"]["wifi_setup_ap_ip"] = coffeeWifiSetupApIp();
