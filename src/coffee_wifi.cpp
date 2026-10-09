@@ -6,8 +6,6 @@
 #include <esp_attr.h>
 #include <esp_system.h>
 
-#include "wifi_secrets.h"
-
 namespace {
 constexpr const char* WIFI_PREF_NAMESPACE = "coffee_wifi";
 constexpr const char* WIFI_PREF_KEY_SSID = "ssid";
@@ -24,6 +22,8 @@ constexpr const char* WIFI_PREF_KEY_P2_PASS = "p2_pass";
 constexpr const char* WIFI_PREF_KEY_PREFERRED = "pref";
 constexpr const char* WIFI_PREF_KEY_AUTO = "auto";
 constexpr const char* WIFI_SETUP_AP_SSID = "Waagen-Setup";
+constexpr uint32_t WIFI_PROFILE_CONNECT_TIMEOUT_MS = 15000UL;
+constexpr uint32_t WIFI_RECOVERY_RETRY_MS = 30000UL;
 constexpr uint32_t SETUP_AP_DIAG_MAGIC = 0x57494649UL;  // "WIFI"
 
 enum class SetupApDiagPhase : uint8_t {
@@ -35,7 +35,11 @@ enum class SetupApDiagPhase : uint8_t {
   SleepOffDone = 5,
   SoftApStart = 6,
   SoftApOk = 7,
-  SoftApFailed = 8
+  SoftApFailed = 8,
+  RecoveryModeAp = 9,
+  RecoveryModeApDone = 10,
+  RecoveryApOk = 11,
+  RecoveryApFailed = 12
 };
 
 RTC_NOINIT_ATTR volatile uint32_t setupApDiagMagicRtc;
@@ -55,11 +59,16 @@ bool profilePasswordAvailable[2] = {false, false};
 uint8_t preferredProfile = 1;
 bool automaticConnectionEnabled = false;
 bool setupApActive = false;
+bool automaticRecoveryMode = false;
+uint32_t recoveryLastStartAttemptMs = 0;
 bool setupCredentialsSavedPendingRestart = false;
 uint32_t storedCredentialsRevision = 0;
 uint32_t activeCredentialsConnectStartedMs = 0;
 bool activeCredentialsGotIp = false;
 uint8_t activeCredentialsDisconnects = 0;
+uint8_t activeConnectionProfile = 0;
+uint8_t fallbackConnectionProfile = 0;
+bool fallbackConnectionStarted = false;
 
 void ensureSetupApDiagRtcInitialized()
 {
@@ -98,6 +107,14 @@ const char* setupApDiagPhaseLabel(uint8_t phase)
       return "Setup-AP erfolgreich gestartet";
     case SetupApDiagPhase::SoftApFailed:
       return "WiFi.softAP() fehlgeschlagen";
+    case SetupApDiagPhase::RecoveryModeAp:
+      return "vor WiFi.mode(WIFI_AP) (Recovery)";
+    case SetupApDiagPhase::RecoveryModeApDone:
+      return "WiFi.mode(WIFI_AP) abgeschlossen (Recovery)";
+    case SetupApDiagPhase::RecoveryApOk:
+      return "Recovery-AP erfolgreich gestartet";
+    case SetupApDiagPhase::RecoveryApFailed:
+      return "Recovery-AP-Start fehlgeschlagen";
     case SetupApDiagPhase::None:
     default:
       return "kein Setup-AP-Versuch gespeichert";
@@ -251,18 +268,6 @@ bool readStoredCredentials(CoffeeWifiCredentials& credentials)
   return readProfileCredentials(preferredProfile, credentials);
 }
 
-CoffeeWifiCredentials fallbackCredentials()
-{
-  CoffeeWifiCredentials credentials;
-  credentials.ssid = WIFI_SSID;
-  credentials.password = WIFI_PASS;
-  credentials.fromPreferences = false;
-  credentials.source = credentials.ssid.length() > 0
-                         ? CoffeeWifiCredentialSource::WifiSecrets
-                         : CoffeeWifiCredentialSource::None;
-  return credentials;
-}
-
 const CoffeeWifiCredentials& ensureActiveCredentials()
 {
   if (!activeCredentialsLoaded) {
@@ -270,6 +275,112 @@ const CoffeeWifiCredentials& ensureActiveCredentials()
     activeCredentialsLoaded = true;
   }
   return activeCredentials;
+}
+
+bool enterAutomaticRecoveryMode()
+{
+  automaticRecoveryMode = true;
+  recoveryLastStartAttemptMs = millis();
+
+  // Im automatischen Recovery-Fall ist keine funktionierende STA-Verbindung
+  // vorhanden. WIFI_AP beendet den laufenden STA-Verbindungsversuch vollstaendig
+  // und verhindert, dass weitere Scans/Reconnects die AP-Beacons stoeren.
+  // Der manuell gestartete Setup-AP bleibt dagegen bewusst WIFI_AP_STA.
+  markSetupApDiag(SetupApDiagPhase::RecoveryModeAp, true);
+  WiFi.mode(WIFI_AP);
+  markSetupApDiag(SetupApDiagPhase::RecoveryModeApDone, true);
+  const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
+  markSetupApDiag(ok ? SetupApDiagPhase::RecoveryApOk : SetupApDiagPhase::RecoveryApFailed, false);
+  Serial.printf("[T4S3][WiFi] Recovery AP: %s\n", ok ? "active" : "failed");
+  setupApActive = ok;
+  // Stay in recovery state even when softAP fails. Otherwise each loop
+  // would immediately repeat WiFi.mode() and softAP(), potentially causing
+  // a restart loop. Retry at a controlled interval instead.
+  return ok;
+}
+
+bool profileAvailableForAutomaticConnection(uint8_t profile)
+{
+  if (!profileNumberValid(profile)) {
+    return false;
+  }
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+  return automaticConnectionEnabled && profileAvailable[profile - 1];
+}
+
+bool beginProfileConnection(uint8_t profile)
+{
+  CoffeeWifiCredentials credentials;
+  if (!profileAvailableForAutomaticConnection(profile) ||
+      !readProfileCredentials(profile, credentials)) {
+    return false;
+  }
+
+  activeCredentials = credentials;
+  activeCredentialsLoaded = true;
+  activeConnectionProfile = profile;
+  resetActiveConnectionAttempt();
+  WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+  Serial.printf("[T4S3][WiFi] connecting profile %u: SSID='%s'\n", profile, activeCredentials.ssid.c_str());
+  return true;
+}
+
+void advanceAutomaticConnectionCycle()
+{
+  if (!fallbackConnectionStarted && fallbackConnectionProfile != 0) {
+    fallbackConnectionStarted = true;
+    if (beginProfileConnection(fallbackConnectionProfile)) {
+      return;
+    }
+  }
+
+  enterAutomaticRecoveryMode();
+}
+
+void beginAutomaticConnectionCycle(uint8_t firstProfile = 0)
+{
+  if (!storedCredentialsKnown) {
+    refreshStoredCredentialsCache();
+  }
+
+  automaticRecoveryMode = false;
+  fallbackConnectionProfile = 0;
+  fallbackConnectionStarted = false;
+
+  if (!automaticConnectionEnabled) {
+    activeConnectionProfile = 0;
+    enterAutomaticRecoveryMode();
+    return;
+  }
+
+  uint8_t selectedFirstProfile = 0;
+  if (profileAvailableForAutomaticConnection(firstProfile)) {
+    selectedFirstProfile = firstProfile;
+  } else if (profileAvailableForAutomaticConnection(preferredProfile)) {
+    selectedFirstProfile = preferredProfile;
+  } else {
+    const uint8_t otherProfile = preferredProfile == 1 ? 2 : 1;
+    if (profileAvailableForAutomaticConnection(otherProfile)) {
+      selectedFirstProfile = otherProfile;
+    }
+  }
+
+  if (selectedFirstProfile == 0) {
+    activeConnectionProfile = 0;
+    enterAutomaticRecoveryMode();
+    return;
+  }
+
+  const uint8_t otherProfile = selectedFirstProfile == 1 ? 2 : 1;
+  if (profileAvailableForAutomaticConnection(otherProfile)) {
+    fallbackConnectionProfile = otherProfile;
+  }
+
+  if (!beginProfileConnection(selectedFirstProfile)) {
+    advanceAutomaticConnectionCycle();
+  }
 }
 }  // namespace
 
@@ -279,8 +390,8 @@ bool coffeeWifiLoadCredentials(CoffeeWifiCredentials& credentials)
     return true;
   }
 
-  credentials = fallbackCredentials();
-  return credentials.ssid.length() > 0;
+  credentials = CoffeeWifiCredentials{};
+  return false;
 }
 
 bool coffeeWifiHasStoredCredentials()
@@ -510,7 +621,7 @@ const char* coffeeWifiCredentialSourceLabel()
     case CoffeeWifiCredentialSource::Preferences:
       return "gespeicherte WLAN-Daten";
     case CoffeeWifiCredentialSource::WifiSecrets:
-      return "Standard-WLAN aus Firmware";
+      return "nicht verwendet";
     case CoffeeWifiCredentialSource::None:
     default:
       return "keine Quelle";
@@ -529,11 +640,35 @@ String coffeeWifiStatusSummary()
 
 void coffeeWifiBegin()
 {
-  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-  WiFi.mode(setupApActive ? WIFI_AP_STA : WIFI_STA);
+  // WiFi sleep is configured once in normal STA mode. Do not call
+  // WiFi.setSleep(false) directly after switching to WIFI_AP_STA.
+  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  resetActiveConnectionAttempt();
-  WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+
+  automaticRecoveryMode = false;
+  beginAutomaticConnectionCycle();
+}
+
+void coffeeWifiLoop()
+{
+  if (automaticRecoveryMode) {
+    if (!setupApActive && millis() - recoveryLastStartAttemptMs >= WIFI_RECOVERY_RETRY_MS) {
+      enterAutomaticRecoveryMode();
+    }
+    return;
+  }
+  if (activeCredentialsGotIp || activeConnectionProfile == 0) {
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    coffeeWifiMarkConnected();
+    return;
+  }
+
+  if (millis() - activeCredentialsConnectStartedMs >= WIFI_PROFILE_CONNECT_TIMEOUT_MS) {
+    advanceAutomaticConnectionCycle();
+  }
 }
 
 void coffeeWifiMarkConnected()
@@ -544,36 +679,34 @@ void coffeeWifiMarkConnected()
 
 void coffeeWifiReconnect()
 {
-  const CoffeeWifiCredentials& credentials = ensureActiveCredentials();
-
-  // Sicherheitsnetz fuer Phase 2c:
-  // Aktivierte NVS-Daten werden nicht mehr beim ersten Disconnect sofort
-  // deaktiviert. Einige ESP32-/Router-Kombinationen erzeugen waehrend des
-  // frischen Verbindungsaufbaus kurze Disconnect-Events, obwohl die Daten
-  // korrekt sind. Erst wenn innerhalb eines Zeitfensters gar keine IP geholt
-  // wurde, wird der Active-Marker geloescht und dauerhaft auf wifi_secrets.h
-  // zurueckgefallen.
-  if (credentials.source == CoffeeWifiCredentialSource::Preferences) {
-    activeCredentialsDisconnects++;
-    const uint32_t elapsedMs = millis() - activeCredentialsConnectStartedMs;
-    if (!activeCredentialsGotIp && elapsedMs >= 20000UL) {
-      coffeeWifiSetStoredCredentialsActive(false);
-      activeCredentials = fallbackCredentials();
-      activeCredentialsLoaded = true;
-      resetActiveConnectionAttempt();
-      WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
-      return;
-    }
-
-    WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+  if (automaticRecoveryMode) {
     return;
   }
 
-  WiFi.begin(credentials.ssid.c_str(), credentials.password.c_str());
+  activeCredentialsDisconnects++;
+
+  // Nach einer zuvor erfolgreichen Verbindung beginnt ein neuer Zyklus mit
+  // dem zuletzt verwendeten Profil. Waehrend eines laufenden Verbindungs-
+  // versuchs steuert coffeeWifiLoop() Timeout und Profilwechsel.
+  if (activeCredentialsGotIp) {
+    beginAutomaticConnectionCycle(activeConnectionProfile);
+    return;
+  }
+
+  // Waehrend des laufenden 15-s-Fensters das aktuelle Profil wie bisher nach
+  // einem Disconnect erneut anstossen. Der Profilwechsel selbst bleibt allein
+  // Aufgabe von coffeeWifiLoop(), damit der Timeout deterministisch bleibt.
+  if (activeConnectionProfile != 0 &&
+      millis() - activeCredentialsConnectStartedMs < WIFI_PROFILE_CONNECT_TIMEOUT_MS) {
+    WiFi.begin(activeCredentials.ssid.c_str(), activeCredentials.password.c_str());
+  }
 }
 
 String coffeeWifiCurrentSsid()
 {
+  if (WiFi.status() == WL_CONNECTED) {
+    return WiFi.SSID();
+  }
   return ensureActiveCredentials().ssid;
 }
 
@@ -632,17 +765,19 @@ const char* coffeeWifiSetupApSsid()
 
 bool coffeeWifiStartSetupAp()
 {
-  setupCredentialsSavedPendingRestart = false;
+  // A running automatic recovery AP already serves the setup page. Do not
+  // switch back to AP+STA unless recovery has been explicitly stopped.
+  if (setupApActive) {
+    return true;
+  }
 
+  setupCredentialsSavedPendingRestart = false;
   markSetupApDiag(SetupApDiagPhase::Requested, true);
   markSetupApDiag(SetupApDiagPhase::ModeApSta, true);
   WiFi.mode(WIFI_AP_STA);
   markSetupApDiag(SetupApDiagPhase::ModeApStaDone, true);
 
-  // WiFi sleep is already disabled during the normal STA startup in
-  // coffeeWifiBegin(). Re-applying WiFi.setSleep(false) immediately after
-  // switching from WIFI_STA to WIFI_AP_STA triggers a panic on the tested
-  // ESP32-S3/Arduino-ESP32 2.0.17 setup, so do not touch the PS state here.
+  // Keep the tested T4-S3 fix: never call WiFi.setSleep(false) here.
   markSetupApDiag(SetupApDiagPhase::SoftApStart, true);
   const bool ok = WiFi.softAP(WIFI_SETUP_AP_SSID);
   setupApActive = ok;
@@ -652,21 +787,29 @@ bool coffeeWifiStartSetupAp()
 
 bool coffeeWifiStopSetupAp()
 {
-  // softAPdisconnect(true) kann auf manchen ESP32-Arduino-Versionen false
-  // liefern, obwohl der AP danach bereits beendet bzw. nicht mehr aktiv ist.
-  // Stoppen soll daher idempotent sein: Der Bediener erwartet, dass der
-  // Setup-AP danach aus ist, nicht dass ein bereits deaktivierter AP als
-  // Fehler gemeldet wird.
+  const bool wasAutomaticRecovery = automaticRecoveryMode;
   WiFi.softAPdisconnect(true);
   delay(50);
   setupApActive = false;
+  automaticRecoveryMode = false;
   WiFi.mode(WIFI_STA);
+
+  // Explicit recovery retry without reboot. If automatic connection is
+  // disabled, this returns straight to AP-only recovery.
+  if (wasAutomaticRecovery) {
+    beginAutomaticConnectionCycle();
+  }
   return true;
 }
 
 bool coffeeWifiSetupApActive()
 {
   return setupApActive;
+}
+
+bool coffeeWifiRecoveryModeActive()
+{
+  return automaticRecoveryMode && setupApActive;
 }
 
 String coffeeWifiSetupApIp()

@@ -12,14 +12,7 @@ namespace {
 bool wifiStarted = false;
 bool connectedMarked = false;
 wl_status_t lastWifiStatus = WL_IDLE_STATUS;
-uint32_t lastReconnectAttemptMs = 0;
 uint32_t lastStatusLogMs = 0;
-uint32_t wifiBeginMs = 0;
-uint32_t firstApStartAttemptMs = 0;
-bool autoSetupApStarted = false;
-
-constexpr uint32_t kSetupApNoSsidDelayMs = 5000UL;
-constexpr uint32_t kSetupApFallbackDelayMs = 45000UL;
 
 void copy_text(char *dst, size_t dstSize, const String& src)
 {
@@ -94,10 +87,6 @@ void t4s3_wifi_begin()
     coffeeWifiBegin();
     wifiStarted = true;
     connectedMarked = false;
-    wifiBeginMs = millis();
-    firstApStartAttemptMs = 0;
-    autoSetupApStarted = false;
-    lastReconnectAttemptMs = wifiBeginMs;
     lastWifiStatus = WiFi.status();
 }
 
@@ -108,40 +97,20 @@ void t4s3_wifi_tick()
     }
 
     const wl_status_t status = WiFi.status();
-
     if (status == WL_CONNECTED) {
         if (!connectedMarked) {
             coffeeWifiMarkConnected();
             connectedMarked = true;
         }
-    } else {
+    } else if (connectedMarked) {
+        // One reconnect cycle after losing a previously working STA link.
+        // The backend owns all further timeouts, profile changes and recovery.
         connectedMarked = false;
-
-        const uint32_t now = millis();
-        if (now - lastReconnectAttemptMs >= 15000UL) {
-            lastReconnectAttemptMs = now;
-            Serial.println("[T4S3][WiFi] reconnect");
-            coffeeWifiReconnect();
-        }
-
-        const String targetSsid = coffeeWifiCurrentSsid();
-        const bool noConfiguredSsid = targetSsid.length() == 0;
-        const uint32_t setupDelayMs = noConfiguredSsid ? kSetupApNoSsidDelayMs : kSetupApFallbackDelayMs;
-        if (!coffeeWifiSetupApActive() && !autoSetupApStarted && now - wifiBeginMs >= setupDelayMs) {
-            autoSetupApStarted = true;
-            firstApStartAttemptMs = now;
-            Serial.printf("[T4S3][WiFi] no STA connection after %lu ms, starting setup AP\n",
-                          static_cast<unsigned long>(now - wifiBeginMs));
-            t4s3_wifi_start_setup_ap();
-        }
-
-        if (!coffeeWifiSetupApActive() && autoSetupApStarted && firstApStartAttemptMs != 0 && now - firstApStartAttemptMs >= 30000UL) {
-            firstApStartAttemptMs = now;
-            Serial.println("[T4S3][WiFi] setup AP retry");
-            t4s3_wifi_start_setup_ap();
-        }
+        Serial.println("[T4S3][WiFi] connection lost, beginning failover cycle");
+        coffeeWifiReconnect();
     }
 
+    coffeeWifiLoop();
     log_status_if_changed();
 }
 
@@ -149,11 +118,8 @@ bool t4s3_wifi_start_setup_ap()
 {
     const bool ok = coffeeWifiStartSetupAp();
     if (ok) {
-        autoSetupApStarted = true;
-        firstApStartAttemptMs = millis();
         Serial.printf("[T4S3][WiFi] setup AP active: SSID='%s', IP=%s\n",
-                      coffeeWifiSetupApSsid(),
-                      coffeeWifiSetupApIp().c_str());
+                      coffeeWifiSetupApSsid(), coffeeWifiSetupApIp().c_str());
     } else {
         Serial.println("[T4S3][WiFi] setup AP start failed");
     }
