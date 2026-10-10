@@ -18,7 +18,7 @@ static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
-#define COFFEE_WEB_ASSET_VERSION "20260915wifi3"
+#define COFFEE_WEB_ASSET_VERSION "20261009wifiB2"
 
 static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
   "public, max-age=31536000, immutable";
@@ -323,43 +323,77 @@ R"rawliteral(">
 
   <div id="settingsWifiPanel" class="settings-section hidden">
     <div class="settings-section-title">WLAN</div>
-    <div class="settings-section-hint">Verbindung, gespeicherte WLAN-Daten und Setup-WLAN.</div>
+    <div class="settings-section-hint">Verbindung, zwei gespeicherte WLAN-Profile und Setup-WLAN.</div>
+
     <section class="card">
       <div class="stats-title">WLAN-Status</div>
       <div class="settings-list small" style="margin-top: 12px;">
         <div>WLAN: <b id="wifiStatus">---</b></div>
         <div>SSID: <b class="mono" id="wifiSsid">---</b></div>
+        <div>IP-Adresse: <b class="mono" id="wifiIpAddress">---</b></div>
         <div>Signal: <span class="wifi-signal-row"><span id="wifiSignalIcon" class="wifi-signal" aria-hidden="true"></span> <b id="wifiSignalLabel">---</b> <span class="muted-inline" id="wifiSignalRssi">---</span></span></div>
-        <div>Quelle: <b id="wifiCredentialSource">---</b></div>
-        <div>Gespeicherte WLAN-Daten: <b id="wifiStoredCredentials">---</b></div>
-        <div>Gespeicherte WLAN-Daten aktiv: <b id="wifiStoredCredentialsActive">---</b></div>
+        <div>Bevorzugtes WLAN: <b id="wifiPreferredProfile">---</b></div>
       </div>
-      <div class="settings-list small" style="margin-top: 10px;">
-        <div>Gespeicherte SSID: <b class="mono" id="wifiStoredSsid">---</b></div>
-        <div>Gespeichertes Passwort: <b id="wifiStoredPasswordStatus">---</b></div>
-        <div>Setup-WLAN: <b id="wifiSetupApStatus">aus</b></div>
-        <div>Setup-Adresse: <b class="mono" id="wifiSetupApAddress">---</b></div>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">WLAN 1 <span id="wifiProfile1PreferredBadge" class="muted-inline" hidden>[BEVORZUGT]</span></div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>SSID: <b class="mono" id="wifiProfile1Ssid">nicht eingerichtet</b></div>
+        <div>Passwort: <b id="wifiProfile1PasswordStatus">nicht gespeichert</b></div>
+      </div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="wifiProfile1Preferred" class="secondary" type="button" hidden>Als bevorzugt verwenden</button>
+        <button id="wifiProfile1Edit" class="secondary" type="button">Einrichten</button>
+        <button id="wifiProfile1Delete" class="secondary" type="button" hidden>Löschen</button>
+      </div>
+      <form class="wifi-form" id="wifiProfile1Form" aria-label="WLAN 1 bearbeiten" autocomplete="off" hidden>
+        <label><span>SSID</span><input id="wifiProfile1SsidInput" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
+        <label><span>Passwort</span><input id="wifiProfile1PasswordInput" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
+        <div class="wifi-form-note">Ein leeres Passwort behält ein bereits gespeichertes Passwort. Speichern ändert die laufende WLAN-Verbindung nicht.</div>
+        <div class="settings-actions">
+          <button class="secondary" type="submit">Speichern</button>
+          <button id="wifiProfile1Cancel" class="secondary" type="button">Abbrechen</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">WLAN 2 <span id="wifiProfile2PreferredBadge" class="muted-inline" hidden>[BEVORZUGT]</span></div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>SSID: <b class="mono" id="wifiProfile2Ssid">nicht eingerichtet</b></div>
+        <div>Passwort: <b id="wifiProfile2PasswordStatus">nicht gespeichert</b></div>
+      </div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="wifiProfile2Preferred" class="secondary" type="button" hidden>Als bevorzugt verwenden</button>
+        <button id="wifiProfile2Edit" class="secondary" type="button">Einrichten</button>
+        <button id="wifiProfile2Delete" class="secondary" type="button" hidden>Löschen</button>
+      </div>
+      <form class="wifi-form" id="wifiProfile2Form" aria-label="WLAN 2 bearbeiten" autocomplete="off" hidden>
+        <label><span>SSID</span><input id="wifiProfile2SsidInput" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
+        <label><span>Passwort</span><input id="wifiProfile2PasswordInput" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
+        <div class="wifi-form-note">Ein leeres Passwort behält ein bereits gespeichertes Passwort. Speichern ändert die laufende WLAN-Verbindung nicht.</div>
+        <div class="settings-actions">
+          <button class="secondary" type="submit">Speichern</button>
+          <button id="wifiProfile2Cancel" class="secondary" type="button">Abbrechen</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="stats-title">Setup-WLAN</div>
+      <div class="settings-list small" style="margin-top: 12px;">
+        <div>Status: <b id="wifiSetupApStatus">aus</b></div>
+        <div>Adresse: <b class="mono" id="wifiSetupApAddress">---</b></div>
       </div>
       <div id="wifiSetupApActiveHint" class="wifi-setup-active" role="status" aria-live="polite">
         <span class="wifi-setup-active-dot" aria-hidden="true"></span>
         <span id="wifiSetupApActiveHintText">Setup-WLAN aktiv</span>
       </div>
-      <div class="small" style="margin-top: 10px;">Gespeicherte WLAN-Daten werden nur nach ausdrücklicher Aktivierung beim Neustart verwendet. Falls die Verbindung damit fehlschlägt, nutzt die Waage automatisch wieder das Standard-WLAN aus der Firmware.</div>
-      <form class="wifi-form" id="wifiCredentialsForm" aria-label="WLAN-Zugangsdaten" autocomplete="off">
-        <div class="stats-title" style="margin-bottom: 0;">WLAN-Zugangsdaten vorbereiten</div>
-        <div class="wifi-form-note">Speichert SSID und Passwort in der Waage. Die Daten werden erst verwendet, wenn sie danach bewusst aktiviert werden.</div>
-        <label><span>SSID</span><input id="wifiSetupSsid" name="ssid" type="text" autocomplete="off" placeholder="WLAN-Name"></label>
-        <label><span>Passwort</span><input id="wifiSetupPassword" name="password" type="password" autocomplete="new-password" placeholder="Leer lassen, um gespeichertes Passwort zu behalten"></label>
-        <div class="settings-actions">
-          <button id="saveWifiCredentials" class="secondary" type="submit">WLAN-Daten speichern</button>
-        </div>
-      </form>
+      <div class="small" style="margin-top: 10px;">Wenn beide gespeicherten WLAN-Profile nicht erreichbar sind, startet automatisch das Recovery-WLAN Waagen-Setup.</div>
       <div class="settings-actions" style="margin-top: 12px;">
-        <button id="activateWifiCredentials" class="secondary">Gespeicherte WLAN-Daten verwenden</button>
-        <button id="deactivateWifiCredentials" class="secondary">Standard-WLAN verwenden</button>
-        <button id="clearWifiCredentials" class="secondary">Gespeicherte WLAN-Daten löschen</button>
-        <button id="startWifiSetupAp" class="secondary">Setup-WLAN starten</button>
-        <button id="stopWifiSetupAp" class="secondary" disabled>Setup-WLAN stoppen</button>
+        <button id="startWifiSetupAp" class="secondary" type="button">Setup-WLAN starten</button>
+        <button id="stopWifiSetupAp" class="secondary" type="button" hidden>Setup-WLAN stoppen</button>
       </div>
     </section>
   </div>
@@ -782,6 +816,7 @@ static const char COFFEE_CSS[] PROGMEM = R"rawliteral(    /* ===== Basis / Layou
     .ip-row { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(148,163,184,.18); }
     .settings-list { display: grid; gap: 8px; margin-top: 8px; }
     .wifi-form { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(148,163,184,.18); }
+    .wifi-form[hidden], .settings-actions button[hidden], .stats-title span[hidden] { display: none; }
     .wifi-form label { display: grid; gap: 5px; color: var(--muted); font-size: .9rem; }
     .wifi-form input { width: 100%; box-sizing: border-box; }
     .wifi-form-note { color: var(--muted); font-size: .86rem; line-height: 1.35; }
@@ -1194,16 +1229,9 @@ function confirmPendingAction() {
   }
   const action = pendingConfirm;
   closeConfirmOverlay();
-  if (action.cmd === 'clear_wifi_credentials_webui') {
-    clearWifiCredentials();
-    return;
-  }
-  if (action.cmd === 'activate_wifi_credentials_webui') {
-    setWifiCredentialsActive(true);
-    return;
-  }
-  if (action.cmd === 'deactivate_wifi_credentials_webui') {
-    setWifiCredentialsActive(false);
+  const clearWifiProfileMatch = /^clear_wifi_profile_([12])_webui$/.exec(action.cmd);
+  if (clearWifiProfileMatch) {
+    clearWifiProfile(Number(clearWifiProfileMatch[1]));
     return;
   }
   sendCommand(action.cmd, action.logText);
@@ -2272,33 +2300,56 @@ function renderStatsAndSystem(s) {
   setText('wifiStatus', s.system?.wifi ? 'verbunden' : 'getrennt');
   setText('wifiSsid', s.system?.wifi_ssid || '---');
   renderWifiSignal(s);
-  setText('wifiCredentialSource', s.system?.wifi_credential_source || '---');
-  setText('wifiStoredCredentials', s.system?.wifi_stored_credentials ? 'ja' : 'nein');
-  setText('wifiStoredCredentialsActive', s.system?.wifi_stored_credentials_active ? 'ja' : 'nein');
+  setText('wifiIpAddress', s.system?.ip || '---');
+  const preferredProfile = Number(s.system?.wifi_preferred_profile || 0);
+  const automaticConnection = !!s.system?.wifi_automatic_connection;
+  setText(
+    'wifiPreferredProfile',
+    automaticConnection && (preferredProfile === 1 || preferredProfile === 2)
+      ? `WLAN ${preferredProfile}`
+      : '---'
+  );
+
+  [1, 2].forEach(profile => {
+    const available = !!s.system?.[`wifi_profile${profile}_available`];
+    const ssid = s.system?.[`wifi_profile${profile}_ssid`] || '';
+    const passwordStored = !!s.system?.[`wifi_profile${profile}_password`];
+    const preferred = available && automaticConnection && preferredProfile === profile;
+
+    setText(`wifiProfile${profile}Ssid`, available && ssid ? ssid : 'nicht eingerichtet');
+    setText(`wifiProfile${profile}PasswordStatus`, passwordStored ? 'gespeichert' : 'nicht gespeichert');
+
+    const badge = el(`wifiProfile${profile}PreferredBadge`);
+    const preferredButton = el(`wifiProfile${profile}Preferred`);
+    const editButton = el(`wifiProfile${profile}Edit`);
+    const deleteButton = el(`wifiProfile${profile}Delete`);
+    const form = el(`wifiProfile${profile}Form`);
+    const ssidInput = el(`wifiProfile${profile}SsidInput`);
+    const passwordInput = el(`wifiProfile${profile}PasswordInput`);
+
+    if (badge) badge.hidden = !preferred;
+    if (preferredButton) preferredButton.hidden = !available || preferred;
+    if (editButton) editButton.textContent = available ? 'Bearbeiten' : 'Einrichten';
+    if (deleteButton) deleteButton.hidden = !available;
+
+    if (form?.hidden && ssidInput && document.activeElement !== ssidInput) {
+      ssidInput.value = ssid;
+    }
+    if (passwordInput) {
+      passwordInput.placeholder = passwordStored
+        ? 'Leer lassen, um gespeichertes Passwort zu behalten'
+        : 'WLAN-Passwort';
+    }
+  });
+
   const setupApActive = !!s.system?.wifi_setup_ap_active;
+  const recoveryMode = !!s.system?.wifi_recovery_mode;
   const setupApSsid = s.system?.wifi_setup_ap_ssid || 'Waagen-Setup';
   const setupApIp = s.system?.wifi_setup_ap_ip || '192.168.4.1';
-  setText('wifiSetupApStatus', setupApActive ? 'an' : 'aus');
+  setText('wifiSetupApStatus', setupApActive ? (recoveryMode ? 'Recovery' : 'an') : 'aus');
   setText('wifiSetupApAddress', setupApActive ? `WLAN: ${setupApSsid} / ${setupApIp}` : '---');
-  updateWifiSetupApIndicator(setupApActive, setupApSsid, setupApIp);
-  updateWifiSetupApButtons(setupApActive);
-
-  const storedSsid = s.system?.wifi_stored_ssid || '';
-  const storedPassword = !!s.system?.wifi_stored_password;
-  setText('wifiStoredSsid', storedSsid || '---');
-  setText('wifiStoredPasswordStatus', storedPassword ? 'vorhanden' : 'nicht gespeichert');
-
-  const ssidInput = el('wifiSetupSsid');
-  if (ssidInput && document.activeElement !== ssidInput && !ssidInput.value && storedSsid) {
-    ssidInput.value = storedSsid;
-  }
-
-  const passwordInput = el('wifiSetupPassword');
-  if (passwordInput) {
-    passwordInput.placeholder = storedPassword
-      ? 'Leer lassen, um gespeichertes Passwort zu behalten'
-      : 'WLAN-Passwort';
-  }
+  updateWifiSetupApIndicator(setupApActive, setupApSsid, setupApIp, recoveryMode);
+  updateWifiSetupApButtons(setupApActive, recoveryMode);
 }
 
 function applyShotTelemetry(data) {
@@ -2413,149 +2464,185 @@ function sendTargetWeight() {
   sendCommand(`set_selected_siebtraeger_weight_${value.toFixed(1)}`, `Sollgewicht gesendet: ${value.toFixed(1)} g`);
 }
 
-async function saveWifiCredentials(e) {
+function setWifiProfileEdit(profile, editing) {
+  const form = el(`wifiProfile${profile}Form`);
+  const ssidInput = el(`wifiProfile${profile}SsidInput`);
+  const passwordInput = el(`wifiProfile${profile}PasswordInput`);
+  if (!form || !ssidInput || !passwordInput) return;
+
+  form.hidden = !editing;
+  const system = lastState?.system || {};
+  if (!editing) {
+    ssidInput.value = system[`wifi_profile${profile}_ssid`] || '';
+    passwordInput.value = '';
+    return;
+  }
+
+  ssidInput.value = system[`wifi_profile${profile}_ssid`] || '';
+  passwordInput.value = '';
+  passwordInput.placeholder = system[`wifi_profile${profile}_password`]
+    ? 'Leer lassen, um gespeichertes Passwort zu behalten'
+    : 'WLAN-Passwort';
+  ssidInput.focus();
+}
+
+async function saveWifiProfile(e, profile) {
   e.preventDefault();
 
-  const ssidInput = el('wifiSetupSsid');
-  const passwordInput = el('wifiSetupPassword');
+  const ssidInput = el(`wifiProfile${profile}SsidInput`);
+  const passwordInput = el(`wifiProfile${profile}PasswordInput`);
   const ssid = ssidInput.value.trim();
   const password = passwordInput.value;
 
   if (!ssid) {
-    addLog('Bitte WLAN-Name/SSID eintragen');
+    addLog(`Bitte WLAN-Name/SSID für WLAN ${profile} eintragen`);
     ssidInput.focus();
     return;
   }
 
   try {
-    addLog('WLAN-Daten speichern …');
+    addLog(`WLAN ${profile} speichern …`);
     const body = new URLSearchParams();
+    body.set('profile', String(profile));
     body.set('ssid', ssid);
     body.set('password', password);
 
-    const response = await fetch('/api/wifi/credentials', {
+    const response = await fetch('/api/wifi/profile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body
     });
+    const data = await response.json();
     if (!response.ok) {
-      addLog(`Fehler beim Speichern der WLAN-Daten: HTTP ${response.status}`);
+      addLog(data.message || `Fehler beim Speichern von WLAN ${profile}: HTTP ${response.status}`);
       return;
     }
-    const data = await response.json();
-    addLog(data.message || 'WLAN-Daten gespeichert. Sie werden erst nach Aktivierung verwendet.');
-    if (typeof data.stored_credentials === 'boolean') {
-      setText('wifiStoredCredentials', data.stored_credentials ? 'ja' : 'nein');
+
+    addLog(data.message || `WLAN ${profile} gespeichert.`);
+    if (lastState?.system) {
+      const system = lastState.system;
+      system[`wifi_profile${profile}_available`] = true;
+      system[`wifi_profile${profile}_ssid`] = ssid;
+      system[`wifi_profile${profile}_password`] = !!password || !!system[`wifi_profile${profile}_password`];
+      if (Number(data.preferred_profile) === 1 || Number(data.preferred_profile) === 2) {
+        system.wifi_preferred_profile = Number(data.preferred_profile);
+      }
+      if (typeof data.automatic_connection === 'boolean') {
+        system.wifi_automatic_connection = data.automatic_connection;
+      }
     }
-    if (typeof data.active === 'boolean') {
-      setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
-    }
-    if (typeof data.stored_ssid === 'string') {
-      setText('wifiStoredSsid', data.stored_ssid || '---');
-      if (data.stored_ssid) ssidInput.value = data.stored_ssid;
-    }
-    if (typeof data.stored_password === 'boolean') {
-      setText('wifiStoredPasswordStatus', data.stored_password ? 'vorhanden' : 'nicht gespeichert');
-      passwordInput.placeholder = data.stored_password
-        ? 'Leer lassen, um gespeichertes Passwort zu behalten'
-        : 'WLAN-Passwort';
-    }
+
     passwordInput.value = '';
+    setWifiProfileEdit(profile, false);
+    if (lastState) renderStatsAndSystem(lastState);
   } catch (err) {
-    addLog('Fehler beim Speichern der WLAN-Daten');
+    addLog(`Fehler beim Speichern von WLAN ${profile}`);
   }
 }
 
-async function clearWifiCredentials() {
+async function clearWifiProfile(profile) {
   try {
-    addLog('Gespeicherte WLAN-Daten löschen …');
-    const response = await fetch('/api/wifi/credentials', { method: 'DELETE' });
+    addLog(`WLAN ${profile} löschen …`);
+    const response = await fetch(`/api/wifi/profile?profile=${profile}`, { method: 'DELETE' });
+    const data = await response.json();
     if (!response.ok) {
-      addLog(`Fehler beim Löschen der gespeicherten WLAN-Daten: HTTP ${response.status}`);
+      addLog(data.message || `Fehler beim Löschen von WLAN ${profile}: HTTP ${response.status}`);
       return;
     }
-    const data = await response.json();
-    addLog(data.message || 'Gespeicherte WLAN-Daten gelöscht. Bitte ESP32 neu starten.');
-    if (typeof data.stored_credentials === 'boolean') {
-      setText('wifiStoredCredentials', data.stored_credentials ? 'ja' : 'nein');
+
+    addLog(data.message || `WLAN ${profile} gelöscht.`);
+    if (lastState?.system) {
+      const system = lastState.system;
+      system[`wifi_profile${profile}_available`] = false;
+      system[`wifi_profile${profile}_ssid`] = '';
+      system[`wifi_profile${profile}_password`] = false;
+      system.wifi_preferred_profile = Number(data.preferred_profile) || 0;
+      if (typeof data.automatic_connection === 'boolean') {
+        system.wifi_automatic_connection = data.automatic_connection;
+      }
     }
-    if (typeof data.active === 'boolean') {
-      setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
-    }
-    if (typeof data.stored_ssid === 'string') {
-      setText('wifiStoredSsid', data.stored_ssid || '---');
-      el('wifiSetupSsid').value = data.stored_ssid || '';
-    }
-    if (typeof data.stored_password === 'boolean') {
-      setText('wifiStoredPasswordStatus', data.stored_password ? 'vorhanden' : 'nicht gespeichert');
-      el('wifiSetupPassword').placeholder = data.stored_password
-        ? 'Leer lassen, um gespeichertes Passwort zu behalten'
-        : 'WLAN-Passwort';
-    }
+
+    setWifiProfileEdit(profile, false);
+    if (lastState) renderStatsAndSystem(lastState);
   } catch (err) {
-    addLog('Fehler beim Löschen der gespeicherten WLAN-Daten');
+    addLog(`Fehler beim Löschen von WLAN ${profile}`);
   }
 }
 
-async function setWifiCredentialsActive(active) {
+async function setWifiPreferredProfile(profile) {
   try {
-    addLog(active ? 'Gespeicherte WLAN-Daten verwenden …' : 'Standard-WLAN verwenden …');
-    const response = await fetch(active ? '/api/wifi/credentials/activate' : '/api/wifi/credentials/deactivate', { method: 'POST' });
+    addLog(`WLAN ${profile} als bevorzugt speichern …`);
+    const body = new URLSearchParams();
+    body.set('profile', String(profile));
+
+    const response = await fetch('/api/wifi/preferred', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+    const data = await response.json();
     if (!response.ok) {
-      addLog(`Fehler beim Ändern der WLAN-Auswahl: HTTP ${response.status}`);
+      addLog(data.message || `Fehler beim Setzen von WLAN ${profile} als bevorzugtes WLAN: HTTP ${response.status}`);
       return;
     }
-    const data = await response.json();
-    addLog(data.message || 'WLAN-Auswahl geändert. Bitte ESP32 neu starten.');
-    if (typeof data.stored_credentials === 'boolean') {
-      setText('wifiStoredCredentials', data.stored_credentials ? 'ja' : 'nein');
+
+    addLog(data.message || `WLAN ${profile} ist jetzt bevorzugt.`);
+    if (lastState?.system) {
+      lastState.system.wifi_preferred_profile = Number(data.preferred_profile) || profile;
+      if (typeof data.automatic_connection === 'boolean') {
+        lastState.system.wifi_automatic_connection = data.automatic_connection;
+      }
     }
-    if (typeof data.active === 'boolean') {
-      setText('wifiStoredCredentialsActive', data.active ? 'ja' : 'nein');
-    }
-    if (typeof data.stored_ssid === 'string') {
-      setText('wifiStoredSsid', data.stored_ssid || '---');
-    }
-    if (typeof data.stored_password === 'boolean') {
-      setText('wifiStoredPasswordStatus', data.stored_password ? 'vorhanden' : 'nicht gespeichert');
-    }
+    if (lastState) renderStatsAndSystem(lastState);
   } catch (err) {
-    addLog('Fehler beim Ändern der WLAN-Auswahl');
+    addLog(`Fehler beim Setzen von WLAN ${profile} als bevorzugtes WLAN`);
   }
 }
 
-function updateWifiSetupApIndicator(active, ssid = 'Waagen-Setup', ip = '192.168.4.1') {
+function updateWifiSetupApIndicator(active, ssid = 'Waagen-Setup', ip = '192.168.4.1', recoveryMode = false) {
   const hint = el('wifiSetupApActiveHint');
   if (hint) hint.classList.toggle('show', !!active);
   if (active) {
-    setText('wifiSetupApActiveHintText', `Setup-WLAN aktiv · ${ssid} · ${ip}`);
+    setText(
+      'wifiSetupApActiveHintText',
+      recoveryMode ? `Recovery-WLAN aktiv · ${ssid} · ${ip}` : `Setup-WLAN aktiv · ${ssid} · ${ip}`
+    );
   }
 }
 
-function updateWifiSetupApButtons(active) {
+function updateWifiSetupApButtons(active, recoveryMode = false) {
   const startButton = el('startWifiSetupAp');
   const stopButton = el('stopWifiSetupAp');
-  if (startButton) startButton.disabled = !!active;
-  if (stopButton) stopButton.disabled = !active;
+  if (startButton) {
+    startButton.hidden = !!active;
+    startButton.disabled = false;
+  }
+  if (stopButton) {
+    stopButton.hidden = !active;
+    stopButton.disabled = false;
+    stopButton.textContent = recoveryMode ? 'WLAN-Verbindung erneut versuchen' : 'Setup-WLAN stoppen';
+  }
 }
 
 async function setWifiSetupApEnabled(enabled) {
-  const activeBefore = !enabled;
+  const activeBefore = !!lastState?.system?.wifi_setup_ap_active;
+  const recoveryBefore = !!lastState?.system?.wifi_recovery_mode;
   const startButton = el('startWifiSetupAp');
   const stopButton = el('stopWifiSetupAp');
   if (startButton) startButton.disabled = true;
   if (stopButton) stopButton.disabled = true;
 
   try {
-    addLog(enabled ? 'Setup-WLAN starten …' : 'Setup-WLAN stoppen …');
+    addLog(enabled ? 'Setup-WLAN starten …' : (recoveryBefore ? 'WLAN-Verbindung erneut versuchen …' : 'Setup-WLAN stoppen …'));
     const response = await fetch(enabled ? '/api/wifi/setup-ap/start' : '/api/wifi/setup-ap/stop', { method: 'POST' });
     if (!response.ok) {
       const message = `Fehler beim ${enabled ? 'Starten' : 'Stoppen'} des Setup-WLANs: HTTP ${response.status}`;
       addLog(message);
       openInfoOverlay('Setup-WLAN Fehler', message);
-      updateWifiSetupApButtons(activeBefore);
+      updateWifiSetupApButtons(activeBefore, recoveryBefore);
       return;
     }
+
     const data = await response.json();
     addLog(data.message || (enabled ? 'Setup-WLAN gestartet.' : 'Setup-WLAN gestoppt.'));
     if (typeof data.active === 'boolean') {
@@ -2563,24 +2650,38 @@ async function setWifiSetupApEnabled(enabled) {
       const ip = data.ip || '192.168.4.1';
       setText('wifiSetupApStatus', data.active ? 'an' : 'aus');
       setText('wifiSetupApAddress', data.active ? `WLAN: ${ssid} / ${ip}` : '---');
-      updateWifiSetupApIndicator(data.active, ssid, ip);
-      updateWifiSetupApButtons(data.active);
+      updateWifiSetupApIndicator(data.active, ssid, ip, false);
+      updateWifiSetupApButtons(data.active, false);
+
+      if (lastState?.system) {
+        lastState.system.wifi_setup_ap_active = data.active;
+        lastState.system.wifi_setup_ap_ssid = ssid;
+        lastState.system.wifi_setup_ap_ip = ip;
+        if (!data.active) lastState.system.wifi_recovery_mode = false;
+      }
+
       if (data.active) {
         openInfoOverlay('Setup-WLAN gestartet', `WLAN: ${ssid}
 Adresse: ${ip}
-Normale WebUI bleibt im Heim-WLAN erreichbar.
+Die normale WebUI bleibt im Heim-WLAN erreichbar.
 
 Hinweis: Das Schließen dieses Fensters beendet das Setup-WLAN nicht.
 Zum Beenden bitte „Setup-WLAN stoppen“ verwenden.`);
+      } else if (recoveryBefore) {
+        openInfoOverlay('WLAN-Verbindung wird erneut versucht', 'Das Recovery-WLAN wurde beendet. Die Waage versucht jetzt erneut die gespeicherten WLAN-Profile.');
       } else {
         openInfoOverlay('Setup-WLAN gestoppt', 'Das Setup-WLAN wurde beendet. Die normale WebUI bleibt im Heim-WLAN erreichbar.');
       }
     }
   } catch (err) {
+    if (!enabled && recoveryBefore) {
+      addLog('Recovery-WLAN wird beendet. WLAN-Verbindung wird erneut versucht …');
+      return;
+    }
     const message = enabled ? 'Fehler beim Starten des Setup-WLANs' : 'Fehler beim Stoppen des Setup-WLANs';
     addLog(message);
     openInfoOverlay('Setup-WLAN Fehler', message);
-    updateWifiSetupApButtons(activeBefore);
+    updateWifiSetupApButtons(activeBefore, recoveryBefore);
   }
 }
 
@@ -2812,25 +2913,18 @@ function bindSettingsHandlers() {
   el('openCalibrate').addEventListener('click', openCalibrationWizard);
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
-  el('wifiCredentialsForm').addEventListener('submit', saveWifiCredentials);
-  el('activateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
-    'Gespeicherte WLAN-Daten verwenden?',
-    'Beim nächsten Neustart versucht die Waage, die gespeicherten WLAN-Daten zu verwenden. Wenn das fehlschlägt, nutzt sie automatisch wieder das Standard-WLAN aus der Firmware.',
-    'activate_wifi_credentials_webui',
-    'Gespeicherte WLAN-Daten verwenden …'
-  ));
-  el('deactivateWifiCredentials').addEventListener('click', () => openConfirmOverlay(
-    'Standard-WLAN verwenden?',
-    'Beim nächsten Neustart nutzt die Waage wieder das Standard-WLAN aus der Firmware. Gespeicherte WLAN-Daten bleiben erhalten.',
-    'deactivate_wifi_credentials_webui',
-    'Standard-WLAN verwenden …'
-  ));
-  el('clearWifiCredentials').addEventListener('click', () => openConfirmOverlay(
-    'Gespeicherte WLAN-Daten löschen?',
-    'Gespeicherte WLAN-Daten werden gelöscht. Die aktuelle Verbindung bleibt bis zum Neustart unverändert.',
-    'clear_wifi_credentials_webui',
-    'Gespeicherte WLAN-Daten löschen …'
-  ));
+  [1, 2].forEach(profile => {
+    el(`wifiProfile${profile}Form`).addEventListener('submit', e => saveWifiProfile(e, profile));
+    el(`wifiProfile${profile}Edit`).addEventListener('click', () => setWifiProfileEdit(profile, true));
+    el(`wifiProfile${profile}Cancel`).addEventListener('click', () => setWifiProfileEdit(profile, false));
+    el(`wifiProfile${profile}Preferred`).addEventListener('click', () => setWifiPreferredProfile(profile));
+    el(`wifiProfile${profile}Delete`).addEventListener('click', () => openConfirmOverlay(
+      `WLAN ${profile} löschen?`,
+      `WLAN ${profile} wird aus der Waage gelöscht. Die aktuelle Verbindung bleibt bis zum nächsten Verbindungswechsel bestehen.`,
+      `clear_wifi_profile_${profile}_webui`,
+      `WLAN ${profile} löschen …`
+    ));
+  });
   el('startWifiSetupAp').addEventListener('click', () => setWifiSetupApEnabled(true));
   el('stopWifiSetupAp').addEventListener('click', () => setWifiSetupApEnabled(false));
   el('openUpdatePage').addEventListener('click', () => { window.location.href = '/update'; });
