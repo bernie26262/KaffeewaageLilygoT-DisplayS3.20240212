@@ -36,6 +36,8 @@ enum class CoffeeBleScaleCommand : uint8_t {
   TimerReset
 };
 
+// Stop BLE for a valid firmware OTA; keep it disabled until restart.
+void coffeeBleScaleStopForOta();
 void coffeeBleScaleBegin(const char* deviceName);
 void coffeeBleScaleTick(uint32_t nowMs, float weightG, bool stable);
 bool coffeeBleScalePopCommand(CoffeeBleScaleCommand& command);

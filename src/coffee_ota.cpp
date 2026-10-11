@@ -1,4 +1,5 @@
 #include "coffee_ota.h"
+#include "ble_scale.h"
 
 #include <Arduino.h>
 #include <SPIFFS.h>
@@ -273,6 +274,10 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
       rejectOtaUpload(filename, "firmware.bin");
       return;
     }
+
+    // Free WiFi/BLE coexistence resources before writing firmware to flash.
+    // A rejected filename must not stop BLE.
+    coffeeBleScaleStopForOta();
 
     Serial.print("Firmware update started: ");
     Serial.println(filename);

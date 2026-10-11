@@ -41,6 +41,7 @@ BLE2902* g_weightDescriptor = nullptr;
 bool g_started = false;
 bool g_connected = false;
 bool g_advertising = false;
+bool g_stoppedForOta = false;
 uint32_t g_lastNotifyMs = 0;
 uint32_t g_lastNotifyAgeReferenceMs = 0;
 uint32_t g_lastNotifyLogMs = 0;
@@ -141,7 +142,7 @@ CoffeeBleScaleCommand decodeCommandPayload(const std::string& value)
 
 void queueCommand(CoffeeBleScaleCommand command)
 {
-  if (command == CoffeeBleScaleCommand::None) {
+  if (g_stoppedForOta || command == CoffeeBleScaleCommand::None) {
     return;
   }
   portENTER_CRITICAL(&g_commandMux);
@@ -155,6 +156,9 @@ void queueCommand(CoffeeBleScaleCommand command)
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*)
   {
+    if (g_stoppedForOta) {
+      return;
+    }
     const bool wasConnected = g_connected;
     g_connected = true;
     g_advertising = false;
@@ -169,11 +173,19 @@ class ServerCallbacks : public BLEServerCallbacks {
     const bool wasConnected = g_connected;
     g_connected = false;
     g_lastNotifyMs = 0;
+    if (g_stoppedForOta) {
+      g_advertising = false;
+      return;
+    }
     if (wasConnected) {
       appendLogFormatted("Verbindung getrennt - Advertising neu");
       Serial.println("[BLE] client disconnected, restart advertising");
     }
     delay(50);
+    if (g_stoppedForOta) {
+      g_advertising = false;
+      return;
+    }
     server->startAdvertising();
     g_advertising = true;
   }
@@ -272,6 +284,10 @@ void coffeeBleScaleCopyLog(char* destination, size_t destinationSize)
 
 void coffeeBleScaleBegin(const char* deviceName)
 {
+  if (g_stoppedForOta) {
+    Serial.println("[BLE] begin skipped: disabled for OTA");
+    return;
+  }
   if (g_started) {
     Serial.println("[BLE] begin skipped: already started");
     return;
@@ -380,10 +396,43 @@ void coffeeBleScaleBegin(const char* deviceName)
   Serial.flush();
 }
 
+void coffeeBleScaleStopForOta()
+{
+  // Stop notifications and block reinitialization/advertising until reboot.
+  // This runs from the AsyncWebServer upload callback (not the main loop).
+  g_stoppedForOta = true;
+  if (!g_started) {
+    return;
+  }
+
+  Serial.println("[BLE] stopping for firmware OTA");
+  const bool wasAdvertising = g_advertising;
+  g_started = false;
+  g_connected = false;
+  g_advertising = false;
+  g_lastNotifyMs = 0;
+
+  portENTER_CRITICAL(&g_commandMux);
+  g_pendingCommand = CoffeeBleScaleCommand::None;
+  portEXIT_CRITICAL(&g_commandMux);
+
+  if (wasAdvertising) {
+    BLEDevice::stopAdvertising();
+  }
+  BLEDevice::deinit(false);
+
+  g_server = nullptr;
+  g_weightCharacteristic = nullptr;
+  g_beanConquerorWeightCharacteristic = nullptr;
+  g_commandCharacteristic = nullptr;
+  g_weightDescriptor = nullptr;
+  appendLogFormatted("BLE fuer OTA deaktiviert");
+}
+
 void coffeeBleScaleTick(uint32_t nowMs, float weightG, bool stable)
 {
   (void)stable; // reserviert fuer spaetere Paket-/Statusvarianten
-  if (!g_started || !g_connected || !g_weightCharacteristic) {
+  if (g_stoppedForOta || !g_started || !g_connected || !g_weightCharacteristic) {
     return;
   }
   if (nowMs - g_lastNotifyMs < kNotifyIntervalMs) {
@@ -447,7 +496,7 @@ bool coffeeBleScalePopCommand(CoffeeBleScaleCommand& command)
 {
   command = CoffeeBleScaleCommand::None;
   portENTER_CRITICAL(&g_commandMux);
-  if (g_pendingCommand != CoffeeBleScaleCommand::None) {
+  if (!g_stoppedForOta && g_pendingCommand != CoffeeBleScaleCommand::None) {
     command = g_pendingCommand;
     g_pendingCommand = CoffeeBleScaleCommand::None;
   }
@@ -487,6 +536,7 @@ const char* coffeeBleScaleCommandName(CoffeeBleScaleCommand command)
 
 #else
 
+void coffeeBleScaleStopForOta() {}
 void coffeeBleScaleBegin(const char*) {}
 void coffeeBleScaleTick(uint32_t, float, bool) {}
 bool coffeeBleScalePopCommand(CoffeeBleScaleCommand& command)
