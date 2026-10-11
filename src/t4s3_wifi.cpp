@@ -162,16 +162,20 @@ void t4s3_wifi_get_status(T4S3WifiStatus& out)
     strlcpy(out.ip, "-", sizeof(out.ip));
     strlcpy(out.signal, "-", sizeof(out.signal));
 
+    // A setup/recovery AP does not imply a working STA connection.
+    // Keep the SSID field empty instead of showing the last attempted network.
+    if (out.setupApActive) {
+        strlcpy(out.ssid, "-", sizeof(out.ssid));
+        strlcpy(out.status, "Setup-AP aktiv", sizeof(out.status));
+        return;
+    }
+
+    // During normal STA connection attempts, show the current target SSID.
     const String configuredSsid = coffeeWifiCurrentSsid();
     if (configuredSsid.length() > 0) {
         copy_text(out.ssid, sizeof(out.ssid), configuredSsid);
     } else {
         strlcpy(out.ssid, "-", sizeof(out.ssid));
-    }
-
-    if (out.setupApActive) {
-        strlcpy(out.status, "Setup-AP aktiv", sizeof(out.status));
-        return;
     }
 
     const wl_status_t status = WiFi.status();
