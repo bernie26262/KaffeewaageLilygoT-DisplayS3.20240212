@@ -12,4 +12,3 @@ void coffeeWebBroadcastState(const AppState& state);
 void coffeeWebBroadcastShotTelemetry(const AppState& state);
 bool coffeeWebHasClients();
 void coffeeWebSetCommandHandler(CoffeeWebCommandHandler handler);
-void coffeeWebSetPwaAssetsAvailable(bool available);

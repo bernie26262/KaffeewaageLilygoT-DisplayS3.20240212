@@ -1,6 +1,5 @@
 #include "coffee_web.h"
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
 
 #include "coffee_wifi.h"
 #include "ble_scale.h"
@@ -12,9 +11,14 @@
 
 static AsyncWebSocket ws("/ws");
 static CoffeeWebCommandHandler commandHandler = nullptr;
-static bool pwaAssetsAvailable = false;
-
-static const uint8_t EMPTY_PWA_ASSET[] PROGMEM = { 0x00 };
+// The following images are embedded by PlatformIO using board_build.embed_files.
+// They are served straight from flash without mounting a filesystem.
+extern const uint8_t coffeeIcon192Start[] asm("_binary_assets_kaffeewaage_192_png_start");
+extern const uint8_t coffeeIcon192End[] asm("_binary_assets_kaffeewaage_192_png_end");
+extern const uint8_t coffeeIcon512Start[] asm("_binary_assets_kaffeewaage_512_png_start");
+extern const uint8_t coffeeIcon512End[] asm("_binary_assets_kaffeewaage_512_png_end");
+extern const uint8_t coffeeFaviconStart[] asm("_binary_assets_kaffeewaage_ico_start");
+extern const uint8_t coffeeFaviconEnd[] asm("_binary_assets_kaffeewaage_ico_end");
 
 // Eine einzige Versionskennung fuer alle eingebetteten WebUI-Assets.
 // Bei CSS-/JavaScript-Aenderungen muss nur diese Stelle angepasst werden.
@@ -26,54 +30,24 @@ static constexpr const char* COFFEE_WEB_ASSET_CACHE_CONTROL =
 static constexpr const char* COFFEE_WEB_MANIFEST_CACHE_CONTROL =
   "no-cache, max-age=0, must-revalidate";
 
-void coffeeWebSetPwaAssetsAvailable(bool available)
+static void sendEmbeddedPwaAsset(AsyncWebServerRequest* request,
+                                 const uint8_t* start, const uint8_t* end,
+                                 const char* contentType)
 {
-  pwaAssetsAvailable = available;
-}
-
-static void sendOptionalPwaAssetEmpty(AsyncWebServerRequest* request, const char* contentType)
-{
-  // Fallback if no SPIFFS image is present yet. Avoid zero-length responses here:
-  // with some ESPAsyncWebServer/client combinations the favicon request kept
-  // the connection open. A one-byte PROGMEM response has a known
-  // Content-Length and completes reliably.
-  if (!request) {
+  if (!request || !start || !end || end <= start) {
     return;
   }
-  if (!contentType || contentType[0] == '\0') {
-    contentType = "application/octet-stream";
-  }
-
   AsyncWebServerResponse* response = request->beginResponse_P(
-    200,
-    contentType,
-    EMPTY_PWA_ASSET,
-    sizeof(EMPTY_PWA_ASSET));
-  response->addHeader("Cache-Control", "no-store");
-  request->send(response);
-}
-
-static void sendPwaAsset(AsyncWebServerRequest* request, const char* path, const char* contentType)
-{
-  if (!request) {
-    return;
-  }
-  if (!pwaAssetsAvailable || !path || !SPIFFS.exists(path)) {
-    sendOptionalPwaAssetEmpty(request, contentType);
-    return;
-  }
-
-  AsyncWebServerResponse* response = request->beginResponse(SPIFFS, path, contentType);
-  response->addHeader("Cache-Control", "public, max-age=31536000, immutable");
+    200, contentType, start, static_cast<size_t>(end - start));
+  response->addHeader("Cache-Control", COFFEE_WEB_ASSET_CACHE_CONTROL);
   request->send(response);
 }
 
 // =============================================================================
 // Eingebettete WebUI
 // =============================================================================
-// Aktuell bewusst als PROGMEM-String eingebettet, damit Firmware und WebUI
-// immer zusammenpassen. Falls HTML/CSS/JS spaeter nach LittleFS wandern, sollte
-// die fachliche Logik trotzdem weiterhin im Core/AppState bleiben.
+// Die WebUI bleibt als PROGMEM-String in der Firmware, damit Firmware und
+// WebUI immer zusammenpassen. Die fachliche Logik bleibt im Core/AppState.
 
 static const char INDEX_HTML[] PROGMEM =
 R"rawliteral(<!doctype html>
@@ -3897,15 +3871,15 @@ void coffeeWebBegin(AsyncWebServer& server)
   });
 
   server.on("/icon-192.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendPwaAsset(request, "/kaffeewaage-192.png", "image/png");
+    sendEmbeddedPwaAsset(request, coffeeIcon192Start, coffeeIcon192End, "image/png");
   });
 
   server.on("/icon-512.png", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendPwaAsset(request, "/kaffeewaage-512.png", "image/png");
+    sendEmbeddedPwaAsset(request, coffeeIcon512Start, coffeeIcon512End, "image/png");
   });
 
   server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest* request) {
-    sendPwaAsset(request, "/kaffeewaage.ico", "image/x-icon");
+    sendEmbeddedPwaAsset(request, coffeeFaviconStart, coffeeFaviconEnd, "image/x-icon");
   });
 
   server.addHandler(&ws);

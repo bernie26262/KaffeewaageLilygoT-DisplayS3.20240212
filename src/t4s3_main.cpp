@@ -9,7 +9,6 @@
 #include <freertos/queue.h>
 
 #include <ESPAsyncWebServer.h>
-#include <SPIFFS.h>
 
 #if defined(COFFEE_USE_HX711) && COFFEE_USE_HX711
 #include <HX711_ADC.h>
@@ -1005,14 +1004,6 @@ static void beginWebUi()
 {
     if (g_webUiStarted) {
         return;
-    }
-
-    const bool spiffsOk = SPIFFS.begin(false);
-    coffeeWebSetPwaAssetsAvailable(spiffsOk);
-    if (!spiffsOk) {
-        Serial.println("[T4S3][WebUI] SPIFFS mount failed or no filesystem uploaded; PWA icons may be unavailable");
-    } else {
-        Serial.println("[T4S3][WebUI] SPIFFS mounted");
     }
 
     refreshWebSettingsCache(millis(), true);
