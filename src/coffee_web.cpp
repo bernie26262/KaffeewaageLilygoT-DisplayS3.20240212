@@ -3067,8 +3067,9 @@ static const char WIFI_SETUP_HTML[] PROGMEM = R"rawliteral(<!doctype html>
       <label>Passwort<input id="password" name="password" type="password" autocomplete="new-password" placeholder="WLAN-Passwort"></label>
       <button type="submit">Speichern und verwenden</button>
     </form>
+    <button id="retryWifi" class="secondary" type="button">Setup-WLAN beenden / WLAN erneut versuchen</button>
     <button id="reboot" class="secondary" type="button">ESP32 neu starten</button>
-    <p class="hint">Nach dem Speichern werden die Daten aktiviert. Starte die Waage danach neu. Wenn die Verbindung scheitert, nutzt sie automatisch wieder das Standard-WLAN aus der Firmware.</p>
+    <p class="hint">Im automatischen Recovery beendet der neue Versuch Waagen-Setup und startet die gespeicherten WLAN-Profile erneut. Wurde Waagen-Setup manuell gestartet, beendet der Button nur das Setup-WLAN.</p>
     <div id="log" class="log"></div>
   </section>
 </main>
@@ -3101,12 +3102,27 @@ document.getElementById('wifiSetupForm').addEventListener('submit', async (e) =>
     const message = data.message || (res.ok ? 'Gespeichert. Bitte ESP32 neu starten.' : 'Fehler beim Speichern.');
     log.textContent = message;
     if (res.ok) {
-      openInfoOverlay('WLAN-Daten gespeichert', 'Die WLAN-Daten wurden gespeichert und aktiviert.\nBitte starte die Waage neu.');
+      openInfoOverlay('WLAN-Daten gespeichert', 'Die WLAN-Daten wurden gespeichert und aktiviert.\nStarte die Waage neu oder beende Waagen-Setup über „WLAN erneut versuchen“.');
     }
   } catch (err) {
     log.textContent = 'Fehler beim Speichern der WLAN-Daten.';
   }
 });
+document.getElementById('retryWifi').addEventListener('click', async () => {
+  log.textContent = 'Waagen-Setup wird beendet …';
+  try {
+    const res = await fetch('/api/wifi/setup-ap/stop', { method: 'POST' });
+    if (!res.ok) {
+      log.textContent = `Setup-WLAN konnte nicht beendet werden: HTTP ${res.status}`;
+      return;
+    }
+    log.textContent = 'Waagen-Setup wurde beendet. Im Recovery startet jetzt ein neuer WLAN-Verbindungsversuch.';
+  } catch (err) {
+    // Beim Abschalten des AP kann die HTTP-Verbindung erwartungsgemäß abbrechen.
+    log.textContent = 'Waagen-Setup wird beendet. Im Recovery startet jetzt ein neuer WLAN-Verbindungsversuch.';
+  }
+});
+
 document.getElementById('reboot').addEventListener('click', async () => {
   log.textContent = 'Neustart angefordert …';
   try { await fetch('/update/reboot', { method: 'POST' }); } catch (err) {}
