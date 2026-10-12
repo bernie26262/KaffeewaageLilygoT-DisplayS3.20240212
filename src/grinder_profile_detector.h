@@ -27,12 +27,13 @@ public:
     float emptyThresholdG = 3.0f;
     float steadyDeltaG = 0.5f;       // reject moving candidates
     float postTareZeroToleranceG = 2.0f; // require a fresh, stable zero after tare
+    bool previewOnly = false; // B3b: report matching combination WITHOUT requesting tara
   };
 
   enum class State : uint8_t {
     WaitVessel, CheckingVessel, WaitFunnel, CheckingFunnel,
     UnknownVessel, AmbiguousVessel, AwaitTare, WaitPostTare, ReadyAuto,
-    ReadyManual, CheckingRemoval, Fault
+    ReadyManual, CheckingRemoval, Fault, CombinationPreview
   };
 
   enum class TareKind : uint8_t { None, AutoCombination, Manual, AfterRemoval };

@@ -44,6 +44,7 @@
 #include "shot_session.h"
 #include "grinder_relay.h"
 #include "grinder_weight_stability.h"
+#include "grinder_profile_detector.h"
 
 #ifndef GRINDER_WEIGHT_MONITOR_LOG
 #define GRINDER_WEIGHT_MONITOR_LOG 0
@@ -177,6 +178,19 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(rotaryCLK, rotaryDT, r
 HX711_ADC LoadCell(HX711_dout, HX711_sck);
 // B3a: passive fresh-sample stability diagnostics; no grinder control.
 static GrinderWeightStability grinderWeightStability;
+// B3b: observe the portafilter/funnel combinations on real HX711 samples.
+// The preview has NO tare, motor or NVS-writing capability.
+static GrinderProfileDetector::Config grinderPreviewConfig()
+{
+  GrinderProfileDetector::Config config;
+  config.previewOnly = true;
+  return config;
+}
+static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
+static bool grinderPreviewAutoEnabled = false;
+static int grinderPreviewManualSelection = -1;
+static GrinderProfileDetector::State grinderPreviewLastState = GrinderProfileDetector::State::Fault;
+static int grinderPreviewLastProfile = -2;
 #if GRINDER_WEIGHT_MONITOR_LOG
 static uint32_t lastGrinderWeightLogMs = 0;
 #endif
@@ -4134,6 +4148,92 @@ void doTara(){
 
 }
 
+// B3b: diagnostic-only profile matcher. The legacy Single-Dose autodetect
+// must NOT run alongside it, because that code automatically calls doTara().
+static void initGrinderProfilePreview()
+{
+  for (int i = 0; i < GrinderProfileDetector::kProfileCount; ++i) {
+    const GrinderProfileDetector::Profile p(weightST[i], weightTrichter[i], setWeightST[i]);
+    if (!grinderProfilePreview.setProfile(i, p)) {
+      Serial.printf("[GBW B3b] profile %d invalid; check calibration/preset\n", i + 1);
+    }
+  }
+  grinderPreviewAutoEnabled = autoDetect != 0;
+  grinderProfilePreview.setAutoDetect(grinderPreviewAutoEnabled);
+  if (!grinderPreviewAutoEnabled) {
+    grinderProfilePreview.selectManualProfile(selectedST);
+  }
+  grinderPreviewManualSelection = selectedST;
+  grinderPreviewLastState = GrinderProfileDetector::State::Fault;
+  Serial.println("[GBW B3b] PREVIEW ONLY: legacy auto-tare disabled; relay stays OFF");
+  Serial.println("[GBW B3b] stored profile weights require verification after calibration");
+}
+
+static const char* grinderPreviewStateName(GrinderProfileDetector::State state)
+{
+  using State = GrinderProfileDetector::State;
+  switch (state) {
+    case State::WaitVessel: return "WaitVessel";
+    case State::CheckingVessel: return "CheckingVessel";
+    case State::WaitFunnel: return "WaitFunnel (Trichter auflegen)";
+    case State::CheckingFunnel: return "CheckingFunnel";
+    case State::UnknownVessel: return "UnknownVessel";
+    case State::AmbiguousVessel: return "AmbiguousVessel";
+    case State::CombinationPreview: return "CombinationPreview (Tara nur simuliert)";
+    case State::AwaitTare: return "AwaitTare";
+    case State::WaitPostTare: return "WaitPostTare";
+    case State::ReadyAuto: return "ReadyAuto";
+    case State::ReadyManual: return "ReadyManual";
+    case State::CheckingRemoval: return "CheckingRemoval";
+    case State::Fault: return "Fault";
+  }
+  return "Unknown";
+}
+
+static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
+{
+  const bool shouldPause = webWizardActive || loadCellInitializing;
+  if (grinderProfilePreview.paused() != shouldPause) {
+    grinderProfilePreview.setPaused(shouldPause);
+    if (!shouldPause) {
+      // After calibration/wizard the previous gross weight is no longer valid.
+      grinderProfilePreview.setAutoDetect(autoDetect != 0);
+      if (autoDetect == 0) grinderProfilePreview.selectManualProfile(selectedST);
+      grinderPreviewLastState = GrinderProfileDetector::State::Fault;
+    }
+  }
+  if (shouldPause) return;
+
+  const bool enabled = autoDetect != 0;
+  if (enabled != grinderPreviewAutoEnabled) {
+    if (grinderProfilePreview.setAutoDetect(enabled)) {
+      grinderPreviewAutoEnabled = enabled;
+      grinderPreviewLastState = GrinderProfileDetector::State::Fault;
+    }
+  }
+  if (!enabled && (grinderPreviewManualSelection != selectedST ||
+                   grinderProfilePreview.selectedProfile() < 0)) {
+    grinderProfilePreview.selectManualProfile(selectedST);
+  }
+  grinderPreviewManualSelection = selectedST;
+
+  if (newHx711Data) {
+    grinderProfilePreview.onWeightSample(actualWeight,
+      grinderWeightStability.isStable(nowMs), nowMs);
+  }
+  grinderProfilePreview.tick(nowMs);
+
+  const auto currentState = grinderProfilePreview.state();
+  const int selected = grinderProfilePreview.selectedProfile();
+  if (currentState != grinderPreviewLastState || selected != grinderPreviewLastProfile) {
+    grinderPreviewLastState = currentState;
+    grinderPreviewLastProfile = selected;
+    Serial.printf("[GBW B3b] %s profile=%d target=%.1f g (preview; NO TARE)\n",
+      grinderPreviewStateName(currentState), selected >= 0 ? selected + 1 : 0,
+      static_cast<double>(grinderProfilePreview.selectedTargetG()));
+  }
+}
+
 void CalibrateSetWeight()
 {
   LoadCell.update();
@@ -5250,6 +5350,7 @@ void setup()
     lastTimeFilterWechselNTP);
   coffeeStorageLoadSiebtraegerNames(preferences, siebtraeger, SIEBTRAEGER_COUNT);
   normaliseSiebtraegerNamesForHmi();
+  initGrinderProfilePreview();
   displayTimeoutMinutes = normaliseDisplayTimeoutMinutes(coffeeStorageLoadDisplayTimeoutMinutes(preferences, DISPLAY_TIMEOUT_DEFAULT_MINUTES));
   delayTimeDisplayOff = static_cast<unsigned long>(displayTimeoutMinutes) * 60000UL;
   coffeeStorageLoadMaintenanceSettings(
@@ -5352,6 +5453,7 @@ void loop(void)
   }
   updateScaleUiModeFromHmiPage();
   const uint32_t nowLoopMs = millis();
+  serviceGrinderProfilePreview(newLoadCellData, nowLoopMs);
 #if GRINDER_WEIGHT_MONITOR_LOG
   if (nowLoopMs - lastGrinderWeightLogMs >= 2000UL) {
     lastGrinderWeightLogMs = nowLoopMs;
@@ -5422,10 +5524,9 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
  
 
   
-  if (shouldRunScaleAutomation())
-  {
-    Autodetect();
-  }
+  // B3b: do NOT run the Legacy Single-Dose Autodetect() in parallel.
+  // Its own automatic tara would interfere with the new GBW detector.
+  // The B3b detector is deliberately read-only until profiles are calibrated.
   saveGrindResult();
   //################################
   // Shot-Waage

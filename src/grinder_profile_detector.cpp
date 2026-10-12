@@ -160,6 +160,17 @@ void GrinderProfileDetector::onWeightSample(float grams, bool stable, uint32_t n
     return;
   }
 
+  if (state_ == State::CombinationPreview) {
+    // B3b is diagnostic only: do not turn a recognized combination into a
+    // tare request, nor keep the previous profile if the load changes.
+    if (grams <= config_.emptyThresholdG) {
+      resetDetection();
+    } else if (std::fabs(grams - candidateG_) >= config_.funnelChangeThresholdG) {
+      beginCandidate(State::CheckingVessel, grams, nowMs);
+    }
+    return;
+  }
+
   if (readyToGrind()) {
     // After tare, removing a heavy vessel produces a strongly negative weight.
     // Revoke ready status immediately; restore only if it bounces back.
@@ -215,6 +226,7 @@ void GrinderProfileDetector::onWeightSample(float grams, bool stable, uint32_t n
     } else {
       selectedProfile_ = match.index;
       if (match.type == MatchType::Portafilter) state_ = State::WaitFunnel;
+      else if (config_.previewOnly) state_ = State::CombinationPreview;
       else beginTare(TareKind::AutoCombination, nowMs);
     }
     return;
@@ -244,7 +256,10 @@ void GrinderProfileDetector::onWeightSample(float grams, bool stable, uint32_t n
     }
     updateCandidate(grams, stable, nowMs);
     if (candidateReady(nowMs, stable)) {
-      if (isCombinationForSelected(grams)) beginTare(TareKind::AutoCombination, nowMs);
+      if (isCombinationForSelected(grams)) {
+        if (config_.previewOnly) state_ = State::CombinationPreview;
+        else beginTare(TareKind::AutoCombination, nowMs);
+      }
       else state_ = State::WaitFunnel; // unexpected item; do not tare
     }
   }
