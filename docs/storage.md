@@ -2,15 +2,22 @@
 
 ## Ziel
 
-Alle dauerhaften Werte werden zentral ueber `src/coffee_storage.cpp` verwaltet. Dadurch bleibt `main.cpp` frei von direkter NVS-/Preferences-Detailarbeit.
+Die Legacy-kompatiblen dauerhaften Werte werden über `src/coffee_storage.cpp` verwaltet. Für die T4-S3 kommen eigene Settings in `src/t4s3_settings.cpp` und WLAN-Profile in `src/coffee_wifi.cpp` hinzu. Die Module verwenden getrennte NVS-Namespaces.
 
 ## Namespace
 
-Der Preferences-Namespace lautet:
+Die für die folgende Legacy-kompatible Tabelle verwendeten Schlüssel liegen unter:
 
 ```text
 savedValues
 ```
+
+Weitere produktive T4-S3-Namespaces:
+
+- `t4s3ui`: HMI, Gefäße, Kalibrierung, Wartung und sonstige T4-spezifische Einstellungen (`src/t4s3_settings.cpp`).
+- `coffee_wifi`: WLAN-Profile (`p1_ssid`, `p1_pass`, `p2_ssid`, `p2_pass`) und Steuerwerte (`schema`, `pref`, `auto`). Die alten Schlüssel `ssid`, `pass`, `active` bleiben nach der einmaligen Migration für ein mögliches Rollback erhalten.
+
+Weitere Details: `docs/t4s3-persistent-settings.md` und `docs/wifi-provisioning.md`.
 
 ## Wichtige gespeicherte Werte
 

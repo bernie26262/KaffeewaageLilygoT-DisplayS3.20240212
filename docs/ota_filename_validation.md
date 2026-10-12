@@ -1,51 +1,32 @@
-# OTA-Dateinamenprüfung
+# OTA-Dateinamenprüfung und Upload-Sperre – T4-S3
 
-## Ziel
+## Zweck
 
-Die OTA-Seite soll verhindern, dass versehentlich ein falsches Binary in den falschen Flash-Bereich geschrieben wird.
-
-## Erlaubte Dateinamen
-
-| Upload-Feld | erlaubte Datei |
-|---|---|
-| Firmware | `firmware.bin` |
-| Dateisystem | `spiffs.bin` oder `littlefs.bin` |
+Die T4-S3 bietet **nur Firmware-OTA** unter `http://<ip>/update`. Zulässiger Dateiname: `firmware.bin` (aus `.pio\build\lilygo-t4-s3-lvgl\`). `spiffs.bin`, `littlefs.bin`, `bootloader.bin` und sonstige Dateien dürfen **nicht** als Firmware hochgeladen werden. Ein Dateisystem-Upload ist nicht mehr vorhanden.
 
 ## Schutzebenen
 
-Die Prüfung erfolgt doppelt:
+1. **Browser:** Prüfung des ausgewählten Dateinamens und erneute Validierung beim Upload; falsche Datei blockiert den Upload-Button. Bei gültiger Datei ist dieser grün und aktiv.
+2. **ESP:** Prüfung im Handler vor `Update.begin(...)`. Falscher Name ergibt HTTP 400. Die BLE-Abschaltung wird erst nach einer gültigen Dateinamenprüfung ausgelöst.
+3. **Nach Erfolg:** Erst `Update.end(true)` setzt den Reboot-Pflichtstatus. `GET /update/status` liefert `{"reboot_required":true}`; ein weiterer Upload vor Neustart ergibt HTTP 409, auch ohne Browser-UI.
+4. **Abbruch/Fehler:** Keine Erfolgsmeldung bei unterbrochenem Update. Ein späterer Versuch verwirft mit `Update.abort()` gegebenenfalls einen laufenden unvollständigen Update-Zustand und beginnt bei 0 %. Ein Byte-Resume gibt es nicht.
 
-1. clientseitig in der OTA-WebUI vor dem Upload
-2. serverseitig im ESP-Upload-Handler vor `Update.begin(...)`
+## Sichtbare Meldungen
 
-Dadurch bleibt der Schutz auch dann erhalten, wenn ein Upload nicht über die normale WebUI ausgelöst wird.
-
-## Erwartete Meldungen
-
-Falsche Firmware-Datei:
+Bei falscher Firmware-Datei beispielsweise:
 
 ```text
-Firmware: falsche Datei gewählt. Erwartet: firmware.bin.
+Firmware: falsche Datei gewaehlt. Erwartet: firmware.bin.
 ```
 
-Falsche Dateisystem-Datei:
+Beim laufenden Upload werden Fortschritt und Warnung angezeigt; nach Erfolg erscheint der Neustartbereich. Während eines erfolgreichen Updates bleiben Navigation und Dateiauswahl gesperrt. Nach **Neustartanforderung** erscheint „Zurück zur WebUI“ wieder; nach abgeschlossenem Boot steht ein neuer OTA-Upload wieder zur Verfügung.
 
-```text
-SPIFFS: falsche Datei gewählt. Erwartet: spiffs.bin oder littlefs.bin.
-```
+## Testfälle / Validierungsstand
 
-Nach erfolgreichem Upload:
+- `firmware.bin` wird angenommen; Firmware-OTA mehrfach auf Hardware bestätigt.
+- `bootloader.bin` wird in der Oberfläche abgewiesen; auf Hardware bestätigt.
+- Nach erfolgreichem Upload und `Strg+F5`: Upload weiter gesperrt; auf Hardware bestätigt.
+- Neustart über OTA-Seite: funktioniert; BLE danach wieder verfügbar; auf Hardware bestätigt.
+- Browserseitiges Neuversuchen nach Fehler bzw. Abbruch: im Code vorgesehen und simuliert; **absichtlich abgebrochener Firmware-Upload noch nicht auf Hardware getestet**.
 
-```text
-Upload erfolgreich. Neustart erforderlich.
-```
-
-Der Neustart erfolgt bewusst per Button und nicht automatisch.
-
-## Testfälle
-
-1. `firmware.bin` im Firmware-Feld hochladen: muss akzeptiert werden.
-2. `spiffs.bin` oder `littlefs.bin` im Dateisystem-Feld hochladen: muss akzeptiert werden.
-3. `spiffs.bin` im Firmware-Feld auswählen: muss blockiert werden.
-4. `firmware.bin` im Dateisystem-Feld auswählen: muss blockiert werden.
-5. Upload-Handler direkt mit falschem Dateinamen ansprechen: ESP muss HTTP 400 liefern.
+Weitere Abläufe in `docs/webui-pwa-ota.md` und `docs/test-plan.md`.

@@ -7,7 +7,7 @@ Die T4-S3-Waage besitzt zwei fachlich getrennte Betriebsarten:
 - **Single Dose** für Bohnen, Gefäßerkennung, Auto-Tara und Save Dose
 - **Shot-Waage** für Espresso-Bezug, Maschinen-Tara, Zeit, Gewicht, Flowrate und WebUI-Graph
 
-BLE bleibt in beiden Modi aktiv und verbunden. Nur die Ausführung von Maschinenkommandos wird im Single-Dose-Modus gesperrt.
+BLE bleibt im normalen Betrieb in beiden Modi aktiv und kann verbunden bleiben. Nur die Ausführung von Maschinenkommandos wird im Single-Dose-Modus gesperrt. **Ausnahme:** Bei gültigem Firmware-OTA wird BLE bis zum Neustart abgeschaltet.
 
 ## WeighMyBru-GATT
 
@@ -46,8 +46,10 @@ Im realen Test mit Gaggiuino wurde nur `TARE` empfangen. `START`, `STOP` und `RE
 - Startverzögerung: 5 Sekunden nach Boot
 - vor BLE-Init wird WLAN-Modem-Sleep aktiviert
 - normale Sendeleistung `ESP_PWR_LVL_P3`
-- nach Disconnect wird Advertising sofort neu gestartet
+- nach Disconnect wird Advertising im Normalbetrieb neu gestartet
 - Wechsel zwischen Single Dose und Shot trennt BLE nicht
+- bei Beginn eines gültigen OTA-Uploads (`firmware.bin`) beendet `coffeeBleScaleStopForOta()` BLE und verhindert Neuinitialisierung/Advertising bis zum Neustart
+- ein fehlerhafter Dateiname löst diese Abschaltung nicht aus; nach Neustart startet BLE wieder wie gewohnt
 
 Farben in HMI und WebUI:
 

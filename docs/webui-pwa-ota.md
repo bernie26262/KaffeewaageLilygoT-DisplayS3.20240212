@@ -4,13 +4,15 @@
 
 Die Haupt-WebUI ist aktuell in `src/coffee_web.cpp` eingebettet. Das ist historisch gewachsen und soll kurzfristig stabil bleiben.
 
-Bereits ausgelagert ins SPIFFS-Dateisystem sind die PWA-/Homescreen-Icons:
+Die PWA-/Homescreen-Icons liegen unter `assets/` und werden mittels `board_build.embed_files` in die Firmware eingebettet:
 
 ```text
-data/kaffeewaage-192.png
-data/kaffeewaage-512.png
-data/kaffeewaage.ico
+assets/kaffeewaage-192.png
+assets/kaffeewaage-512.png
+assets/kaffeewaage.ico
 ```
+
+Die T4-S3 benötigt **kein SPIFFS-/LittleFS-Dateisystem** zum Ausliefern ihrer WebUI.
 
 
 ## WebUI-Asset-Split
@@ -47,7 +49,7 @@ http://<ip>/coffee_render.js?v=test
 http://<ip>/coffee_events.js?v=test
 ```
 
-Wichtig: Die PWA-/Homescreen-Icons bleiben weiterhin im SPIFFS-Dateisystem. Der Asset-Split betrifft nur die Haupt-WebUI aus `src/coffee_web.cpp`.
+Die Haupt-WebUI und die eingebetteten PWA-Icons werden alle aus der Firmware geliefert; es gibt keinen separaten Filesystem-OTA-Upload.
 ## WebSocket-Rendering / Langlauf-Performance
 
 Die WebUI verarbeitet Live-State-Nachrichten über WebSocket. Nach langen Laufzeiten traten im Browser zeitweise Chrome-Meldungen wie diese auf:
@@ -127,14 +129,14 @@ Die Icons werden ueber stabile URLs bereitgestellt:
 /favicon.ico
 ```
 
-Diese Routen mappen auf die Dateien im SPIFFS.
+Diese Routen liefern die direkt eingebetteten Flash-Assets, ohne Mounten eines Dateisystems.
 
 ## Cache-Busting und Produktiv-Caching
 
 CSS und JavaScript verwenden eine gemeinsame zentrale Versionskennung in `src/coffee_web.cpp`:
 
 ```cpp
-#define COFFEE_WEB_ASSET_VERSION "20260913shot1"
+#define COFFEE_WEB_ASSET_VERSION "20261009wifiB2"
 ```
 
 Die Versionskennung wird automatisch an `/coffee.css` und alle JavaScript-Routen angehängt. Bei jeder Änderung an eingebettetem HTML, CSS oder JavaScript muss ausschließlich diese zentrale Kennung erhöht werden.
@@ -155,7 +157,7 @@ Bei Icon-Änderungen zusätzlich die Icon-Version im HTML erhöhen. Android aktu
 
 ## Pruef-URLs
 
-Nach Firmware- und SPIFFS-Upload sollten diese URLs getestet werden:
+Nach dem Firmware-Upload sollten diese URLs getestet werden:
 
 ```text
 http://<ip>/manifest.json?v=99
@@ -171,64 +173,44 @@ Erwartung:
 - Favicon erscheint im Browser-Tab
 - Android Chrome kann die Seite als Homescreen-App installieren
 
-## OTA-Seite
+## OTA-Seite und Ablauf
 
-Die OTA-Seite ist erreichbar unter:
+Die separat in `src/coffee_ota.cpp` eingebettete OTA-Seite unter `http://<ip>/update` verwendet das dunkle WebUI-Design und bietet **nur Firmware-OTA**. Erlaubt ist `firmware.bin` aus:
 
 ```text
-http://<ip>/update
+.pio\build\lilygo-t4-s3-lvgl\firmware.bin
 ```
 
-Sie bietet getrennte Uploads fuer:
+Der Ablauf ist bewusst in Zustände aufgeteilt:
 
-- Firmware
-- SPIFFS-Dateisystem
-
-Nach erfolgreichem Upload wird kein automatischer Neustart ausgefuehrt. Dadurch kann erst geprueft werden, ob der Upload erfolgreich war. Danach wird per Button neu gestartet.
-
-## OTA-Dateinamen-Schutz
-
-Die OTA-Seite prueft die ausgewaehlten Dateinamen doppelt:
-
-1. clientseitig in der WebUI direkt bei der Dateiauswahl und erneut beim Upload-Klick
-2. ESP-seitig im Upload-Handler, bevor `Update.begin(...)` aufgerufen wird
-
-Erlaubte Dateinamen:
-
-| Upload-Feld | erlaubte Datei |
+| Zustand | Verhalten |
 |---|---|
-| Firmware | `firmware.bin` |
-| SPIFFS/Dateisystem | `spiffs.bin` oder `littlefs.bin` |
+| Keine / falsche Datei | Upload-Button deaktiviert, bei falschem Namen Fehlermeldung |
+| Gültige `firmware.bin` | Upload-Button grün und aktiv |
+| Upload läuft | Fortschrittsanzeige, deutliche Warnung, Dateiauswahl und Navigation gesperrt, `beforeunload` aktiv |
+| Upload erfolgreich | Fortschritt 100 %, weiterer Upload gesperrt, nur Neustart möglich; „Zurück zur WebUI“ zunächst ausgeblendet |
+| Neustart angefordert | Verbindungsabbruch erwartet; Hinweis erscheint und „Zurück zur WebUI“ wird wieder angeboten |
+| ESP32 neu gestartet | OTA wieder verfügbar; WebUI, WLAN und BLE normal nutzbar |
 
-Bei falschem Dateinamen wird der Upload blockiert. ESP-seitig antwortet der Handler mit HTTP 400 und einer erklaerenden Meldung. Dadurch wird verhindert, dass versehentlich `spiffs.bin` als Firmware oder `firmware.bin` als Dateisystem-Image geschrieben wird.
+Beim Beginn eines **gültigen** Firmware-Uploads wird BLE mit `coffeeBleScaleStopForOta()` gestoppt und bis zum Neustart nicht mehr gestartet. Bei falschem Dateinamen bleibt BLE unverändert.
 
-Details und Testfaelle stehen in:
+### Serverseitiger OTA-Schutz
 
-```text
-docs/ota_filename_validation.md
-```
+- `POST /update/firmware`: validiert den Dateinamen vor `Update.begin(...)`; ungültige Dateinamen werden mit HTTP 400 abgelehnt.
+- `Update.end(true)` entscheidet, ob der Upload wirklich erfolgreich war. Erst dann wird `otaFirmwareReadyForReboot` gesetzt.
+- `GET /update/status`: JSON `{"reboot_required":true|false}`; nach erfolgreichem Upload bleibt die Sperre auch nach `Strg+F5` aktiv.
+- Ein erneuter Upload nach Erfolg wird bis zum Neustart serverseitig mit HTTP 409 abgewiesen.
+- `POST /update/reboot`: fordert den kontrollierten ESP32-Neustart an.
+- Unterbrochener Upload: Vor einem neuen Versuch wird bei `Update.isRunning()` der unvollständige Zustand mit `Update.abort()` verworfen. Ein neuer Upload beginnt vollständig bei **0 %**; echtes Resume ab einer Byteposition existiert nicht.
 
+**Teststatus:** Normale Firmware-Uploads, BLE-Abschaltung, Neustart, Dateinamenprüfung und Sperre nach Erfolg wurden auf Hardware bestätigt. Ein **absichtlich unterbrochener Upload** wurde bislang nur per Code-/Simulationstest geprüft, nicht auf Hardware provoziert.
 
-## Firmware bauen
+## Firmware bauen und hochladen
 
 ```powershell
 pio run -e lilygo-t4-s3-lvgl
 ```
 
-Die erzeugte Firmware-Binary liegt unter:
+Anschließend `.pio\build\lilygo-t4-s3-lvgl\firmware.bin` über `/update` auswählen, hochladen und nach Erfolg „ESP32 jetzt neu starten“ drücken. Ein zusätzliches `buildfs`, `uploadfs`, `spiffs.bin` oder `littlefs.bin` ist für die T4-S3 **nicht erforderlich**; die Filesystem-OTA-Sektion wurde entfernt, die Partitionstabelle bleibt unverändert.
 
-```text
-.pio\build\KaffeewaageLilygoT-DisplayS3_20240212\firmware.bin
-```
-
-## SPIFFS bauen
-
-Bei OTA-Projekten nicht `pio run -t uploadfs` verwenden.
-
-Stattdessen:
-
-```powershell
-pio run -e lilygo-t4-s3-lvgl -t buildfs
-```
-
-Danach das erzeugte SPIFFS-/LittleFS-Image aus dem Build-Ordner über `/update` hochladen.
+Die doppelte Dateinamenprüfung wird in `docs/ota_filename_validation.md` beschrieben.

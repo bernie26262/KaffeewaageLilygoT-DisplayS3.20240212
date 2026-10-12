@@ -78,57 +78,42 @@ Bei Icon-Problemen:
 - alte Homescreen-Verknuepfung loeschen
 - neu hinzufuegen
 
-## OTA-Test
+## WLAN-Profil-, Failover- und Recovery-Test
 
-Update-Seite oeffnen:
+Prüfpunkte nach Änderungen an `coffee_wifi.cpp`, `t4s3_wifi.cpp` oder der WLAN-WebUI:
 
-```text
-http://<ip>/update
-```
+1. WLAN1/2 speichern und anzeigen; Passwörter nicht im Klartext ausliefern; leeres Passwort beim Bearbeiten behält den vorhandenen Schlüssel.
+2. Preferred auf WLAN2 setzen: laufende WLAN1-Verbindung bleibt bestehen. Nach Neustart verbindet die Waage WLAN2.
+3. WLAN1 bevorzugt, aber vorübergehend unerreichbar: nach ca. 15 s erfolgt Failover zu WLAN2.
+4. WLAN2 nach stabilem Betrieb abschalten, WLAN1 ebenfalls nicht erreichbar: nach Verbindungsversuchen erscheint der automatische **AP-only** `Waagen-Setup`.
+5. Smartphone verbindet sich mit `Waagen-Setup`; die separate Seite `http://192.168.4.1/` bleibt mindestens 3 Minuten erreichbar.
+6. WLAN2 wieder aktivieren und „Setup-WLAN beenden / WLAN erneut versuchen“ auslösen: Verbindung ohne ESP-Neustart.
+7. Manuellen Setup-AP über HMI starten: `WIFI_AP_STA`, normale Heimnetz-WebUI bleibt erreichbar.
+8. Im AP-only-Recovery keine letzte Ziel-SSID als *verbunden* auf dem HMI anzeigen; IP und RSSI ohne STA-Verbindung leer.
+9. Nach Test ursprüngliche WLAN1-SSID und Preferred-Einstellung kontrollieren; Normalbetrieb wiederherstellen.
 
-Firmware-Upload:
+**Sicheres Testverfahren:** Statt das Heim-WLAN abzuschalten, WLAN1-SSID vorübergehend auf einen nicht existierenden Testnamen ändern (Passwort leer lassen) und WLAN2 über einen abschaltbaren Hotspot testen. Produktives FritzBox-/UniFi-WLAN dabei nicht ausschalten. Mit der einzigen funktionierenden Waage Änderungen kontrolliert durchführen.
 
-1. Firmware bauen
-2. `firmware.bin` ueber Firmware-Upload hochladen
-3. Erfolgsmeldung abwarten
-4. per Button neu starten
-5. WebUI wieder oeffnen
+**Bereits auf T4-S3 hardwaregetestet:** Preferred, Boot auf WLAN2, Failover, AP-only-Recovery, Setup-Seite, Retry über HMI und WebUI.
 
-SPIFFS-Upload:
+## Firmware-OTA-Test (kein Filesystem-OTA)
 
-1. Dateisystem bauen
+Update-Seite unter `http://<ip>/update` öffnen. Build-Datei: `.pio\build\lilygo-t4-s3-lvgl\firmware.bin`.
 
-```powershell
-pio run -e lilygo-t4-s3-lvgl -t buildfs
-```
+1. Ohne Datei: Upload-Button deaktiviert.
+2. `bootloader.bin` auswählen: Fehlermeldung, Upload bleibt blockiert. Gültige `firmware.bin` anschließend auswählen: Fehler verschwindet, Button wird grün.
+3. Während gültigem OTA-Upload: Fortschritt, Warnung und Navigation-Sperre prüfen. BLE-Verbindung soll beim Start dieses Uploads beendet werden.
+4. Bei 100 %: Erfolgsmeldung und Neustartbereich; Datei und Upload gesperrt, „Zurück zur WebUI“ ausgeblendet.
+5. Vor Neustart mit `Strg+F5` neu laden: Zustand bleibt gesperrt; `GET /update/status` meldet `{"reboot_required":true}`.
+6. Auf „ESP32 jetzt neu starten“ klicken: Neustart-Hinweis erscheint und „Zurück zur WebUI“ wird wieder angeboten.
+7. Nach Boot: Wiegen, Tarieren, Shot-Funktion, WLAN und WebUI prüfen; BLE muss wieder verfügbar sein; die OTA-Seite erlaubt erneut Dateiauswahl.
+8. Browser-Assets `/manifest.json`, `/icon-192.png`, `/icon-512.png` und `/favicon.ico` separat prüfen – sie werden aus dem Firmware-Flash geliefert.
 
-2. erzeugte SPIFFS-Binary ueber Dateisystem-Upload hochladen
-3. Erfolgsmeldung abwarten
-4. per Button neu starten
-5. Icon-/Manifest-URLs pruefen
+Serverseitig muss ein falscher Firmware-Dateiname HTTP 400 auslösen; ein zweiter Upload nach Erfolg und vor Neustart muss HTTP 409 ergeben. Diese Fälle bei Bedarf mit gezielten HTTP-Tests überprüfen, ohne produktive Firmwaredaten unnötig zu verändern.
 
+**Nicht mit der einzigen Waage mutwillig erzwingen:** Stromunterbrechung oder ein abgebrochener OTA-Upload. Die Implementierung verwirft gegebenenfalls einen vorherigen `Update.isRunning()`-Zustand und beginnt einen neuen Upload vollständig bei 0 % (kein Byte-Resume). Dieser Sonderfall wurde noch nicht auf Hardware getestet.
 
-### OTA-Dateinamen-Schutz
-
-Falsche Datei im Firmware-Feld:
-
-1. `spiffs.bin` oder `littlefs.bin` im Firmware-Feld auswaehlen
-2. Erwartung: Meldung `Firmware: falsche Datei gewaehlt. Erwartet: firmware.bin.`
-3. Upload-Klick
-4. Erwartung: Upload wird clientseitig blockiert
-
-Falsche Datei im SPIFFS-Feld:
-
-1. `firmware.bin` im SPIFFS-/Dateisystem-Feld auswaehlen
-2. Erwartung: Meldung `SPIFFS: falsche Datei gewaehlt. Erwartet: spiffs.bin oder littlefs.bin.`
-3. Upload-Klick
-4. Erwartung: Upload wird clientseitig blockiert
-
-Serverseitiger Schutz:
-
-- Falls ein Upload die WebUI-Pruefung umgehen wuerde, muss der ESP mit HTTP 400 antworten.
-- Firmware-Endpunkt akzeptiert nur `firmware.bin`.
-- Dateisystem-Endpunkt akzeptiert nur `spiffs.bin` oder `littlefs.bin`.
+`buildfs`, `uploadfs` sowie `spiffs.bin`/`littlefs.bin` und ein Filesystem-Upload sind in der T4-S3 nicht mehr vorgesehen.
 
 ## WebUI-Langlauf-Performance
 

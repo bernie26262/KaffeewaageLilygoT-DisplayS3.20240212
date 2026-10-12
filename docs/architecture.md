@@ -62,7 +62,7 @@ Persistente T4-S3-HMI- und Waagenwerte im Namespace `t4s3ui`:
 
 ### `src/t4s3_wifi.cpp/.h`
 
-T4-S3-nahe WLAN-Status- und Hilfslogik.
+T4-S3-nahe WLAN-Status- und Hilfslogik. Die periodische Prüfung delegiert Timeouts, Failover und Recovery an `coffee_wifi.cpp`; sie führt keine konkurrierenden eigenen Reconnect-Zyklen aus. Die HMI zeigt nur bei tatsächlicher STA-Verbindung eine verbundene SSID; im Recovery-AP-Modus keine zuletzt versuchte SSID.
 
 ### `src/t4s3_weight_diag.cpp/.h`
 
@@ -100,7 +100,8 @@ Gemeinsame WebUI- und WebSocket-Schicht für Legacy und T4-S3:
 - WebSocket-Kommandos
 - JSON-State-Erzeugung
 - PWA-Manifest-Handler
-- Icon-/Favicon-Routen
+- Icon-/Favicon-Routen für direkt eingebettete `assets/`-Dateien
+- WLAN-Profil-API und Statusfelder für WLAN 1 / WLAN 2 / Preferred / Recovery
 - Shot-Sample-Endpunkt `/api/shot/samples`
 - kompakte `shot_telemetry`-WebSocket-Nachrichten während `armed/running`
 - Weight-Diagnose-Endpunkte für Liveansicht und CSV-Export
@@ -118,8 +119,9 @@ WeighMyBru-kompatible BLE-Peripheral-Schicht:
 - Nordic-UART-artiger Service `6E400001-...`
 - Gewichtspakete mit 5 Hz
 - Kommando-Characteristic für `TARE`, `START`, `STOP` und `RESET`
-- Advertising-Neustart nach Disconnect
+- Advertising-Neustart nach Disconnect im Normalbetrieb, nicht nach OTA-Abschaltung
 - BLE-Start fünf Sekunden nach Boot, damit Display, WLAN und BLE-Koexistenz stabil bleiben
+- vor einem gültigen Firmware-OTA: BLE-Deinitialisierung und Sperre bis zum nächsten Neustart (`coffeeBleScaleStopForOta()`)
 
 Im aktuell getesteten Gaggiuino-Client wird nur `TARE` gesendet. Die Unterstützung der übrigen Kommandos bleibt für andere Clients beziehungsweise spätere Firmwarestände erhalten.
 
@@ -143,21 +145,20 @@ Die Shot-Zeit beginnt beim ersten **softwareseitig plausibilisierten Flüssigkei
 
 ### `src/coffee_ota.cpp/.h`
 
-Update-Seite `/update` mit getrenntem Upload für:
-
-- Firmware (`firmware.bin`)
-- Dateisystem (`spiffs.bin` oder `littlefs.bin`)
-
-Der ESP rebootet nach Upload nicht automatisch. Der Neustart erfolgt per Button. Falsche Dateinamen werden client- und serverseitig abgelehnt.
+Firmware-OTA-Seite `/update` (nur `firmware.bin`) mit Fortschrittsanzeige, Upload-Warnung, Dateinamenprüfung und manuellem Neustart. Ein erfolgreicher Upload wird erst nach `Update.end(true)` akzeptiert und blockiert weitere Uploads bis zum Neustart, auch bei erneuter Seitenladung (`GET /update/status`). Unterbrochene Uploads werden vor einem neuen Versuch mit `Update.abort()` verworfen; es gibt kein Byte-Resume. Keine SPIFFS-/LittleFS-OTA-Routen mehr.
 
 ### `src/coffee_wifi.cpp/.h`
 
-WLAN-Provisioning und gespeicherte WLAN-Daten:
+WLAN-Provisioning und Failover:
 
-- Laden/Speichern/Löschen von SSID und Passwort in NVS
-- Auswahl zwischen gespeicherten WLAN-Daten und Standard-WLAN aus Firmware
-- Setup-Access-Point `Waagen-Setup`
-- Setup-Seite unter `http://192.168.4.1/`
+- zwei SSID-/Passwort-Profile im NVS-Namespace `coffee_wifi` mit bevorzugtem Profil
+- einmalige Migration der alten Single-Profil-Schlüssel (`ssid`, `pass`, `active`) nach WLAN 1
+- Verbindungsversuche mit etwa 15 s Timeout je Profil; kein Firmware-Credentials-Fallback
+- manueller `Waagen-Setup`-AP im Modus `WIFI_AP_STA`
+- automatischer Recovery-AP bei fehlgeschlagenen Profilversuchen im Modus `WIFI_AP` (AP-only)
+- Wiederverbindungsversuch über HMI oder `http://192.168.4.1/` ohne Neustart
+
+`src/coffee_web.cpp` stellt dazu die Profil- und Preferred-API und die getrennte Setup-Seite bereit. Details: `docs/wifi-provisioning.md`.
 
 ### `src/coffee_storage.cpp/.h`
 
