@@ -31,7 +31,9 @@
 #define rotary_VCC_PIN               -1 /* 27 put -1 of Rotary encoder Vcc is connected directly to 3,3V; else you can use declared output pin for powering rotary encoder */
 #define buttonMiddle                 10 
 #define buttonRight                  11 
-//#define relayMuehle                  16
+// Grind-by-Weight SSR: historically active LOW (LOW=ON, HIGH=OFF).
+// GPIO16 is dedicated to the grinder; phase A1 drives OFF only.
+#define PIN_GRINDER_SSR              16
 const int HX711_dout      =          12; //mcu > HX711 dout pin
 const int HX711_sck       =          13; //mcu > HX711 sck pin
 

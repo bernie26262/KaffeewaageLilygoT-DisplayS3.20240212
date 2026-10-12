@@ -42,6 +42,7 @@
 #include "coffee_storage.h"
 #include "ble_scale.h"
 #include "shot_session.h"
+#include "grinder_relay.h"
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -5187,6 +5188,9 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
 
 void setup()
 {
+  // SSR zuerst in den AUS-Zustand bringen, bevor Display, NVS oder WLAN starten.
+  // Phase A1: Keine Funktion in dieser Firmware darf die Muehle einschalten.
+  grinderRelayInitOff();
 
   // #######################
   // Display section of setup
@@ -5271,8 +5275,7 @@ void setup()
   
   pinMode(buttonMiddle, INPUT_PULLUP);
   pinMode(buttonRight, INPUT_PULLUP);
-  //pinMode(relayMuehle, OUTPUT);
-  //digitalWrite(relayMuehle, HIGH);
+  // Der SSR-Ausgang wurde bereits zu Beginn von setup() auf AUS gesetzt.
 
   syncSiebtraegerMenuItems();
   //menuItemsOfPage[3][1]  = siebtraeger[selectedST];
