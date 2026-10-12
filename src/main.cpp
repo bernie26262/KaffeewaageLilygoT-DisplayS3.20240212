@@ -43,6 +43,11 @@
 #include "ble_scale.h"
 #include "shot_session.h"
 #include "grinder_relay.h"
+#include "grinder_weight_stability.h"
+
+#ifndef GRINDER_WEIGHT_MONITOR_LOG
+#define GRINDER_WEIGHT_MONITOR_LOG 0
+#endif
 
 /*
 const unsigned char PROGMEM wlandisconnected16x16 [38]  = {
@@ -170,6 +175,11 @@ int32_t oldReadEncoder = 0;
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(rotaryCLK, rotaryDT, rotarySW, rotary_VCC_PIN, rotary_STEPS);
 
 HX711_ADC LoadCell(HX711_dout, HX711_sck);
+// B3a: passive fresh-sample stability diagnostics; no grinder control.
+static GrinderWeightStability grinderWeightStability;
+#if GRINDER_WEIGHT_MONITOR_LOG
+static uint32_t lastGrinderWeightLogMs = 0;
+#endif
 
 AsyncWebServer server(HTTP_PORT);
 //AsyncWebSocket ws("/ws");
@@ -5338,9 +5348,24 @@ void loop(void)
   actualWeight = LoadCell.getData();
   if (newLoadCellData) {
     updateShotWeightFilter(actualWeight);
+    grinderWeightStability.onSample(actualWeight, millis());
   }
   updateScaleUiModeFromHmiPage();
   const uint32_t nowLoopMs = millis();
+#if GRINDER_WEIGHT_MONITOR_LOG
+  if (nowLoopMs - lastGrinderWeightLogMs >= 2000UL) {
+    lastGrinderWeightLogMs = nowLoopMs;
+    const bool fresh = grinderWeightStability.hasFreshSample(nowLoopMs);
+    if (fresh) {
+      Serial.printf("[GBW B3a] weight=%.2f g fresh=1 stable=%d quiet_samples=%u\n",
+                    static_cast<double>(grinderWeightStability.lastWeightG()),
+                    grinderWeightStability.isStable(nowLoopMs) ? 1 : 0,
+                    static_cast<unsigned>(grinderWeightStability.quietSampleCount()));
+    } else {
+      Serial.println("[GBW B3a] weight=invalid fresh=0 stable=0");
+    }
+  }
+#endif
   tickShotSession(nowLoopMs);
   serviceSingleDoseAutomationResume(nowLoopMs);
   tickBleScale(nowLoopMs);
