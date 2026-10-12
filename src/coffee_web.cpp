@@ -37,7 +37,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kaffeewaage">
-  <link rel="stylesheet" href="/coffee.css?v=legacy-shot-20261008wifi2c2">
+  <link rel="stylesheet" href="/coffee.css?v=gbw-b3c-20261012">
 </head>
 <body>
 <main>
@@ -235,6 +235,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
     </section>
 
     <section class="card">
+      <div class="stats-title">Grind-by-Weight: Siebträger und Trichter</div>
+      <div class="small">Zuerst Waage kalibrieren. Danach je Profil Siebträger und Kombination einmessen.</div>
+      <div id="grinderProfileWeights" class="settings-list small" style="margin-top: 12px;"></div>
+      <div class="settings-actions" style="margin-top: 12px;">
+        <button id="openMeasureGrinderProfile" class="secondary">Siebträger + Trichter einmessen</button>
+      </div>
+    </section>
+
+    <section class="card">
       <div class="stats-title">Gefäße einmessen</div>
       <div class="small">Gespeicherte Gefäßgewichte für Autodetect.</div>
       <div id="gefaessList" class="gefaess-list"></div>
@@ -404,9 +413,9 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
 
 </main>
 
-<script src="/coffee_core.js?v=legacy-shot-20261008wifi2c2"></script>
-<script src="/coffee_render.js?v=legacy-shot-20261008wifi2c2"></script>
-<script src="/coffee_events.js?v=legacy-shot-20261008wifi2c2"></script>
+<script src="/coffee_core.js?v=gbw-b3c-20261012"></script>
+<script src="/coffee_render.js?v=gbw-b3c-20261012"></script>
+<script src="/coffee_events.js?v=gbw-b3c-20261012"></script>
 </body>
 </html>)rawliteral";
 
@@ -869,6 +878,7 @@ let targetWeightDirty = false;
 let pendingConfirm = null;
 let wizard = { type: null, step: 0, calibrationWeight: null };
 let wizardEndSent = true;
+let grinderMeasurePending = null;
 let currentMainTab = 'scalePage';
 let initialScaleModeSyncDone = false;
 let lastShotMode = null;
@@ -1111,6 +1121,31 @@ function sendCommand(cmd, logText) {
   addLog(logText || `${cmd} gesendet …`);
 }
 
+function sendGrinderMeasureCommand(cmd, nextStep) {
+  if (!isWebSocketReady() || grinderMeasurePending) {
+    addLog('Einmessung: auf WebSocket/Bestätigung warten');
+    return;
+  }
+  grinderMeasurePending = { cmd, nextStep };
+  sendCommand(cmd, `Einmessung: ${cmd} …`);
+}
+
+// Unlike the old generic wizard helper, B3c advances ONLY on ACK.
+function handleGrinderMeasureReply(data) {
+  if (!grinderMeasurePending || data.cmd !== grinderMeasurePending.cmd) return;
+  const pending = grinderMeasurePending;
+  grinderMeasurePending = null;
+  if (data.type !== 'ack') {
+    openInfoOverlay('Einmessen nicht möglich',
+      'Bitte die Waage beruhigen lassen, Gefäßkombination und Tarierung prüfen und erneut versuchen.');
+    return;
+  }
+  if (wizard.type === 'grinderProfile') {
+    wizard.step = pending.nextStep;
+    renderWizard();
+  }
+}
+
 function sendCommandAndThen(cmd, logText, nextStep) {
   sendCommand(cmd, logText);
   if (typeof nextStep === 'number') {
@@ -1128,6 +1163,10 @@ function finishWizardOverlay() {
 }
 
 function closeWizardOverlay() {
+  if (grinderMeasurePending) {
+    addLog('Einmessung: Bitte erst die Antwort des ESP abwarten.');
+    return;
+  }
   finishWizardOverlay();
   el('wizardOverlay').classList.remove('show');
   wizard = { type: null, step: 0 };
@@ -1220,6 +1259,58 @@ function renderCalibrationWizard() {
 
 function gefaessName(index) {
   return GEFAESS_NAMES[index] || `Gefäß ${index + 1}`;
+}
+
+function renderGrinderProfileWizard() {
+  const index = Number(wizard.grinderProfileIndex ?? 0);
+  const names = lastState?.selection?.siebtraeger_names || [];
+  const name = names[index] || `Siebträger ${index + 1}`;
+  if (wizard.step === 0) {
+    const options = [0,1,2,3].map(i =>
+      `<option value="${i}">${escapeHtml(names[i] || `Siebträger ${i+1}`)}</option>`).join('');
+    setWizardContent('Siebträger + Trichter: Profil',
+      'Bitte das einzumessende Profil auswählen.',
+      `<label class="wizard-field"><span>Profil</span><select id="grinderMeasureSelect">${options}</select></label>`,
+      [wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+       wizardButton('Weiter', '', () => {
+         wizard.grinderProfileIndex = Number(el('grinderMeasureSelect').value);
+         sendGrinderMeasureCommand(`gbw_measure_begin_${wizard.grinderProfileIndex}`, 1);
+       })]);
+    return;
+  }
+  if (wizard.step === 1) {
+    setWizardContent('Siebträger + Trichter: Tara',
+      'Waage vollständig leeren und auf 0,0 g tarieren.',
+      '<div class="wizard-note">Danach nur den Siebträger auflegen. Den Trichter noch weglassen.</div>',
+      [wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+       wizardButton('Tarieren', '', () => sendGrinderMeasureCommand(CMD.wizardTare, 2))]);
+    return;
+  }
+  if (wizard.step === 2) {
+    setWizardContent('Siebträgergewicht messen',
+      `${name} ohne Trichter auflegen und warten, bis der Messwert stabil ist.`,
+      `<div class="wizard-note">Aktuelles Gewicht: <b id="grinderMeasureLiveWeight">${fmtG(lastState?.weight?.actual_g)} g</b></div>`,
+      [wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+       wizardButton('Siebträger übernehmen', '', () =>
+         sendGrinderMeasureCommand(`gbw_measure_portafilter_${index}`, 3))]);
+    return;
+  }
+  if (wizard.step === 3) {
+    setWizardContent('Siebträger + Trichter messen',
+      'Siebträger liegen lassen, Trichter hinzufügen und Gewicht stabilisieren lassen.',
+      `<div class="wizard-note">Aktuelles Gesamtgewicht: <b id="grinderMeasureLiveWeight">${fmtG(lastState?.weight?.actual_g)} g</b></div>
+       <div class="wizard-note warn">Erst jetzt werden die beiden Gewichte zusammen in NVS gespeichert.</div>`,
+      [wizardButton('Abbrechen', 'secondary', closeWizardOverlay),
+       wizardButton('Kombination speichern', '', () =>
+         sendGrinderMeasureCommand(`gbw_measure_combination_${index}`, 4))]);
+    return;
+  }
+  const pf = lastState?.grinder_profiles?.portafilter_g || [];
+  const fu = lastState?.grinder_profiles?.funnel_g || [];
+  setWizardContent('Profil erfolgreich gespeichert',
+    `${name}: Siebträger ${fmtG(pf[index])} g, Trichter ${fmtG(fu[index])} g.`,
+    '<div class="wizard-note">Die neue Profilerkennung verwendet die Werte nach Beenden des Assistenten. Die automatische Tara bleibt deaktiviert.</div>',
+    [wizardButton('Fertig', '', closeWizardOverlay)]);
 }
 
 function renderMeasureGefaessWizard() {
@@ -1317,11 +1408,14 @@ function renderStatsTotalsWizard() {
 
 function renderWizard() {
   if (wizard.type === 'calibration') renderCalibrationWizard();
+  if (wizard.type === 'grinderProfile') renderGrinderProfileWizard();
   if (wizard.type === 'gefaess') renderMeasureGefaessWizard();
   if (wizard.type === 'statsTotals') renderStatsTotalsWizard();
 }
 
 function updateWizardLiveFields() {
+  const grinderWeightEl = el('grinderMeasureLiveWeight');
+  if (grinderWeightEl) grinderWeightEl.textContent = `${fmtG(lastState?.weight?.actual_g)} g`;
   const weightEl = el('gefaessLiveWeight');
   if (weightEl) {
     weightEl.textContent = `${fmtG(lastState?.weight?.actual_g)} g`;
@@ -1340,6 +1434,10 @@ function openWizard(type, pauseAutodetect = true) {
 
 function openCalibrationWizard() {
   openWizard('calibration');
+}
+
+function openMeasureGrinderProfileWizard() {
+  openWizard('grinderProfile');
 }
 
 function openMeasureGefaessWizard() {
@@ -1803,6 +1901,17 @@ function renderSiebtraegerNameSettings(s) {
   }).join('');
 }
 
+function renderGrinderProfileWeights(s) {
+  const list = el('grinderProfileWeights');
+  if (!list) return;
+  const names = s?.selection?.siebtraeger_names || [];
+  const pf = s?.grinder_profiles?.portafilter_g || [];
+  const fu = s?.grinder_profiles?.funnel_g || [];
+  list.innerHTML = [0, 1, 2, 3].map(i =>
+    `<div><b>${escapeHtml(names[i] || `Siebträger ${i + 1}`)}:</b> ` +
+    `${fmtG(pf[i])} g + ${fmtG(fu[i])} g Trichter</div>`).join('');
+}
+
 function renderGefaessSettings(s) {
   const list = el('gefaessList');
   if (!list) return;
@@ -2059,6 +2168,7 @@ function render(s) {
   renderMaintenanceIntervalSettings(s.maintenance);
   renderSiebtraegerNameSettings(s);
   renderGefaessSettings(s);
+  renderGrinderProfileWeights(s);
 
   if (el('wizardOverlay').classList.contains('show')) {
     updateWizardLiveFields();
@@ -2080,6 +2190,7 @@ function connect() {
   ws.onclose = () => {
     el('ws').textContent = 'Getrennt';
     el('ws').classList.remove('ok');
+    grinderMeasurePending = null;
     addLog('WebSocket getrennt, reconnect läuft …');
     setTimeout(connect, 1500);
   };
@@ -2089,6 +2200,7 @@ function connect() {
     if (data.type === 'state') render(data);
     if (data.type === 'shot_telemetry') applyShotTelemetry(data);
     if (data.type === 'ack') addLog(`OK: ${data.cmd}`);
+    if (data.type === 'ack' || data.type === 'error') handleGrinderMeasureReply(data);
     if (data.type === 'error') addLog(`Fehler: ${data.cmd || ''} ${data.message}`);
   };
 }
@@ -2471,6 +2583,7 @@ function bindNavigationHandlers() {
 
 function bindSettingsHandlers() {
   el('openCalibrate').addEventListener('click', openCalibrationWizard);
+  el('openMeasureGrinderProfile').addEventListener('click', openMeasureGrinderProfileWizard);
   el('openMeasureGefaess').addEventListener('click', openMeasureGefaessWizard);
   el('openStatsTotals').addEventListener('click', openStatsTotalsWizard);
   el('siebtraegerNameList').addEventListener('click', handleSiebtraegerNameListClick);
@@ -3339,6 +3452,13 @@ static String buildStateJson(const AppState& s)
 
   doc["calibration"]["set_weight_g"] = s.calibration.set_weight_g;
   doc["calibration"]["factor"] = s.calibration.factor;
+
+  JsonArray grinderSt = doc["grinder_profiles"]["portafilter_g"].to<JsonArray>();
+  JsonArray grinderFunnels = doc["grinder_profiles"]["funnel_g"].to<JsonArray>();
+  for (int i = 0; i < 4; ++i) {
+    grinderSt.add(s.grinder_profiles.portafilter_g[i]);
+    grinderFunnels.add(s.grinder_profiles.funnel_g[i]);
+  }
 
   JsonArray gefaessWeights = doc["gefaesse"]["weights_g"].to<JsonArray>();
   for (int i = 0; i < 4; ++i) {

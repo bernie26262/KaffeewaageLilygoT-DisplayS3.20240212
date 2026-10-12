@@ -132,6 +132,19 @@ void coffeeStorageSaveSelectedSiebtraeger(
   preferences.end();
 }
 
+bool coffeeStorageSaveGrinderProfileWeights(
+  Preferences& preferences,
+  const float* weightST, const float* weightTrichter, size_t byteCount)
+{
+  if (!weightST || !weightTrichter || byteCount != sizeof(float) * 4) return false;
+  if (!preferences.begin(STORAGE_NAMESPACE, RW_MODE)) return false;
+  const bool stOk = preferences.putBytes("savedWeightST", weightST, byteCount) == byteCount;
+  const bool triOk = stOk &&
+      preferences.putBytes("savedWeightTri", weightTrichter, byteCount) == byteCount;
+  preferences.end();
+  return stOk && triOk;
+}
+
 void coffeeStorageSaveSiebtraegerSetWeights(
   Preferences& preferences,
   const float* setWeightST,

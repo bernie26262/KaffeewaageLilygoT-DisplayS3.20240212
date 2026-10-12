@@ -43,6 +43,7 @@
 #include "ble_scale.h"
 #include "shot_session.h"
 #include "grinder_relay.h"
+#include "grinder_profile_measurement.h"
 #include "grinder_weight_stability.h"
 #include "grinder_profile_detector.h"
 
@@ -178,6 +179,8 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(rotaryCLK, rotaryDT, r
 HX711_ADC LoadCell(HX711_dout, HX711_sck);
 // B3a: passive fresh-sample stability diagnostics; no grinder control.
 static GrinderWeightStability grinderWeightStability;
+static GrinderProfileMeasurement grinderProfileMeasurement;
+static bool grinderPreviewProfilesDirty = false;
 // B3b: observe the portafilter/funnel combinations on real HX711 samples.
 // The preview has NO tare, motor or NVS-writing capability.
 static GrinderProfileDetector::Config grinderPreviewConfig()
@@ -880,6 +883,10 @@ static void updateCoffeeAppStateFromGlobals()
   appState.selection.gefaess = selectedGefaess;
   appState.selection.autodetect = autoDetect;
 
+  for (byte i = 0; i < SIEBTRAEGER_COUNT; ++i) {
+    appState.grinder_profiles.portafilter_g[i] = weightST[i];
+    appState.grinder_profiles.funnel_g[i] = weightTrichter[i];
+  }
   appState.calibration.set_weight_g = setWeightCalibration;
   appState.calibration.factor = calFactor;
   for (int i = 0; i < 4; ++i) {
@@ -971,7 +978,7 @@ void RedrawTFTShotBackgroundLock();
 void RefreshTFTShotBackgroundLock();
 void RefreshTFTBluetoothStatus();
 void DisplayOnOff();
-void doTara();
+bool doTara();
 void stringifySetWeight();
 void CalibrateSetWeight();
 void CalibrateFactor();
@@ -1412,6 +1419,7 @@ static void beginWebWizardCore()
 
 static void endWebWizardCore()
 {
+  grinderProfileMeasurement.cancel();
   const bool wasActive = webWizardActive;
   const bool restoreAutodetect = webWizardPreviousAutodetect;
 
@@ -1606,6 +1614,9 @@ static constexpr const char* CMD_WEB_WIZARD_END = "web_wizard_end";
 static constexpr const char* CMD_WEB_WIZARD_TARE = "web_wizard_tare";
 static constexpr const char* CMD_SCALE_CALIBRATION_APPLY = "scale_calibration_apply";
 static constexpr const char* CMD_MEASURE_GEFAESS_SAVE = "measure_gefaess_save";
+static constexpr const char* PREFIX_GBW_MEASURE_BEGIN = "gbw_measure_begin_";
+static constexpr const char* PREFIX_GBW_MEASURE_ST = "gbw_measure_portafilter_";
+static constexpr const char* PREFIX_GBW_MEASURE_COMBO = "gbw_measure_combination_";
 static constexpr const char* CMD_MAINTENANCE_RESET_GRINDER = "maintenance_reset_grinder";
 static constexpr const char* CMD_MAINTENANCE_RESET_MACHINE = "maintenance_reset_machine";
 static constexpr const char* CMD_MAINTENANCE_RESET_FILTER = "maintenance_reset_filter";
@@ -1636,7 +1647,10 @@ static bool webCommandBlockedByRunningShot(const char* cmd)
       cmdEquals(cmd, CMD_WEB_WIZARD_BEGIN) ||
       cmdEquals(cmd, CMD_WEB_WIZARD_TARE) ||
       cmdEquals(cmd, CMD_SCALE_CALIBRATION_APPLY) ||
-      cmdEquals(cmd, CMD_MEASURE_GEFAESS_SAVE)) {
+      cmdEquals(cmd, CMD_MEASURE_GEFAESS_SAVE) ||
+      cmdStartsWith(cmd, PREFIX_GBW_MEASURE_BEGIN) ||
+      cmdStartsWith(cmd, PREFIX_GBW_MEASURE_ST) ||
+      cmdStartsWith(cmd, PREFIX_GBW_MEASURE_COMBO)) {
     return true;
   }
 
@@ -1720,7 +1734,11 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
     }
   }
 
-  doTara();
+  const bool tareOk = doTara();
+  if (!tareOk) return false;
+  if (webWizardTare && grinderProfileMeasurement.active()) {
+    grinderProfileMeasurement.confirmTare();
+  }
 
   if (!webWizardTare && scaleUiMode == SCALE_UI_MODE_SHOT) {
     armShotSessionAfterTare();
@@ -1809,6 +1827,69 @@ static void tickBleScale(uint32_t nowMs)
 #else
   (void)nowMs;
 #endif
+}
+
+// All three B3c commands require the wizard to be active. The normal
+// WebSocket ACK is emitted ONLY when the action really succeeded.
+static bool parseGrinderMeasureIndex(const char* cmd, const char* prefix, int& index)
+{
+  if (!cmdStartsWith(cmd, prefix)) return false;
+  const char* tail = cmd + strlen(prefix);
+  if (tail[0] < '0' || tail[0] > '3' || tail[1] != '\0') return false;
+  index = tail[0] - '0';
+  return true;
+}
+
+static bool handleGrinderMeasureCommand(const char* cmd, bool& handled)
+{
+  int index = -1;
+  if (cmdStartsWith(cmd, PREFIX_GBW_MEASURE_BEGIN)) {
+    handled = true;
+    if (!webWizardActive || isShotRunningNow() ||
+        !parseGrinderMeasureIndex(cmd, PREFIX_GBW_MEASURE_BEGIN, index)) return false;
+    return grinderProfileMeasurement.begin(index);
+  }
+  if (cmdStartsWith(cmd, PREFIX_GBW_MEASURE_ST) ||
+      cmdStartsWith(cmd, PREFIX_GBW_MEASURE_COMBO)) {
+    handled = true;
+    const bool captureSt = cmdStartsWith(cmd, PREFIX_GBW_MEASURE_ST);
+    if (!parseGrinderMeasureIndex(cmd,
+          captureSt ? PREFIX_GBW_MEASURE_ST : PREFIX_GBW_MEASURE_COMBO, index) ||
+        !webWizardActive || isShotRunningNow() ||
+        !grinderProfileMeasurement.activeFor(index) ||
+        !grinderWeightStability.isStable(millis())) return false;
+    const float grossG = grinderWeightStability.lastWeightG();
+    if (captureSt) {
+      const bool ok = grinderProfileMeasurement.capturePortafilter(grossG);
+      if (ok) Serial.printf("[GBW B3c] ST %d staged: %.2f g\n", index + 1,
+                            static_cast<double>(grossG));
+      return ok;
+    }
+    GrinderProfileMeasurement::Result result{};
+    if (!grinderProfileMeasurement.captureCombination(grossG, result)) return false;
+    const float oldST = weightST[index];
+    const float oldFunnel = weightTrichter[index];
+    weightST[index] = result.portafilterG;
+    weightTrichter[index] = result.funnelG;
+    if (!coffeeStorageSaveGrinderProfileWeights(preferences,
+          weightST, weightTrichter, sizeof(weightST))) {
+      weightST[index] = oldST;
+      weightTrichter[index] = oldFunnel;
+      // Best-effort rollback if only the first NVS write succeeded.
+      coffeeStorageSaveGrinderProfileWeights(preferences,
+          weightST, weightTrichter, sizeof(weightST));
+      return false;
+    }
+    grinderProfileMeasurement.cancel(); // The NVS save was verified.
+    grinderPreviewProfilesDirty = true;
+    Serial.printf("[GBW B3c] profile %d saved: ST=%.2f g funnel=%.2f g\n",
+                  index + 1, static_cast<double>(result.portafilterG),
+                  static_cast<double>(result.funnelG));
+    broadcastWebStateFromGlobals();
+    return true;
+  }
+  handled = false;
+  return false;
 }
 
 static bool handleWebWizardCommand(const char* cmd, bool& handled)
@@ -2212,6 +2293,11 @@ static bool handleCoffeeWebCommand(const char* cmd)
   }
 
   ok = handleWebTareCommand(cmd, handled);
+  if (handled) {
+    return ok;
+  }
+
+  ok = handleGrinderMeasureCommand(cmd, handled);
   if (handled) {
     return ok;
   }
@@ -4127,25 +4213,24 @@ if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
 
 }
 
-void doTara(){
-  
-  
+bool doTara(){
   oldAutoDetect = autoDetect;
   autoDetect = 0;
-  
+
   debugln("tare");
-  LoadCell.tare();                        // hier: nicht tareNoDelay. Läuft nicht.
-  if (LoadCell.getTareStatus() == true) {
-  debugln("Tare complete");
+  LoadCell.tare(); // Existing blocking tare path.
+  const bool successful = LoadCell.getTareStatus();
+  if (successful) {
+    grinderWeightStability.reset(); // Do not reuse pre-tare readings.
+    debugln("Tare complete");
     taraRequest = false;
     oldWeightAutoDetect = actualWeight;
-    autoDetect = oldAutoDetect;
     weightToCompareAutoDetect = actualWeight - oldWeightAutoDetect;
     oldWeightDisplayOff = actualWeight;
     startWeightGrinding = actualWeight;
-    
   }
-
+  autoDetect = oldAutoDetect;
+  return successful;
 }
 
 // B3b: diagnostic-only profile matcher. The legacy Single-Dose autodetect
@@ -4196,6 +4281,13 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
   if (grinderProfilePreview.paused() != shouldPause) {
     grinderProfilePreview.setPaused(shouldPause);
     if (!shouldPause) {
+      if (grinderPreviewProfilesDirty) {
+        for (int i = 0; i < GrinderProfileDetector::kProfileCount; ++i) {
+          grinderProfilePreview.setProfile(i,
+            GrinderProfileDetector::Profile(weightST[i], weightTrichter[i], setWeightST[i]));
+        }
+        grinderPreviewProfilesDirty = false;
+      }
       // After calibration/wizard the previous gross weight is no longer valid.
       grinderProfilePreview.setAutoDetect(autoDetect != 0);
       if (autoDetect == 0) grinderProfilePreview.selectManualProfile(selectedST);

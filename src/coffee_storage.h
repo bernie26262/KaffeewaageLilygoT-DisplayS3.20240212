@@ -59,6 +59,12 @@ void coffeeStorageSaveSelectedSiebtraeger(
   Preferences& preferences,
   uint16_t selectedST);
 
+// Save portafilter and funnel arrays under their existing NVS keys.
+// A false result must be treated as a failed measurement save.
+bool coffeeStorageSaveGrinderProfileWeights(
+  Preferences& preferences,
+  const float* weightST, const float* weightTrichter, size_t byteCount);
+
 void coffeeStorageSaveSiebtraegerSetWeights(
   Preferences& preferences,
   const float* setWeightST,

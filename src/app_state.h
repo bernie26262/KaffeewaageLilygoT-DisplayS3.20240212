@@ -51,6 +51,11 @@ struct CalibrationState {
   float factor = 0.0f;
 };
 
+struct GrinderProfilesState {
+  float portafilter_g[4] = {};
+  float funnel_g[4] = {};
+};
+
 struct GefaessState {
   float weights_g[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
@@ -139,6 +144,7 @@ struct AppState {
   SelectionState selection;
   CalibrationState calibration;
   GefaessState gefaesse;
+  GrinderProfilesState grinder_profiles;
   StatsState stats;
   MaintenanceState maintenance;
   TimeState time;
