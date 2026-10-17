@@ -52,6 +52,9 @@ public:
   void onTareResult(bool successful, uint32_t nowMs); // actual HX711 tare completion
   void setPaused(bool paused); // future B3: inhibit detection during grinding
   void clearFault();
+  // External tare, profile edit or calibration invalidates any previous
+  // readiness. Never retain a ready indication across a foreign tare.
+  void invalidatePreparation();
 
   bool autoDetect() const { return autoDetect_; }
   bool paused() const { return paused_; }

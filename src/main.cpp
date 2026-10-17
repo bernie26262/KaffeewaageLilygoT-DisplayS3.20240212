@@ -181,12 +181,12 @@ HX711_ADC LoadCell(HX711_dout, HX711_sck);
 static GrinderWeightStability grinderWeightStability;
 static GrinderProfileMeasurement grinderProfileMeasurement;
 static bool grinderPreviewProfilesDirty = false;
-// B3b: observe the portafilter/funnel combinations on real HX711 samples.
-// The preview has NO tare, motor or NVS-writing capability.
+// B3d: recognized complete combinations request the existing HX711 tare.
+// There is deliberately NO connection to the SSR or grinder controller.
 static GrinderProfileDetector::Config grinderPreviewConfig()
 {
   GrinderProfileDetector::Config config;
-  config.previewOnly = true;
+  config.previewOnly = false;
   return config;
 }
 static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
@@ -194,6 +194,9 @@ static bool grinderPreviewAutoEnabled = false;
 static int grinderPreviewManualSelection = -1;
 static GrinderProfileDetector::State grinderPreviewLastState = GrinderProfileDetector::State::Fault;
 static int grinderPreviewLastProfile = -2;
+// Distinguish the detector's own one-shot auto-tare from a user/wizard tare.
+static bool grinderDetectorTareInProgress = false;
+static bool grinderExplicitManualTare = false;
 #if GRINDER_WEIGHT_MONITOR_LOG
 static uint32_t lastGrinderWeightLogMs = 0;
 #endif
@@ -845,7 +848,7 @@ static void updateCoffeeAppStateFromGlobals()
 
   appState.weight.actual_g = currentScaleDisplayWeight();
   appState.weight.set_g = setWeightST[selectedST];
-  appState.weight.stable = true; // TODO: later map from real scale stability detection
+  appState.weight.stable = grinderWeightStability.isStable(nowMs);
 
   appState.status.save_ready = statusReadyToSave;
   if (statusReadyToSave) {
@@ -968,6 +971,7 @@ static void updateCoffeeAppStateFromGlobals()
 void RefreshFooter();
 void RefreshTFTSetWeightST();
 void RefreshTFTDisplay();
+static void refreshGrinderPreparationOnHmi();
 void RedrawTFTWarnungen();
 void RefreshTFTCursor();
 void RefreshTFTTaraWait();
@@ -1734,7 +1738,10 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
     }
   }
 
+  grinderExplicitManualTare = !webWizardTare &&
+                              scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE;
   const bool tareOk = doTara();
+  grinderExplicitManualTare = false;
   if (!tareOk) return false;
   if (webWizardTare && grinderProfileMeasurement.active()) {
     grinderProfileMeasurement.confirmTare();
@@ -4056,6 +4063,7 @@ void RefreshTFTDisplay()
 
   // Footer
   RefreshFooter();
+  refreshGrinderPreparationOnHmi();
  
 }
 
@@ -4214,6 +4222,28 @@ if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
 }
 
 bool doTara(){
+  // Tares initiated from the WebUI/HMI must invalidate any previous ready
+  // state. Only a stable, explicitly selected manual profile may become ready.
+  bool trackedManualTare = false;
+  if (!grinderDetectorTareInProgress) {
+    grinderProfilePreview.invalidatePreparation();
+    if (grinderProfilePreview.autoDetect() != (autoDetect != 0)) {
+      grinderProfilePreview.setAutoDetect(autoDetect != 0);
+      grinderPreviewAutoEnabled = autoDetect != 0;
+    }
+    const uint32_t requestMs = millis();
+    if (grinderExplicitManualTare && !webWizardActive && !loadCellInitializing &&
+        scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && autoDetect == 0 &&
+        grinderWeightStability.isStable(requestMs) &&
+        grinderProfilePreview.selectManualProfile(selectedST)) {
+      grinderProfilePreview.onWeightSample(grinderWeightStability.lastWeightG(),
+                                            true, requestMs);
+      trackedManualTare = grinderProfilePreview.requestManualTare(requestMs) &&
+                          grinderProfilePreview.takeTareRequest() ==
+                            GrinderProfileDetector::TareKind::Manual;
+    }
+  }
+
   oldAutoDetect = autoDetect;
   autoDetect = 0;
 
@@ -4230,11 +4260,14 @@ bool doTara(){
     startWeightGrinding = actualWeight;
   }
   autoDetect = oldAutoDetect;
+  if (trackedManualTare) {
+    grinderProfilePreview.onTareResult(successful, millis());
+  }
   return successful;
 }
 
-// B3b: diagnostic-only profile matcher. The legacy Single-Dose autodetect
-// must NOT run alongside it, because that code automatically calls doTara().
+// B3d: the GBW detector owns automatic profile tare. The old Single-Dose
+// autodetect must remain disabled; it also calls doTara() independently.
 static void initGrinderProfilePreview()
 {
   for (int i = 0; i < GrinderProfileDetector::kProfileCount; ++i) {
@@ -4250,8 +4283,7 @@ static void initGrinderProfilePreview()
   }
   grinderPreviewManualSelection = selectedST;
   grinderPreviewLastState = GrinderProfileDetector::State::Fault;
-  Serial.println("[GBW B3b] PREVIEW ONLY: legacy auto-tare disabled; relay stays OFF");
-  Serial.println("[GBW B3b] stored profile weights require verification after calibration");
+  Serial.println("[GBW B3d] profile + auto-tare active; relay stays OFF");
 }
 
 static const char* grinderPreviewStateName(GrinderProfileDetector::State state)
@@ -4275,12 +4307,41 @@ static const char* grinderPreviewStateName(GrinderProfileDetector::State state)
   return "Unknown";
 }
 
+static void refreshGrinderPreparationOnHmi()
+{
+  if (pageID != 0 || displayOff != 0 || isShotRunningNow()) return;
+  using State = GrinderProfileDetector::State;
+  const auto state = grinderProfilePreview.state();
+  const char* label = "";
+  if (autoDetect) {
+    if (state == State::WaitFunnel) label = "Trichter auflegen";
+    else if (state == State::AwaitTare) label = "Tarieren...";
+    else if (state == State::WaitPostTare) label = "Tara pruefen";
+    else if (state == State::ReadyAuto) label = "Bereit";
+    else if (state == State::Fault) label = "Tara-Fehler";
+  } else if (state == State::ReadyManual) {
+    label = "Manuell bereit";
+  }
+  // Right-hand side of the third menu row; do not modify menu navigation.
+  tft.fillRect(157, 69, 163, 21, TFT_BLACK);
+  if (label[0]) {
+    tft.setTextDatum(TR_DATUM);
+    tft.setFreeFont(FSS9);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.drawString(label, 316, 72, GFXFF);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  }
+}
+
 static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
 {
-  const bool shouldPause = webWizardActive || loadCellInitializing;
+  const bool shouldPause = webWizardActive || loadCellInitializing ||
+                           scaleUiMode == SCALE_UI_MODE_SHOT || isShotArmedOrRunningNow();
   if (grinderProfilePreview.paused() != shouldPause) {
     grinderProfilePreview.setPaused(shouldPause);
     if (!shouldPause) {
+      // A wizard/calibration may have changed the tare offset and profiles.
+      grinderProfilePreview.invalidatePreparation();
       if (grinderPreviewProfilesDirty) {
         for (int i = 0; i < GrinderProfileDetector::kProfileCount; ++i) {
           grinderProfilePreview.setProfile(i,
@@ -4315,14 +4376,53 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
   }
   grinderProfilePreview.tick(nowMs);
 
+  using TareKind = GrinderProfileDetector::TareKind;
+  const TareKind requested = grinderProfilePreview.takeTareRequest();
+  if (requested != TareKind::None) {
+    const bool validAutomaticTare =
+      (requested == TareKind::AutoCombination || requested == TareKind::AfterRemoval) &&
+      autoDetect && !shouldPause;
+    // Never execute a stale or unexpected tare request, nor operate GPIO16.
+    bool tareOk = false;
+    if (validAutomaticTare) {
+      Serial.printf("[GBW B3d] Auto-tare requested: %s\n",
+                    requested == TareKind::AfterRemoval ? "removal" : "combination");
+      grinderDetectorTareInProgress = true;
+      tareOk = doTara();
+      grinderDetectorTareInProgress = false;
+    }
+    grinderProfilePreview.onTareResult(tareOk, millis());
+    Serial.printf("[GBW B3d] Auto-tare %s; waiting for stable zero=%d\n",
+                  tareOk ? "completed" : "FAILED", tareOk ? 1 : 0);
+  }
+
   const auto currentState = grinderProfilePreview.state();
   const int selected = grinderProfilePreview.selectedProfile();
   if (currentState != grinderPreviewLastState || selected != grinderPreviewLastProfile) {
     grinderPreviewLastState = currentState;
     grinderPreviewLastProfile = selected;
-    Serial.printf("[GBW B3b] %s profile=%d target=%.1f g (preview; NO TARE)\n",
+    if (enabled && selected >= 0 && selected < SIEBTRAEGER_COUNT &&
+        (currentState == GrinderProfileDetector::State::WaitFunnel ||
+         currentState == GrinderProfileDetector::State::CheckingFunnel ||
+         currentState == GrinderProfileDetector::State::AwaitTare ||
+         currentState == GrinderProfileDetector::State::WaitPostTare ||
+         currentState == GrinderProfileDetector::State::ReadyAuto) &&
+        selectedST != selected) {
+      // Auto-selected preset is a runtime choice, not a permanent NVS edit.
+      selectedST = static_cast<byte>(selected);
+      syncSiebtraegerMenuItems();
+      stringifySetWeight();
+      if (displayOff == 0 && pageID == 0) {
+        RefreshTFTDisplay();
+        RefreshTFTCursor();
+      }
+      broadcastWebStateFromGlobals();
+    }
+    Serial.printf("[GBW B3d] %s profile=%d target=%.1f g ready=%d (SSR OFF)\n",
       grinderPreviewStateName(currentState), selected >= 0 ? selected + 1 : 0,
-      static_cast<double>(grinderProfilePreview.selectedTargetG()));
+      static_cast<double>(grinderProfilePreview.selectedTargetG()),
+      grinderProfilePreview.readyToGrind() ? 1 : 0);
+    refreshGrinderPreparationOnHmi();
   }
 }
 
@@ -4923,7 +5023,9 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
         taraRequest = true;
         RefreshTFTTaraWait();
         debugln("doTara");
+        grinderExplicitManualTare = true;
         doTara();                              //taraRequest = false; ist in doTara() enthalten
+        grinderExplicitManualTare = false;
         if (autoDetect == 0){
         scheduleAutoDetectPostTara(true, false);
         }
@@ -5616,9 +5718,9 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
  
 
   
-  // B3b: do NOT run the Legacy Single-Dose Autodetect() in parallel.
-  // Its own automatic tara would interfere with the new GBW detector.
-  // The B3b detector is deliberately read-only until profiles are calibrated.
+  // B3d: do NOT run the Legacy Single-Dose Autodetect() in parallel.
+  // All automatic tara requests belong exclusively to the GBW detector.
+  // GPIO16 remains OFF; the grinder controller is not connected yet.
   saveGrindResult();
   //################################
   // Shot-Waage

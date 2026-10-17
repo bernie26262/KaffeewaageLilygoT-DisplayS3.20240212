@@ -286,3 +286,7 @@ void GrinderProfileDetector::setPaused(bool paused) {
 void GrinderProfileDetector::clearFault() {
   if (state_ == State::Fault) resetDetection();
 }
+
+void GrinderProfileDetector::invalidatePreparation() {
+  resetDetection();
+}
