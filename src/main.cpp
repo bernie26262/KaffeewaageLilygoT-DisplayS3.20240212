@@ -46,6 +46,7 @@
 #include "grinder_profile_measurement.h"
 #include "grinder_weight_stability.h"
 #include "grinder_profile_detector.h"
+#include "grinder_cycle_gate.h"
 
 #ifndef GRINDER_WEIGHT_MONITOR_LOG
 #define GRINDER_WEIGHT_MONITOR_LOG 0
@@ -190,6 +191,9 @@ static GrinderProfileDetector::Config grinderPreviewConfig()
   return config;
 }
 static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
+// B4a.2: passive connection to B1 controller. No start/cancel action,
+// no relay or GPIO connection until separately reviewed later phases.
+static GrinderCycleGate grinderCycleGate(grinderProfilePreview);
 static bool grinderPreviewAutoEnabled = false;
 static int grinderPreviewManualSelection = -1;
 static GrinderProfileDetector::State grinderPreviewLastState = GrinderProfileDetector::State::Fault;
@@ -4452,6 +4456,13 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
       grinderWeightStability.isStable(nowMs), nowMs);
   }
   grinderProfilePreview.tick(nowMs);
+  // B4a.2: only forward genuine HX711 samples, after the detector has
+  // processed them and BEFORE any potentially blocking automatic tare.
+  // A fresh post-tare zero will arrive separately through LoadCell.update().
+  if (newHx711Data) {
+    grinderCycleGate.onWeightSample(actualWeight,
+      grinderWeightStability.isStable(nowMs), nowMs);
+  }
 
   using TareKind = GrinderProfileDetector::TareKind;
   const TareKind requested = grinderProfilePreview.takeTareRequest();
@@ -5741,6 +5752,10 @@ void loop(void)
   updateScaleUiModeFromHmiPage();
   const uint32_t nowLoopMs = millis();
   serviceGrinderProfilePreview(newLoadCellData, nowLoopMs);
+  // Even without a new sample (and while detection is paused), the
+  // controller must see elapsed time and any loss of preparation.
+  // millis() is read again: serviceGrinderProfilePreview may block on tare.
+  grinderCycleGate.tick(millis());
 #if GRINDER_WEIGHT_MONITOR_LOG
   if (nowLoopMs - lastGrinderWeightLogMs >= 2000UL) {
     lastGrinderWeightLogMs = nowLoopMs;
@@ -5753,6 +5768,20 @@ void loop(void)
     } else {
       Serial.println("[GBW B3a] weight=invalid fresh=0 stable=0");
     }
+    // There is deliberately no requestStart() call in B4a.2.
+    // The passive controller must stay Idle and never request a motor run.
+    Serial.printf("[GBW B4a.2] state=%u gateWeight=%.2f g fresh=%d stable=%d "
+                  "ready=%d profile=%d target=%.1f g consumed=%d "
+                  "motorRequest=%d (SSR OFF)\n",
+                  static_cast<unsigned>(grinderCycleGate.state()),
+                  static_cast<double>(grinderCycleGate.lastWeightG()),
+                  fresh ? 1 : 0,
+                  grinderWeightStability.isStable(nowLoopMs) ? 1 : 0,
+                  grinderProfilePreview.readyToGrind() ? 1 : 0,
+                  grinderProfilePreview.selectedProfile() + 1,
+                  static_cast<double>(grinderProfilePreview.selectedTargetG()),
+                  grinderCycleGate.cycleConsumed() ? 1 : 0,
+                  grinderCycleGate.logicRunning() ? 1 : 0);
   }
 #endif
   tickShotSession(nowLoopMs);
@@ -5813,7 +5842,7 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   
   // B3d: do NOT run the Legacy Single-Dose Autodetect() in parallel.
   // All automatic tara requests belong exclusively to the GBW detector.
-  // GPIO16 remains OFF; the grinder controller is not connected yet.
+  // GPIO16 remains OFF; no control request is forwarded to the relay.
   saveGrindResult();
   //################################
   // Shot-Waage
