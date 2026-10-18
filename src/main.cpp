@@ -972,6 +972,7 @@ void RefreshFooter();
 void RefreshTFTSetWeightST();
 void RefreshTFTDisplay();
 static void refreshGrinderPreparationOnHmi();
+static bool canRequestGrinderUserTare(uint32_t nowMs);
 void RedrawTFTWarnungen();
 void RefreshTFTCursor();
 void RefreshTFTTaraWait();
@@ -1723,6 +1724,13 @@ static bool handleWebTareCommand(const char* cmd, bool& handled)
 
   handled = true;
 
+  // Same guard as the TFT middle key: never bypass a pending funnel decision
+  // or re-tare a dose through the WebUI.
+  if (!webWizardTare && scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
+      !canRequestGrinderUserTare(millis())) {
+    Serial.println("[GBW B3f] WebUI Tara blocked (SSR OFF)");
+    return false;
+  }
   if (webWizardTare) {
     beginWebWizardCore();
   }
@@ -3557,14 +3565,20 @@ void RefreshFooter()
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setFreeFont(FSS9);                 // Select the font
   if (footerOfPageID[pageID] == 0)
-  { tft.setTextDatum(TC_DATUM); // Set datum to Top Center
+  { const bool skipFunnel = autoDetect != 0 && !grinderProfilePreview.paused() &&
+        grinderProfilePreview.state() == GrinderProfileDetector::State::WaitFunnel;
+    tft.setTextDatum(TC_DATUM); // Set datum to Top Center
     tft.drawString("       Set       ",48,140,GFXFF);
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
-    tft.drawString("     Tara     ",166,140,GFXFF);
+    const bool taraAllowed = scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE ||
+                             canRequestGrinderUserTare(millis());
+    tft.drawString(taraAllowed ? "     Tara     " : "              ",166,140,GFXFF);
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
-    if (statusReadyToSave == 0) 
+    if (skipFunnel)
+      {tft.drawString("   Skip   ",258,140,GFXFF);}
+    else if (statusReadyToSave == 0)
       {tft.drawString("            ",258,140,GFXFF);}
-    if (statusReadyToSave == 1) 
+    else
       {tft.drawString("   Save   ",258,140,GFXFF);}
     tft.setTextDatum(TL_DATUM); // Set datum to Top Left}
     u8f.setFontDirection(0);            // left to right (this is default)
@@ -3575,11 +3589,9 @@ void RefreshFooter()
 
     u8f.drawGlyph(48,166,0x25bc); // Pfeil nach unten
     u8f.setForegroundColor(TFT_WHITE);
+    u8f.setForegroundColor(taraAllowed ? TFT_WHITE : TFT_BLACK);
     u8f.drawGlyph(166,166,0x25bc);
-    if (statusReadyToSave == 0)
-      {u8f.setForegroundColor(TFT_BLACK);}
-    if (statusReadyToSave == 1)
-      {u8f.setForegroundColor(TFT_WHITE);}
+    u8f.setForegroundColor((skipFunnel || statusReadyToSave) ? TFT_WHITE : TFT_BLACK);
     u8f.drawGlyph(258,166,0x25bc);
   }
   if (footerOfPageID[pageID] == 1)
@@ -4185,6 +4197,21 @@ void RefreshTFTDisplay()
 
 void saveGrindResult(){
 
+  // B3e: right key becomes Skip only while a known bare portafilter waits
+  // for its optional funnel. Never let this press also reach legacy Save.
+  if (buttonPressedbuttonRight == 1 && pageID == 0 && autoDetect != 0 &&
+      !grinderProfilePreview.paused() && !isShotRunningNow() &&
+      grinderProfilePreview.state() == GrinderProfileDetector::State::WaitFunnel) {
+    const bool accepted = grinderProfilePreview.requestSkipFunnel(millis());
+    buttonPressedbuttonRight = 0;
+    buttonReleasedbuttonRight = 0;
+    statusSwitchSaveWeightFell = 0;
+    statusSwitchSaveWeightRose = 0;
+    Serial.printf("[GBW B3e] Skip funnel %s (SSR OFF)\n",
+                  accepted ? "accepted" : "rejected: weight not stable/matching");
+    return;
+  }
+
   if (isShotRunningNow())
   {
     buttonPressedbuttonRight = 0;
@@ -4221,26 +4248,72 @@ if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
 
 }
 
+// B3f: this is the single policy for both TFT and WebUI user-tare actions.
+// Wizard and internal automatic tare calls have their own protected paths.
+static bool canRequestGrinderUserTare(uint32_t nowMs) {
+  if (webWizardActive || loadCellInitializing || isShotArmedOrRunningNow() ||
+      grinderProfilePreview.paused()) return false;
+  // The pure detector enforces identical state policy for both user inputs.
+  return grinderProfilePreview.canUserTare(nowMs);
+}
+
 bool doTara(){
-  // Tares initiated from the WebUI/HMI must invalidate any previous ready
-  // state. Only a stable, explicitly selected manual profile may become ready.
-  bool trackedManualTare = false;
+  bool trackedDetectorTare = false;
   if (!grinderDetectorTareInProgress) {
-    grinderProfilePreview.invalidatePreparation();
-    if (grinderProfilePreview.autoDetect() != (autoDetect != 0)) {
-      grinderProfilePreview.setAutoDetect(autoDetect != 0);
-      grinderPreviewAutoEnabled = autoDetect != 0;
-    }
     const uint32_t requestMs = millis();
-    if (grinderExplicitManualTare && !webWizardActive && !loadCellInitializing &&
-        scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && autoDetect == 0 &&
-        grinderWeightStability.isStable(requestMs) &&
-        grinderProfilePreview.selectManualProfile(selectedST)) {
-      grinderProfilePreview.onWeightSample(grinderWeightStability.lastWeightG(),
-                                            true, requestMs);
-      trackedManualTare = grinderProfilePreview.requestManualTare(requestMs) &&
-                          grinderProfilePreview.takeTareRequest() ==
-                            GrinderProfileDetector::TareKind::Manual;
+    if (grinderExplicitManualTare && scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
+        !canRequestGrinderUserTare(requestMs)) {
+      Serial.println("[GBW B3f] User Tara rejected: funnel pending, busy or not near stable zero (SSR OFF)");
+      return false;
+    }
+
+    const bool retareReady = grinderExplicitManualTare &&
+        scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && autoDetect != 0 &&
+        grinderProfilePreview.readyToGrind();
+    if (retareReady) {
+      // Keep the recognized profile and readiness destination. Take exactly
+      // one request, then suspend ready until a fresh zero is confirmed.
+      trackedDetectorTare = grinderProfilePreview.requestRetare(requestMs);
+      if (!trackedDetectorTare) return false;
+      const auto kind = grinderProfilePreview.takeTareRequest();
+      if (kind != GrinderProfileDetector::TareKind::ReTareAuto &&
+          kind != GrinderProfileDetector::TareKind::ReTareNoFunnel) {
+        grinderProfilePreview.invalidatePreparation();
+        return false;
+      }
+      Serial.println("[GBW B3f] Re-tare accepted; readiness suspended (SSR OFF)");
+    } else if (grinderExplicitManualTare &&
+               scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && autoDetect == 0 &&
+               grinderProfilePreview.state() == GrinderProfileDetector::State::ReadyManual) {
+      // Manual mode: allow a near-zero drift correction without losing
+      // ReadyManual. A filled portafilter cannot be re-tared by mistake.
+      trackedDetectorTare = grinderProfilePreview.requestManualTare(requestMs);
+      if (!trackedDetectorTare ||
+          grinderProfilePreview.takeTareRequest() !=
+            GrinderProfileDetector::TareKind::Manual) return false;
+      Serial.println("[GBW B3g] Manual re-tare accepted; readiness suspended (SSR OFF)");
+    } else {
+      // Other user tares retain the legacy behaviour, but never create
+      // auto-readiness. Autodetect OFF only creates ReadyManual when a real
+      // vessel was already stably present before the tare.
+      grinderProfilePreview.invalidatePreparation();
+      if (grinderProfilePreview.autoDetect() != (autoDetect != 0)) {
+        grinderProfilePreview.setAutoDetect(autoDetect != 0);
+        grinderPreviewAutoEnabled = autoDetect != 0;
+      }
+      if (grinderExplicitManualTare && !webWizardActive && !loadCellInitializing &&
+          scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && autoDetect == 0 &&
+          grinderWeightStability.isStable(requestMs) &&
+          grinderProfilePreview.selectManualProfile(selectedST)) {
+        grinderProfilePreview.onWeightSample(grinderWeightStability.lastWeightG(),
+                                              true, requestMs);
+        trackedDetectorTare = grinderProfilePreview.requestManualTare(requestMs) &&
+            grinderProfilePreview.takeTareRequest() ==
+              GrinderProfileDetector::TareKind::Manual;
+        if (!trackedDetectorTare) {
+          Serial.println("[GBW B3g] Manual zero only: no stable vessel before tare; ready=0 (SSR OFF)");
+        }
+      }
     }
   }
 
@@ -4260,7 +4333,7 @@ bool doTara(){
     startWeightGrinding = actualWeight;
   }
   autoDetect = oldAutoDetect;
-  if (trackedManualTare) {
+  if (trackedDetectorTare) {
     grinderProfilePreview.onTareResult(successful, millis());
   }
   return successful;
@@ -4300,6 +4373,7 @@ static const char* grinderPreviewStateName(GrinderProfileDetector::State state)
     case State::AwaitTare: return "AwaitTare";
     case State::WaitPostTare: return "WaitPostTare";
     case State::ReadyAuto: return "ReadyAuto";
+    case State::ReadyNoFunnel: return "ReadyNoFunnel";
     case State::ReadyManual: return "ReadyManual";
     case State::CheckingRemoval: return "CheckingRemoval";
     case State::Fault: return "Fault";
@@ -4318,6 +4392,7 @@ static void refreshGrinderPreparationOnHmi()
     else if (state == State::AwaitTare) label = "Tarieren...";
     else if (state == State::WaitPostTare) label = "Tara pruefen";
     else if (state == State::ReadyAuto) label = "Bereit";
+    else if (state == State::ReadyNoFunnel) label = "Bereit ohne Tr.";
     else if (state == State::Fault) label = "Tara-Fehler";
   } else if (state == State::ReadyManual) {
     label = "Manuell bereit";
@@ -4331,6 +4406,8 @@ static void refreshGrinderPreparationOnHmi()
     tft.drawString(label, 316, 72, GFXFF);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
   }
+  // Skip/Save text and right-button glyph follow the detector state.
+  RefreshFooter();
 }
 
 static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
@@ -4379,14 +4456,18 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
   using TareKind = GrinderProfileDetector::TareKind;
   const TareKind requested = grinderProfilePreview.takeTareRequest();
   if (requested != TareKind::None) {
-    const bool validAutomaticTare =
-      (requested == TareKind::AutoCombination || requested == TareKind::AfterRemoval) &&
-      autoDetect && !shouldPause;
+    // Removal re-zero applies to both ReadyManual (autodetect OFF) and the
+    // automatic modes. Only initial combination/Skip require autodetect ON.
+    const bool validAutomaticTare = !shouldPause &&
+      (requested == TareKind::AfterRemoval ||
+       (autoDetect && (requested == TareKind::AutoCombination ||
+                       requested == TareKind::AutoNoFunnel)));
     // Never execute a stale or unexpected tare request, nor operate GPIO16.
     bool tareOk = false;
     if (validAutomaticTare) {
       Serial.printf("[GBW B3d] Auto-tare requested: %s\n",
-                    requested == TareKind::AfterRemoval ? "removal" : "combination");
+                    requested == TareKind::AfterRemoval ? "removal" :
+                    requested == TareKind::AutoNoFunnel ? "skip funnel" : "combination");
       grinderDetectorTareInProgress = true;
       tareOk = doTara();
       grinderDetectorTareInProgress = false;
@@ -4394,6 +4475,15 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
     grinderProfilePreview.onTareResult(tareOk, millis());
     Serial.printf("[GBW B3d] Auto-tare %s; waiting for stable zero=%d\n",
                   tareOk ? "completed" : "FAILED", tareOk ? 1 : 0);
+  }
+
+  // A dose/unstable reading can change whether zero correction is allowed
+  // without changing detector state. Keep the footer in sync with this guard.
+  static bool previousTareAllowed = false;
+  const bool tareAllowed = canRequestGrinderUserTare(millis());
+  if (tareAllowed != previousTareAllowed) {
+    previousTareAllowed = tareAllowed;
+    if (pageID == 0 && displayOff == 0) RefreshFooter();
   }
 
   const auto currentState = grinderProfilePreview.state();
@@ -4406,7 +4496,8 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
          currentState == GrinderProfileDetector::State::CheckingFunnel ||
          currentState == GrinderProfileDetector::State::AwaitTare ||
          currentState == GrinderProfileDetector::State::WaitPostTare ||
-         currentState == GrinderProfileDetector::State::ReadyAuto) &&
+         currentState == GrinderProfileDetector::State::ReadyAuto ||
+         currentState == GrinderProfileDetector::State::ReadyNoFunnel) &&
         selectedST != selected) {
       // Auto-selected preset is a runtime choice, not a permanent NVS edit.
       selectedST = static_cast<byte>(selected);
@@ -5020,22 +5111,24 @@ if (buttonPressedRotarySW == 1 && displayOff == 0)
        }
     else if (pageID == 0)
        {
-        taraRequest = true;
-        RefreshTFTTaraWait();
-        debugln("doTara");
-        grinderExplicitManualTare = true;
-        doTara();                              //taraRequest = false; ist in doTara() enthalten
-        grinderExplicitManualTare = false;
-        if (autoDetect == 0){
-        scheduleAutoDetectPostTara(true, false);
-        }
-        
-        if (taraRequest == false)
-          {
-            RefreshTFTTaraFinished();
+        if (!canRequestGrinderUserTare(millis())) {
+          Serial.println("[GBW B3f] TFT Tara blocked (SSR OFF)");
+          RefreshFooter();
+        } else {
+          taraRequest = true;
+          RefreshTFTTaraWait();
+          debugln("doTara");
+          grinderExplicitManualTare = true;
+          const bool tareOk = doTara();
+          grinderExplicitManualTare = false;
+          if (tareOk && autoDetect == 0) {
+            scheduleAutoDetectPostTara(true, false);
           }
-        RedrawTFTTime();
+          if (!tareOk) taraRequest = false;
+          if (taraRequest == false) RefreshTFTTaraFinished();
+          RedrawTFTTime();
         }
+       }
     
     if (pageID == 3){
            taraRequest = true;

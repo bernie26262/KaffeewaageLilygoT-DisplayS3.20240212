@@ -65,7 +65,62 @@ bool GrinderProfileDetector::requestManualTare(uint32_t nowMs) {
       state_ == State::AwaitTare || state_ == State::WaitPostTare ||
       state_ == State::CheckingRemoval ||
       !configured(selectedProfile_) || !freshStableSample(nowMs)) return false;
+  if (state_ == State::ReadyManual) {
+    // Only correct a small drift while prepared. Keep the selected profile.
+    if (std::fabs(sampleG_) > config_.retareMaxAbsWeightG) return false;
+  } else {
+    // Explicit manual preparation needs evidence of an actual vessel being
+    // placed on the untared scale. Taring the empty scale must not arm it.
+    if (sampleG_ < config_.placeThresholdG) return false;
+  }
   beginTare(TareKind::Manual, nowMs);
+  return true;
+}
+
+bool GrinderProfileDetector::requestSkipFunnel(uint32_t nowMs) {
+  // Only a user action while a *bare*, known portafilter is stably present.
+  // In particular, an old WaitFunnel state is not enough if the load moved.
+  if (!autoDetect_ || paused_ || config_.previewOnly ||
+      state_ != State::WaitFunnel || !configured(selectedProfile_) ||
+      !freshStableSample(nowMs) ||
+      std::fabs(sampleG_ - profiles_[selectedProfile_].portafilterG) >=
+        config_.matchToleranceG) return false;
+  beginTare(TareKind::AutoNoFunnel, nowMs);
+  return true;
+}
+
+bool GrinderProfileDetector::canUserTare(uint32_t nowMs) const {
+  if (paused_) return false;
+  // An in-flight automatic removal tare may also occur with autodetect OFF.
+  // Never let a user tare race this operation.
+  if (state_ == State::AwaitTare || state_ == State::WaitPostTare ||
+      state_ == State::CheckingRemoval) return false;
+  if (!autoDetect_) {
+    // An already prepared manual vessel may be re-zeroed for drift only.
+    // A dose must not silently disappear from the displayed weight.
+    if (state_ == State::ReadyManual)
+      return freshStableSample(nowMs) &&
+             std::fabs(sampleG_) <= config_.retareMaxAbsWeightG;
+    return true; // idle: user tare is allowed but must not imply readiness
+  }
+  if (state_ == State::WaitFunnel || state_ == State::CheckingFunnel) return false;
+  if (state_ == State::ReadyAuto || state_ == State::ReadyNoFunnel)
+    return canRetare(nowMs);
+  return true; // idle/unknown: plain zero, never automatic ready
+}
+
+bool GrinderProfileDetector::canRetare(uint32_t nowMs) const {
+  return autoDetect_ && !paused_ && !config_.previewOnly &&
+         (state_ == State::ReadyAuto || state_ == State::ReadyNoFunnel) &&
+         freshStableSample(nowMs) &&
+         std::fabs(sampleG_) <= config_.retareMaxAbsWeightG;
+}
+
+bool GrinderProfileDetector::requestRetare(uint32_t nowMs) {
+  if (!canRetare(nowMs)) return false;
+  const TareKind kind = state_ == State::ReadyAuto ?
+      TareKind::ReTareAuto : TareKind::ReTareNoFunnel;
+  beginTare(kind, nowMs);
   return true;
 }
 
@@ -154,7 +209,10 @@ void GrinderProfileDetector::onWeightSample(float grams, bool stable, uint32_t n
     const TareKind kind = completedTareKind_;
     completedTareKind_ = TareKind::None;
     if (kind == TareKind::AfterRemoval) resetDetection();
-    else if (kind == TareKind::AutoCombination) state_ = State::ReadyAuto;
+    else if (kind == TareKind::AutoCombination || kind == TareKind::ReTareAuto)
+      state_ = State::ReadyAuto;
+    else if (kind == TareKind::AutoNoFunnel || kind == TareKind::ReTareNoFunnel)
+      state_ = State::ReadyNoFunnel;
     else if (kind == TareKind::Manual) state_ = State::ReadyManual;
     else state_ = State::Fault;
     return;

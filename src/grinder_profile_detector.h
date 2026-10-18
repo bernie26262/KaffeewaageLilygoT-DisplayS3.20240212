@@ -27,16 +27,17 @@ public:
     float emptyThresholdG = 3.0f;
     float steadyDeltaG = 0.5f;       // reject moving candidates
     float postTareZeroToleranceG = 2.0f; // require a fresh, stable zero after tare
+    float retareMaxAbsWeightG = 1.0f; // avoid resetting a dose during drift correction
     bool previewOnly = false; // B3b: report matching combination WITHOUT requesting tara
   };
 
   enum class State : uint8_t {
     WaitVessel, CheckingVessel, WaitFunnel, CheckingFunnel,
     UnknownVessel, AmbiguousVessel, AwaitTare, WaitPostTare, ReadyAuto,
-    ReadyManual, CheckingRemoval, Fault, CombinationPreview
+    ReadyManual, ReadyNoFunnel, CheckingRemoval, Fault, CombinationPreview
   };
 
-  enum class TareKind : uint8_t { None, AutoCombination, Manual, AfterRemoval };
+  enum class TareKind : uint8_t { None, AutoCombination, AutoNoFunnel, Manual, AfterRemoval, ReTareAuto, ReTareNoFunnel };
 
   GrinderProfileDetector();
   explicit GrinderProfileDetector(const Config& config);
@@ -46,6 +47,13 @@ public:
   bool setAutoDetect(bool enabled); // only while not awaiting tare/paused
   bool selectManualProfile(int index); // requires AutoDetect OFF
   bool requestManualTare(uint32_t nowMs); // deliberate user action, stable weight required
+  // B3e: the user deliberately skips the funnel after a stable portafilter match.
+  bool requestSkipFunnel(uint32_t nowMs);
+  // B3f: a user-initiated zero correction while already prepared.
+  // Only near zero, fresh and stable; readiness is suspended until verified.
+  bool canUserTare(uint32_t nowMs) const; // shared TFT/WebUI policy
+  bool canRetare(uint32_t nowMs) const;
+  bool requestRetare(uint32_t nowMs);
   void onWeightSample(float grams, bool stable, uint32_t nowMs);
   void tick(uint32_t nowMs);
   TareKind takeTareRequest(); // one-shot request for the future HX711 adapter
@@ -59,7 +67,8 @@ public:
   bool autoDetect() const { return autoDetect_; }
   bool paused() const { return paused_; }
   bool readyToGrind() const {
-    return state_ == State::ReadyAuto || state_ == State::ReadyManual;
+    return state_ == State::ReadyAuto || state_ == State::ReadyNoFunnel ||
+           state_ == State::ReadyManual;
   }
   State state() const { return state_; }
   int selectedProfile() const { return selectedProfile_; }
