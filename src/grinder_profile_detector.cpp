@@ -51,6 +51,10 @@ bool GrinderProfileDetector::selectManualProfile(int index) {
   return true;
 }
 
+float GrinderProfileDetector::profileTargetG(int index) const {
+  return configured(index) ? profiles_[index].targetG : 0.0f;
+}
+
 float GrinderProfileDetector::selectedTargetG() const {
   return configured(selectedProfile_) ? profiles_[selectedProfile_].targetG : 0.0f;
 }

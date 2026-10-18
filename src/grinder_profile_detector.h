@@ -73,6 +73,7 @@ public:
   State state() const { return state_; }
   int selectedProfile() const { return selectedProfile_; }
   float selectedTargetG() const;
+  float profileTargetG(int index) const; // read stored target for safe deferred synchronisation
   TareKind awaitingTare() const { return tareKind_; }
 
 private:

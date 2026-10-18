@@ -47,6 +47,8 @@
 #include "grinder_weight_stability.h"
 #include "grinder_profile_detector.h"
 #include "grinder_cycle_gate.h"
+#include "grinder_encoder_button.h"
+#include "grinder_target_sync.h"
 
 #ifndef GRINDER_WEIGHT_MONITOR_LOG
 #define GRINDER_WEIGHT_MONITOR_LOG 0
@@ -194,6 +196,11 @@ static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
 // B4a.2: passive connection to B1 controller. No start/cancel action,
 // no relay or GPIO connection until separately reviewed later phases.
 static GrinderCycleGate grinderCycleGate(grinderProfilePreview);
+// B4a.3a: classify short/long clicks without blocking. Long events are NOT
+// enabled until B4a.3b, and NO event is connected to requestStart() yet.
+static GrinderEncoderButton grinderEncoderButton;
+static constexpr bool kEnableGrinderSimulationLongPress = false;
+static bool grinderTargetSyncPending = false;
 static bool grinderPreviewAutoEnabled = false;
 static int grinderPreviewManualSelection = -1;
 static GrinderProfileDetector::State grinderPreviewLastState = GrinderProfileDetector::State::Fault;
@@ -3569,18 +3576,20 @@ void RefreshFooter()
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setFreeFont(FSS9);                 // Select the font
   if (footerOfPageID[pageID] == 0)
-  { const bool skipFunnel = autoDetect != 0 && !grinderProfilePreview.paused() &&
+  { const bool skipFunnel = !grinderCycleGate.cycleConsumed() &&
+        autoDetect != 0 && !grinderProfilePreview.paused() &&
         grinderProfilePreview.state() == GrinderProfileDetector::State::WaitFunnel;
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
     tft.drawString("       Set       ",48,140,GFXFF);
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
-    const bool taraAllowed = scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE ||
-                             canRequestGrinderUserTare(millis());
+    const bool taraAllowed = !grinderCycleGate.cycleConsumed() &&
+      (scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE ||
+       canRequestGrinderUserTare(millis()));
     tft.drawString(taraAllowed ? "     Tara     " : "              ",166,140,GFXFF);
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
     if (skipFunnel)
       {tft.drawString("   Skip   ",258,140,GFXFF);}
-    else if (statusReadyToSave == 0)
+    else if (statusReadyToSave == 0 || grinderCycleGate.cycleConsumed())
       {tft.drawString("            ",258,140,GFXFF);}
     else
       {tft.drawString("   Save   ",258,140,GFXFF);}
@@ -3595,7 +3604,8 @@ void RefreshFooter()
     u8f.setForegroundColor(TFT_WHITE);
     u8f.setForegroundColor(taraAllowed ? TFT_WHITE : TFT_BLACK);
     u8f.drawGlyph(166,166,0x25bc);
-    u8f.setForegroundColor((skipFunnel || statusReadyToSave) ? TFT_WHITE : TFT_BLACK);
+    u8f.setForegroundColor((skipFunnel ||
+       (statusReadyToSave && !grinderCycleGate.cycleConsumed())) ? TFT_WHITE : TFT_BLACK);
     u8f.drawGlyph(258,166,0x25bc);
   }
   if (footerOfPageID[pageID] == 1)
@@ -4200,6 +4210,15 @@ void RefreshTFTDisplay()
 
 
 void saveGrindResult(){
+  // Prevent Skip and legacy Save from consuming simulation test weights.
+  // This remains inactive until B4a.3b can actually start a cycle.
+  if (grinderCycleGate.cycleConsumed()) {
+    buttonPressedbuttonRight = 0;
+    buttonReleasedbuttonRight = 0;
+    statusSwitchSaveWeightFell = 0;
+    statusSwitchSaveWeightRose = 0;
+    return;
+  }
 
   // B3e: right key becomes Skip only while a known bare portafilter waits
   // for its optional funnel. Never let this press also reach legacy Save.
@@ -4255,6 +4274,8 @@ if (statusReadyToSave == 1 && statusSwitchSaveWeightFell == 1){
 // B3f: this is the single policy for both TFT and WebUI user-tare actions.
 // Wizard and internal automatic tare calls have their own protected paths.
 static bool canRequestGrinderUserTare(uint32_t nowMs) {
+  // In B4a.3b a simulated cycle must never be erased by user tare.
+  if (grinderCycleGate.cycleConsumed()) return false;
   if (webWizardActive || loadCellInitializing || isShotArmedOrRunningNow() ||
       grinderProfilePreview.paused()) return false;
   // The pure detector enforces identical state policy for both user inputs.
@@ -4262,6 +4283,12 @@ static bool canRequestGrinderUserTare(uint32_t nowMs) {
 }
 
 bool doTara(){
+  // This covers WebUI and HMI user tares. Detector-owned removal re-zero
+  // remains possible even after a cycle (grinderDetectorTareInProgress).
+  if (!grinderDetectorTareInProgress && grinderCycleGate.cycleConsumed()) {
+    Serial.println("[GBW B4a.3a] User tare blocked during consumed grind cycle (SSR OFF)");
+    return false;
+  }
   bool trackedDetectorTare = false;
   if (!grinderDetectorTareInProgress) {
     const uint32_t requestMs = millis();
@@ -4437,6 +4464,28 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
     }
   }
   if (shouldPause) return;
+
+  // HMI page 4 and the WebUI both edit setWeightST[]. setProfile()
+  // intentionally rejects changes while a vessel is prepared. Defer until
+  // WaitVessel, and block any future start while targets differ.
+  GrinderProfileDetector::Profile desired[GrinderProfileDetector::kProfileCount];
+  for (int i = 0; i < GrinderProfileDetector::kProfileCount; ++i)
+    desired[i] = GrinderProfileDetector::Profile(
+      weightST[i], weightTrichter[i], setWeightST[i]);
+  if (!grinderCycleGate.cycleConsumed() &&
+      grinderProfilePreview.state() == GrinderProfileDetector::State::WaitVessel &&
+      !GrinderTargetSync::targetsMatch(grinderProfilePreview, desired)) {
+    if (GrinderTargetSync::reconcileIfIdle(grinderProfilePreview, desired) &&
+        autoDetect == 0) {
+      grinderProfilePreview.selectManualProfile(selectedST);
+    }
+  }
+  const bool targetPending = !GrinderTargetSync::targetsMatch(grinderProfilePreview, desired);
+  if (targetPending != grinderTargetSyncPending) {
+    Serial.printf("[GBW B4a.3a] Target sync %s (SSR OFF)\n",
+                  targetPending ? "DEFERRED until unprepared" : "completed");
+    grinderTargetSyncPending = targetPending;
+  }
 
   const bool enabled = autoDetect != 0;
   if (enabled != grinderPreviewAutoEnabled) {
@@ -4838,10 +4887,23 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
 
 
 
-  if (rotaryEncoder.isEncoderButtonClicked())
-	{
-		rotary_onButtonClick();
-	}
+  // B4a.3a: read the existing active-LOW encoder switch without the
+  // library's potentially blocking click wait. Short click preserves menu.
+  // Long press is deliberately disabled until the simulation patch B4a.3b.
+  const bool longPressEligible = kEnableGrinderSimulationLongPress &&
+      pageID == 0 && displayOff == 0 &&
+      scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
+      grinderProfilePreview.readyToGrind() && !grinderTargetSyncPending &&
+      !grinderCycleGate.cycleConsumed() && !webWizardActive &&
+      !isShotArmedOrRunningNow();
+  const GrinderEncoderButton::Event encoderEvent = grinderEncoderButton.update(
+      digitalRead(rotarySW) == LOW, longPressEligible, millis());
+  if (encoderEvent == GrinderEncoderButton::Event::ShortClick) {
+    rotary_onButtonClick();
+  } else if (encoderEvent == GrinderEncoderButton::Event::LongPress) {
+    // Reserved for B4a.3b. No grinderCycleGate.requestStart() yet.
+    Serial.println("[GBW B4a.3a] Encoder long press reserved (SSR OFF)");
+  }
 
 
     byte buttonStatebuttonMiddle = digitalRead (buttonMiddle);
@@ -5681,6 +5743,8 @@ void setup()
    */
 	//rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
 	rotaryEncoder.setAcceleration(250); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
+  pinMode(rotarySW, INPUT_PULLUP);
+  grinderEncoderButton.reset(digitalRead(rotarySW) == LOW, millis());
   
   pinMode(buttonMiddle, INPUT_PULLUP);
   pinMode(buttonRight, INPUT_PULLUP);
