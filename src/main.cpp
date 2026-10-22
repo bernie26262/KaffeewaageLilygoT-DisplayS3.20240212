@@ -193,13 +193,12 @@ static GrinderProfileDetector::Config grinderPreviewConfig()
   return config;
 }
 static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
-// B4a.2: passive connection to B1 controller. No start/cancel action,
-// no relay or GPIO connection until separately reviewed later phases.
+// B4a.3b: purely logical controller. No relay/GPIO connection or motor run.
 static GrinderCycleGate grinderCycleGate(grinderProfilePreview);
-// B4a.3a: classify short/long clicks without blocking. Long events are NOT
-// enabled until B4a.3b, and NO event is connected to requestStart() yet.
+// B4a.3b: classify clicks non-blockingly; long press starts only a logical run.
 static GrinderEncoderButton grinderEncoderButton;
-static constexpr bool kEnableGrinderSimulationLongPress = false;
+// Temporary B4a.3b test switch, NOT a motor/SSR enable.
+static constexpr bool kEnableGrinderSimulationLongPress = true;
 static bool grinderTargetSyncPending = false;
 static bool grinderPreviewAutoEnabled = false;
 static int grinderPreviewManualSelection = -1;
@@ -4418,7 +4417,17 @@ static void refreshGrinderPreparationOnHmi()
   using State = GrinderProfileDetector::State;
   const auto state = grinderProfilePreview.state();
   const char* label = "";
-  if (autoDetect) {
+  if (grinderCycleGate.cycleConsumed()) {
+    using CycleState = GrinderController::State;
+    switch (grinderCycleGate.state()) {
+      case CycleState::Grinding: label = "SIM MAHLT"; break;
+      case CycleState::ManualTopup: label = "SIM MAHLT"; break;
+      case CycleState::Settling: label = "SIM STOPP"; break;
+      case CycleState::Complete: label = "SIM FERTIG"; break;
+      case CycleState::Fault: label = "SIM FEHLER"; break;
+      default: break;
+    }
+  } else if (autoDetect) {
     if (state == State::WaitFunnel) label = "Trichter auflegen";
     else if (state == State::AwaitTare) label = "Tarieren...";
     else if (state == State::WaitPostTare) label = "Tara pruefen";
@@ -4887,22 +4896,45 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
 
 
 
-  // B4a.3a: read the existing active-LOW encoder switch without the
-  // library's potentially blocking click wait. Short click preserves menu.
-  // Long press is deliberately disabled until the simulation patch B4a.3b.
-  const bool longPressEligible = kEnableGrinderSimulationLongPress &&
+  // On page 0, a long hold always consumes the click, even when a start
+  // cannot be granted. This prevents executing a menu item on release.
+  const bool simulationInputContext = kEnableGrinderSimulationLongPress &&
       pageID == 0 && displayOff == 0 &&
       scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
-      grinderProfilePreview.readyToGrind() && !grinderTargetSyncPending &&
-      !grinderCycleGate.cycleConsumed() && !webWizardActive &&
       !isShotArmedOrRunningNow();
   const GrinderEncoderButton::Event encoderEvent = grinderEncoderButton.update(
-      digitalRead(rotarySW) == LOW, longPressEligible, millis());
+      digitalRead(rotarySW) == LOW, simulationInputContext, millis());
   if (encoderEvent == GrinderEncoderButton::Event::ShortClick) {
-    rotary_onButtonClick();
+    const auto simState = grinderCycleGate.state();
+    if (simulationInputContext && simState == GrinderController::State::Grinding) {
+      const bool cancelled = grinderCycleGate.requestCancel(millis());
+      Serial.printf("[GBW B4a.3b] Short click cancel=%d (SSR OFF)\n", cancelled ? 1 : 0);
+      refreshGrinderPreparationOnHmi();
+    } else if (simulationInputContext &&
+               (simState == GrinderController::State::Settling ||
+                simState == GrinderController::State::ManualTopup)) {
+      // Do not invoke normal HMI actions while a simulation is settling.
+      if (simState == GrinderController::State::ManualTopup)
+        grinderCycleGate.requestSafetyAbort();
+    } else {
+      rotary_onButtonClick(); // preserve existing HMI menu behavior
+    }
   } else if (encoderEvent == GrinderEncoderButton::Event::LongPress) {
-    // Reserved for B4a.3b. No grinderCycleGate.requestStart() yet.
-    Serial.println("[GBW B4a.3a] Encoder long press reserved (SSR OFF)");
+    if (simulationInputContext &&
+        grinderCycleGate.state() == GrinderController::State::Fault) {
+      const bool acknowledged = grinderCycleGate.acknowledgeFault();
+      Serial.printf("[GBW B4a.3b] Fault acknowledge=%d (SSR OFF)\n",
+                    acknowledged ? 1 : 0);
+    } else {
+      const bool permitted = simulationInputContext && !webWizardActive &&
+          !loadCellInitializing && !grinderTargetSyncPending &&
+          grinderProfilePreview.selectedProfile() == selectedST;
+      const bool started = permitted && grinderCycleGate.requestStart(millis());
+      Serial.printf("[GBW B4a.3b] Long press start=%d ready=%d pending=%d (SSR OFF)\n",
+                    started ? 1 : 0, grinderProfilePreview.readyToGrind() ? 1 : 0,
+                    grinderTargetSyncPending ? 1 : 0);
+    }
+    refreshGrinderPreparationOnHmi();
   }
 
 
@@ -4991,7 +5023,13 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
   if (displayOff == 0 && encoderPosChanged == true)
   {  
     lastActionAgainstDisplayOff = millis();
-  if (pageID == 0 && isShotRunningNow())
+  if (pageID == 0 && (grinderCycleGate.state() == GrinderController::State::Grinding ||
+                       grinderCycleGate.state() == GrinderController::State::Settling))
+  {
+    // Discard rotation while simulated grinding; only short click cancels.
+    encoderPosChanged = false;
+  }
+  else if (pageID == 0 && isShotRunningNow())
   {
     encoderPos = 2;
     menuItemPos = 2;
@@ -5816,10 +5854,34 @@ void loop(void)
   updateScaleUiModeFromHmiPage();
   const uint32_t nowLoopMs = millis();
   serviceGrinderProfilePreview(newLoadCellData, nowLoopMs);
-  // Even without a new sample (and while detection is paused), the
-  // controller must see elapsed time and any loss of preparation.
-  // millis() is read again: serviceGrinderProfilePreview may block on tare.
+  // Mode/page/target changes must abort a started run. This is independent
+  // of the detector's (possibly later) readiness transition.
+  const auto cycleStateBeforeTick = grinderCycleGate.state();
+  if ((cycleStateBeforeTick == GrinderController::State::Grinding ||
+       cycleStateBeforeTick == GrinderController::State::ManualTopup ||
+       cycleStateBeforeTick == GrinderController::State::Settling) &&
+      (pageID != 0 || scaleUiMode != SCALE_UI_MODE_SINGLE_DOSE ||
+       webWizardActive || isShotArmedOrRunningNow() ||
+       grinderTargetSyncPending ||
+       grinderProfilePreview.selectedProfile() != selectedST)) {
+    grinderCycleGate.requestSafetyAbort();
+    Serial.println("[GBW B4a.3b] Safety abort: context changed (SSR OFF)");
+  }
+  // Always service B1 timeouts, including loops without a new HX711 sample.
+  // millis() is read again: detector-owned tare may be blocking.
   grinderCycleGate.tick(millis());
+  static GrinderController::State lastGrinderSimulationState = GrinderController::State::Idle;
+  if (grinderCycleGate.state() != lastGrinderSimulationState) {
+    lastGrinderSimulationState = grinderCycleGate.state();
+    Serial.printf("[GBW B4a.3b] state=%u reason=%u weight=%.2f target=%.2f "
+                  "logicMotorRequest=%d (SSR OFF)\n",
+                  static_cast<unsigned>(lastGrinderSimulationState),
+                  static_cast<unsigned>(grinderCycleGate.stopReason()),
+                  static_cast<double>(grinderCycleGate.lastWeightG()),
+                  static_cast<double>(grinderCycleGate.targetG()),
+                  grinderCycleGate.logicRunning() ? 1 : 0);
+    refreshGrinderPreparationOnHmi();
+  }
 #if GRINDER_WEIGHT_MONITOR_LOG
   if (nowLoopMs - lastGrinderWeightLogMs >= 2000UL) {
     lastGrinderWeightLogMs = nowLoopMs;
@@ -5832,9 +5894,8 @@ void loop(void)
     } else {
       Serial.println("[GBW B3a] weight=invalid fresh=0 stable=0");
     }
-    // There is deliberately no requestStart() call in B4a.2.
-    // The passive controller must stay Idle and never request a motor run.
-    Serial.printf("[GBW B4a.2] state=%u gateWeight=%.2f g fresh=%d stable=%d "
+    // Logical motorRequest is DIAGNOSTIC ONLY; NEVER forwarded to GPIO16.
+    Serial.printf("[GBW B4a.3b] state=%u gateWeight=%.2f g fresh=%d stable=%d "
                   "ready=%d profile=%d target=%.1f g consumed=%d "
                   "motorRequest=%d (SSR OFF)\n",
                   static_cast<unsigned>(grinderCycleGate.state()),

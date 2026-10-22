@@ -18,6 +18,7 @@ public:
   struct Config {
     uint32_t maxStartSampleAgeMs = 1000;
     float maxStartAbsWeightG = 1.0f;
+    float minActiveWeightG = -3.0f; // immediate lift guard, even before detector revokes ready
   };
 
   explicit GrinderCycleGate(const GrinderProfileDetector& detector);
@@ -27,6 +28,7 @@ public:
   void tick(uint32_t nowMs);
   bool requestStart(uint32_t nowMs);
   bool requestCancel(uint32_t nowMs);
+  bool requestSafetyAbort(); // invalid context, without involving the SSR
 
   // Fault recovery is an explicit user action, only after preparation was
   // completely reset. An interrupted run must not restart automatically.

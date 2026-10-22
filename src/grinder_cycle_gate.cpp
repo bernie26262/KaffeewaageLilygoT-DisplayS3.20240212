@@ -65,6 +65,16 @@ void GrinderCycleGate::onWeightSample(float grams, bool stable, uint32_t nowMs) 
   sampleStable_ = sampleValid_ && stable;
   sampleG_ = grams;
   lastSampleMs_ = nowMs;
+  // A negative jump on removal can appear for one HX711 sample while the
+  // detector still reports Ready. Never wait for that state transition.
+  const auto state = controller_.state();
+  if ((state == GrinderController::State::Grinding ||
+       state == GrinderController::State::ManualTopup ||
+       state == GrinderController::State::Settling) &&
+      (!sampleValid_ || grams < config_.minActiveWeightG)) {
+    controller_.emergencyStop();
+    return;
+  }
   controller_.onWeightSample(grams, nowMs);
 }
 
@@ -95,6 +105,15 @@ bool GrinderCycleGate::requestCancel(uint32_t nowMs) {
   if (controller_.state() != GrinderController::State::Grinding) return false;
   controller_.onButtonPress(nowMs); // B1 user cancel, stops logical demand
   return controller_.state() == GrinderController::State::Settling;
+}
+
+bool GrinderCycleGate::requestSafetyAbort() {
+  const auto state = controller_.state();
+  if (state != GrinderController::State::Grinding &&
+      state != GrinderController::State::ManualTopup &&
+      state != GrinderController::State::Settling) return false;
+  controller_.emergencyStop();
+  return true;
 }
 
 bool GrinderCycleGate::acknowledgeFault() {
