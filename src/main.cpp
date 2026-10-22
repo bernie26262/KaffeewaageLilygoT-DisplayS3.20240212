@@ -19,6 +19,7 @@
 
   See end of file for original header text and MIT license info.
 */
+#include <atomic>
 #include <HX711_ADC.h>
 #include <AiEsp32RotaryEncoder.h>
 /*******************************************************************************
@@ -47,6 +48,7 @@
 #include "grinder_weight_stability.h"
 #include "grinder_profile_detector.h"
 #include "grinder_cycle_gate.h"
+#include "grinder_web_safety.h"
 #include "grinder_encoder_button.h"
 #include "grinder_target_sync.h"
 
@@ -195,6 +197,16 @@ static GrinderProfileDetector::Config grinderPreviewConfig()
 static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
 // B4a.3b: purely logical controller. No relay/GPIO connection or motor run.
 static GrinderCycleGate grinderCycleGate(grinderProfilePreview);
+// WebSocket callbacks run on the AsyncWebServer task. Only loop() may
+// mutate GrinderCycleGate. Publish a single consistent, atomic snapshot
+// for WebUI command admission and queue a one-way abort request.
+static std::atomic<uint32_t> grinderWebSafetySnapshot{0};
+static std::atomic<bool> grinderWebAbortRequested{false};
+static void publishGrinderWebSafetySnapshot() {
+  const uint32_t snapshot = static_cast<uint32_t>(grinderCycleGate.state()) |
+      (grinderCycleGate.cycleConsumed() ? 0x100UL : 0UL);
+  grinderWebSafetySnapshot.store(snapshot, std::memory_order_release);
+}
 // B4a.3b: classify clicks non-blockingly; long press starts only a logical run.
 static GrinderEncoderButton grinderEncoderButton;
 // Temporary B4a.3b test switch, NOT a motor/SSR enable.
@@ -2277,6 +2289,14 @@ static bool handleWebSaveDoseCommand(const char* cmd, bool& handled)
 
   handled = true;
 
+  // Defense in depth: do not persist simulated weights as a real dose,
+  // even if legacy statusReadyToSave was set before the cycle started.
+  // Also use the atomic state snapshot here: WebSocket callbacks do not
+  // read mutable cycle-gate internals directly.
+  if ((grinderWebSafetySnapshot.load(std::memory_order_acquire) & 0x100UL) != 0) {
+    Serial.println("[GBW B4a.4] WebUI dose save blocked: simulated cycle (SSR OFF)");
+    return false;
+  }
   if (!statusReadyToSave) {
     return false;
   }
@@ -2304,6 +2324,24 @@ static bool handleWebSaveDoseCommand(const char* cmd, bool& handled)
 static bool handleCoffeeWebCommand(const char* cmd)
 {
   if (!cmd) {
+    return false;
+  }
+
+  // All active-cycle WebUI *commands* are fail-closed. In particular, do not
+  // permit wizard/calibration, mode and profile changes to run before the
+  // next loop() safety tick. Passive WebSocket updates remain permitted.
+  const uint32_t snapshot = grinderWebSafetySnapshot.load(std::memory_order_acquire);
+  const auto webState = static_cast<GrinderController::State>(snapshot & 0xFFUL);
+  const GrinderWebCommandPolicy webPolicy = grinderWebCommandPolicy(
+      webState, (snapshot & 0x100UL) != 0, cmdEquals(cmd, CMD_SAVE_DOSE));
+  if (webPolicy != GrinderWebCommandPolicy::Allow) {
+    if (webPolicy == GrinderWebCommandPolicy::AbortAndReject) {
+      // Only loop() writes the controller state; no cross-task mutation.
+      grinderWebAbortRequested.store(true, std::memory_order_release);
+      Serial.println("[GBW B4a.4] WebUI command rejected: safety abort queued (SSR OFF)");
+    } else {
+      Serial.println("[GBW B4a.4] WebUI simulated dose save rejected (SSR OFF)");
+    }
     return false;
   }
 
@@ -5845,6 +5883,16 @@ void loop(void)
   coffeeOtaLoop();
   //ws.cleanupClients();
   rotaryMenu();
+  // Publish an immediate snapshot after the Encoder may have started a cycle.
+  publishGrinderWebSafetySnapshot();
+  // WebSocket callbacks only set this flag. Process the fault here on the
+  // single loop task, before feeding further HX711 data.
+  if (grinderWebAbortRequested.exchange(false, std::memory_order_acq_rel)) {
+    if (grinderCycleGate.requestSafetyAbort()) {
+      Serial.println("[GBW B4a.4] WebUI safety abort applied (SSR OFF)");
+    }
+    publishGrinderWebSafetySnapshot();
+  }
   const bool newLoadCellData = LoadCell.update();
   actualWeight = LoadCell.getData();
   if (newLoadCellData) {
@@ -5870,6 +5918,7 @@ void loop(void)
   // Always service B1 timeouts, including loops without a new HX711 sample.
   // millis() is read again: detector-owned tare may be blocking.
   grinderCycleGate.tick(millis());
+  publishGrinderWebSafetySnapshot();
   static GrinderController::State lastGrinderSimulationState = GrinderController::State::Idle;
   if (grinderCycleGate.state() != lastGrinderSimulationState) {
     lastGrinderSimulationState = grinderCycleGate.state();

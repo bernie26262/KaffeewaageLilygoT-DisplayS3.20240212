@@ -65,13 +65,15 @@ void GrinderController::onWeightSample(float grams, uint32_t nowMs) {
     fault(StopReason::RuntimeExceeded);
     return;
   }
-  if (active() && !freshWeight(nowMs)) {
+  // A delayed sample must not disguise a sensor outage, including while
+  // waiting for the post-stop settling measurement.
+  if ((active() || state_ == State::Settling) && !freshWeight(nowMs)) {
     fault(StopReason::StaleWeight);
     return;
   }
   if (!std::isfinite(grams)) {
     hasWeight_ = false;
-    if (active()) fault(StopReason::InvalidWeight);
+    if (active() || state_ == State::Settling) fault(StopReason::InvalidWeight);
     return;
   }
   weightG_ = grams;
@@ -113,6 +115,12 @@ void GrinderController::tick(uint32_t nowMs) {
       fault(StopReason::StaleWeight);
       return;
     }
+  }
+  // Never mark a stopped cycle Complete after losing HX711 telemetry.
+  // Run the same freshness check before a pending Settling -> Complete step.
+  if (state_ == State::Settling && !freshWeight(nowMs)) {
+    fault(StopReason::StaleWeight);
+    return;
   }
   if (state_ != State::Settling || nowMs - stoppedMs_ < config_.settleMs) return;
 
