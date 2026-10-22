@@ -4971,6 +4971,11 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
       Serial.printf("[GBW B4a.3b] Long press start=%d ready=%d pending=%d (SSR OFF)\n",
                     started ? 1 : 0, grinderProfilePreview.readyToGrind() ? 1 : 0,
                     grinderTargetSyncPending ? 1 : 0);
+      if (started) {
+        Serial.printf("[GBW B4b.1] start profile=%d latency=%.2f g (RAM only, SSR OFF)\n",
+                      grinderProfilePreview.selectedProfile() + 1,
+                      static_cast<double>(grinderCycleGate.latencyG()));
+      }
     }
     refreshGrinderPreparationOnHmi();
   }
@@ -5929,6 +5934,12 @@ void loop(void)
                   static_cast<double>(grinderCycleGate.lastWeightG()),
                   static_cast<double>(grinderCycleGate.targetG()),
                   grinderCycleGate.logicRunning() ? 1 : 0);
+    if (lastGrinderSimulationState == GrinderController::State::Complete &&
+        grinderCycleGate.stopReason() == GrinderController::StopReason::TargetReached) {
+      Serial.printf("[GBW B4b.1] settled profile=%d latency=%.2f g (RAM only, SSR OFF)\n",
+                    grinderProfilePreview.selectedProfile() + 1,
+                    static_cast<double>(grinderCycleGate.latencyG()));
+    }
     refreshGrinderPreparationOnHmi();
   }
 #if GRINDER_WEIGHT_MONITOR_LOG

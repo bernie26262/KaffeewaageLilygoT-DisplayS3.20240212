@@ -7,7 +7,11 @@ GrinderCycleGate::GrinderCycleGate(const GrinderProfileDetector& detector)
 
 GrinderCycleGate::GrinderCycleGate(const GrinderProfileDetector& detector,
                                    const Config& config)
-    : detector_(detector), config_(config) {}
+    : detector_(detector), config_(config) {
+  for (int i = 0; i < GrinderProfileDetector::kProfileCount; ++i) {
+    learnedLatencyG_[i] = controller_.latencyG(); // B1 default: 0.25 g
+  }
+}
 
 bool GrinderCycleGate::validPreparation() const {
   const auto state = detector_.state();
@@ -29,7 +33,17 @@ void GrinderCycleGate::observePreparation() {
   // not a transient CheckingRemoval bounce back to Ready.
   if (state == GrinderController::State::Complete &&
       detector_.state() == GrinderProfileDetector::State::WaitVessel) {
-    controller_.reset();
+    // Capture a learned value only after a normally target-stopped cycle
+    // AND confirmed removal. Cancelled/faulted cycles never train.
+    if (controller_.stopReason() == GrinderController::StopReason::TargetReached &&
+        runningProfile_ >= 0 &&
+        runningProfile_ < GrinderProfileDetector::kProfileCount) {
+      const float learned = controller_.latencyG();
+      if (std::isfinite(learned) && learned >= 0.0f && learned <= 2.0f) {
+        learnedLatencyG_[runningProfile_] = learned;
+      }
+    }
+    controller_.reset(); // clears the cycle, not the per-profile RAM cache
     cycleConsumed_ = false;
     runningProfile_ = -1;
     runningTargetG_ = 0.0f;
@@ -90,7 +104,9 @@ bool GrinderCycleGate::requestStart(uint32_t nowMs) {
       !validPreparation() || !hasFreshStableZero(nowMs)) return false;
 
   const float target = detector_.selectedTargetG();
-  if (!controller_.setTargetG(target)) return false;
+  const int profile = detector_.selectedProfile(); // validated above
+  if (!controller_.setTargetG(target) ||
+      !controller_.setLatencyG(learnedLatencyG_[profile])) return false;
   // requestStart() is the ONLY caller of onButtonPress() for starting.
   controller_.onButtonPress(nowMs);
   if (controller_.state() != GrinderController::State::Grinding) return false;

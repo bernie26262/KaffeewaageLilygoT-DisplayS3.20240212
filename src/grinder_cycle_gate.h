@@ -37,6 +37,8 @@ public:
   GrinderController::State state() const { return controller_.state(); }
   GrinderController::StopReason stopReason() const { return controller_.stopReason(); }
   float targetG() const { return controller_.targetG(); }
+  // Compensation used in the current simulation; never an SSR command.
+  float latencyG() const { return controller_.latencyG(); }
   float lastWeightG() const { return controller_.lastWeightG(); }
   bool logicRunning() const { return controller_.relayRequested(); }
   bool cycleConsumed() const { return cycleConsumed_; }
@@ -52,6 +54,8 @@ private:
   int runningProfile_ = -1;
   float runningTargetG_ = 0.0f;
   bool cycleConsumed_ = false;
+  // B4b.1: volatile per-profile compensation. No NVS, no GPIO access.
+  float learnedLatencyG_[GrinderProfileDetector::kProfileCount] = {};
   bool sampleValid_ = false;
   bool sampleStable_ = false;
   float sampleG_ = 0.0f;
