@@ -2344,7 +2344,8 @@ static bool handleCoffeeWebCommand(const char* cmd)
       webState, (snapshot & 0x100UL) != 0, cmdEquals(cmd, CMD_SAVE_DOSE));
   if (webPolicy != GrinderWebCommandPolicy::Allow) {
     if (webPolicy == GrinderWebCommandPolicy::AbortAndReject) {
-      // Only loop() writes the controller state; no cross-task mutation.
+      // Immediately force GPIO16 HIGH; loop() alone owns the fault state.
+      grinderRelayForceOff();
       grinderWebAbortRequested.store(true, std::memory_order_release);
       Serial.println("[GBW B4a.4] WebUI command rejected: safety abort queued (SSR OFF)");
     } else {
@@ -5956,6 +5957,8 @@ void setup()
 
 void loop(void)
 { 
+  // Physical OFF before potentially slow WiFi, OTA and HMI work.
+  grinderRelayForceOff();
   coffeeWebLoop();
   coffeeWifiLoop();
   coffeeOtaLoop();
@@ -5997,7 +6000,7 @@ void loop(void)
   // millis() is read again: detector-owned tare may be blocking.
   grinderCycleGate.tick(millis());
   publishGrinderWebSafetySnapshot();
-  // B4c.1: dry-run of the future SSR output gate. GPIO16 remains HIGH.
+  // B4c.2a: the diagnostic guard is fed into an OFF-only output driver.
   // Keep the veto independent of the existing GrinderCycleGate, so a future
   // actuator path must pass BOTH checks. No LOW write is added in this phase.
   const bool otaMotorInhibit = coffeeOtaMotorInhibitRequested();
@@ -6026,6 +6029,7 @@ void loop(void)
       grinderProfilePreview.state() == GrinderProfileDetector::State::WaitVessel) {
     grinderOutputGuard.clearAfterUnprepared(true, true, otaMotorInhibit);
   }
+  grinderRelayApplyGuard(grinderOutputGuard); // OFF-only in B4c.2a.
   static bool previousOutputCandidate = false;
   static GrinderOutputGuard::Reason previousOutputReason =
       GrinderOutputGuard::Reason::NoRequest;
@@ -6140,7 +6144,7 @@ if (millis() - lastTimeTFTActualWeight >= delayTimeTFTActualWeight)
   
   // B3d: do NOT run the Legacy Single-Dose Autodetect() in parallel.
   // All automatic tara requests belong exclusively to the GBW detector.
-  // GPIO16 remains OFF; no control request is forwarded to the relay.
+  // GPIO16 remains OFF; the driver ignores even an approved request.
   saveGrindResult();
   //################################
   // Shot-Waage

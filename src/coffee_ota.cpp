@@ -1,5 +1,6 @@
 #include "coffee_ota.h"
 #include "ble_scale.h"
+#include "grinder_relay.h"
 
 #include <Arduino.h>
 #include <Update.h>
@@ -449,9 +450,8 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
       return;
     }
 
-    // The AsyncWebServer callback runs outside the main loop. Latch this
-    // BEFORE beginning an accepted upload; the loop will abort the logical
-    // grinder request on its next iteration. B4c.1 never energizes an SSR.
+    // Force physical HIGH/OFF immediately in this AsyncWebServer callback.
+    grinderRelayForceOff();
     otaMotorInhibitRequested.store(true, std::memory_order_release);
     coffeeBleScaleStopForOta();
 
@@ -490,6 +490,7 @@ void coffeeOtaBegin(AsyncWebServer& server) {
 }
 
 void coffeeOtaRequestReboot() {
+  grinderRelayForceOff();
   otaMotorInhibitRequested.store(true, std::memory_order_release);
   otaRebootRequested = true;
   otaRebootRequestMs = millis();
