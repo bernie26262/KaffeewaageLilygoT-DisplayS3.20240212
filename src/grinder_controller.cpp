@@ -61,7 +61,8 @@ void GrinderController::stop(StopReason reason, uint32_t nowMs) {
 void GrinderController::onWeightSample(float grams, uint32_t nowMs) {
   // Check deadlines against the previous sample before accepting the next one;
   // a late sample must not hide a sensor stall or a run-time overrun.
-  if (active() && nowMs - runStartMs_ >= config_.maxRunMs) {
+  if (active() && nowMs - runStartMs_ >=
+      (state_ == State::ManualTopup ? config_.maxTopupMs : config_.maxRunMs)) {
     fault(StopReason::RuntimeExceeded);
     return;
   }
@@ -107,7 +108,8 @@ void GrinderController::onButtonRelease(uint32_t nowMs) {
 
 void GrinderController::tick(uint32_t nowMs) {
   if (active()) {
-    if (nowMs - runStartMs_ >= config_.maxRunMs) {
+    if (nowMs - runStartMs_ >=
+        (state_ == State::ManualTopup ? config_.maxTopupMs : config_.maxRunMs)) {
       fault(StopReason::RuntimeExceeded);
       return;
     }

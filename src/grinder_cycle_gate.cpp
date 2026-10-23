@@ -90,6 +90,12 @@ void GrinderCycleGate::onWeightSample(float grams, bool stable, uint32_t nowMs) 
     return;
   }
   controller_.onWeightSample(grams, nowMs);
+  // Manual top-up is a hold action, but even a held button may not continue
+  // requesting motor operation after the desired weight is reached.
+  if (controller_.state() == GrinderController::State::ManualTopup &&
+      grams >= runningTargetG_ - 0.05f) {
+    controller_.onButtonRelease(nowMs);
+  }
 }
 
 void GrinderCycleGate::tick(uint32_t nowMs) {
@@ -120,6 +126,36 @@ bool GrinderCycleGate::requestCancel(uint32_t nowMs) {
   observePreparation();
   if (controller_.state() != GrinderController::State::Grinding) return false;
   controller_.onButtonPress(nowMs); // B1 user cancel, stops logical demand
+  return controller_.state() == GrinderController::State::Settling;
+}
+
+bool GrinderCycleGate::canRequestManualTopup(uint32_t nowMs) const {
+  if (!cycleConsumed_ || controller_.state() != GrinderController::State::Complete ||
+      !validPreparation() || runningProfile_ != detector_.selectedProfile() ||
+      std::fabs(runningTargetG_ - detector_.selectedTargetG()) > 0.001f ||
+      !sampleValid_ || !sampleStable_ ||
+      nowMs - lastSampleMs_ > config_.maxStartSampleAgeMs) return false;
+  // Require a confirmed normal completion (or an earlier released top-up),
+  // and a SMALL positive deficit. No restart from cancel, fault or overdose.
+  const auto reason = controller_.stopReason();
+  if (reason != GrinderController::StopReason::TargetReached &&
+      reason != GrinderController::StopReason::ManualReleased) return false;
+  const float deficitG = runningTargetG_ - sampleG_;
+  return deficitG >= 0.10f && deficitG <= 0.50f;
+}
+
+bool GrinderCycleGate::requestManualTopupPress(uint32_t nowMs) {
+  observePreparation();
+  if (!canRequestManualTopup(nowMs)) return false;
+  // B1 will ONLY enter ManualTopup inside this 0.5 g window. Full Grinding
+  // is deliberately unreachable from this consumed-cycle action.
+  controller_.onButtonPress(nowMs);
+  return controller_.state() == GrinderController::State::ManualTopup;
+}
+
+bool GrinderCycleGate::requestManualTopupRelease(uint32_t nowMs) {
+  if (controller_.state() != GrinderController::State::ManualTopup) return false;
+  controller_.onButtonRelease(nowMs);
   return controller_.state() == GrinderController::State::Settling;
 }
 

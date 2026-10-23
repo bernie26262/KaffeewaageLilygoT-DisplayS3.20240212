@@ -28,6 +28,11 @@ public:
   void tick(uint32_t nowMs);
   bool requestStart(uint32_t nowMs);
   bool requestCancel(uint32_t nowMs);
+  // B4b.2: ONLY after a target-controlled cycle completed under target.
+  // The right key must remain held. Release must be forwarded immediately.
+  bool canRequestManualTopup(uint32_t nowMs) const;
+  bool requestManualTopupPress(uint32_t nowMs);
+  bool requestManualTopupRelease(uint32_t nowMs);
   bool requestSafetyAbort(); // invalid context, without involving the SSR
 
   // Fault recovery is an explicit user action, only after preparation was

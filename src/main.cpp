@@ -50,6 +50,7 @@
 #include "grinder_cycle_gate.h"
 #include "grinder_web_safety.h"
 #include "grinder_encoder_button.h"
+#include "grinder_topup_hold_button.h"
 #include "grinder_target_sync.h"
 
 #ifndef GRINDER_WEIGHT_MONITOR_LOG
@@ -209,6 +210,9 @@ static void publishGrinderWebSafetySnapshot() {
 }
 // B4a.3b: classify clicks non-blockingly; long press starts only a logical run.
 static GrinderEncoderButton grinderEncoderButton;
+static GrinderTopupHoldButton grinderTopupHoldButton;
+// Debounced presentation only; the motor request still uses the raw safety gate.
+static bool grinderTopupFooterVisible = false;
 // Temporary B4a.3b test switch, NOT a motor/SSR enable.
 static constexpr bool kEnableGrinderSimulationLongPress = true;
 static bool grinderTargetSyncPending = false;
@@ -3613,7 +3617,11 @@ void RefreshFooter()
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setFreeFont(FSS9);                 // Select the font
   if (footerOfPageID[pageID] == 0)
-  { const bool skipFunnel = !grinderCycleGate.cycleConsumed() &&
+  {
+    // Blank the entire footer label row before redrawing: space padding alone
+    // leaves pixels behind when NACHM./HALTEN changes to a shorter label.
+    tft.fillRect(0, 137, 320, 25, TFT_BLACK);
+    const bool skipFunnel = !grinderCycleGate.cycleConsumed() &&
         autoDetect != 0 && !grinderProfilePreview.paused() &&
         grinderProfilePreview.state() == GrinderProfileDetector::State::WaitFunnel;
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
@@ -3626,7 +3634,13 @@ void RefreshFooter()
     tft.setTextDatum(TC_DATUM); // Set datum to Top Center
     if (skipFunnel)
       {tft.drawString("   Skip   ",258,140,GFXFF);}
-    else if (statusReadyToSave == 0 || grinderCycleGate.cycleConsumed())
+    else if (grinderCycleGate.state() == GrinderController::State::ManualTopup)
+      {tft.drawString("   HALTEN   ",258,140,GFXFF);}
+    else if (grinderCycleGate.cycleConsumed())
+      {tft.drawString((grinderCycleGate.state() == GrinderController::State::Complete &&
+                       grinderTopupFooterVisible) ?
+                      "   NACHM.   " : "            ",258,140,GFXFF);}
+    else if (statusReadyToSave == 0)
       {tft.drawString("            ",258,140,GFXFF);}
     else
       {tft.drawString("   Save   ",258,140,GFXFF);}
@@ -3642,6 +3656,9 @@ void RefreshFooter()
     u8f.setForegroundColor(taraAllowed ? TFT_WHITE : TFT_BLACK);
     u8f.drawGlyph(166,166,0x25bc);
     u8f.setForegroundColor((skipFunnel ||
+       grinderCycleGate.state() == GrinderController::State::ManualTopup ||
+       (grinderCycleGate.state() == GrinderController::State::Complete &&
+        grinderTopupFooterVisible) ||
        (statusReadyToSave && !grinderCycleGate.cycleConsumed())) ? TFT_WHITE : TFT_BLACK);
     u8f.drawGlyph(258,166,0x25bc);
   }
@@ -4459,7 +4476,7 @@ static void refreshGrinderPreparationOnHmi()
     using CycleState = GrinderController::State;
     switch (grinderCycleGate.state()) {
       case CycleState::Grinding: label = "SIM MAHLT"; break;
-      case CycleState::ManualTopup: label = "SIM MAHLT"; break;
+      case CycleState::ManualTopup: label = "SIM NACHMAHLT"; break;
       case CycleState::Settling: label = "SIM STOPP"; break;
       case CycleState::Complete: label = "SIM FERTIG"; break;
       case CycleState::Fault: label = "SIM FEHLER"; break;
@@ -4587,11 +4604,31 @@ static void serviceGrinderProfilePreview(bool newHx711Data, uint32_t nowMs)
   // A dose/unstable reading can change whether zero correction is allowed
   // without changing detector state. Keep the footer in sync with this guard.
   static bool previousTareAllowed = false;
-  const bool tareAllowed = canRequestGrinderUserTare(millis());
-  if (tareAllowed != previousTareAllowed) {
-    previousTareAllowed = tareAllowed;
-    if (pageID == 0 && displayOff == 0) RefreshFooter();
+  static bool topupDisplayCandidate = false;
+  static uint32_t topupCandidateSinceMs = 0;
+  constexpr uint32_t kTopupDisplayDebounceMs = 500;
+  const uint32_t footerNowMs = millis();
+  const bool tareAllowed = canRequestGrinderUserTare(footerNowMs);
+  const bool topupAllowed = grinderCycleGate.canRequestManualTopup(footerNowMs);
+  if (topupAllowed != topupDisplayCandidate) {
+    topupDisplayCandidate = topupAllowed;
+    topupCandidateSinceMs = footerNowMs;
   }
+  bool footerChanged = tareAllowed != previousTareAllowed;
+  previousTareAllowed = tareAllowed;
+  // Leave all controller limits untouched. Only the HMI waits for a
+  // continuously valid/invalid indication before changing NACHM.
+  if (grinderCycleGate.state() != GrinderController::State::Complete) {
+    if (grinderTopupFooterVisible) {
+      grinderTopupFooterVisible = false;
+      footerChanged = true;
+    }
+  } else if (grinderTopupFooterVisible != topupDisplayCandidate &&
+             footerNowMs - topupCandidateSinceMs >= kTopupDisplayDebounceMs) {
+    grinderTopupFooterVisible = topupDisplayCandidate;
+    footerChanged = true;
+  }
+  if (footerChanged && pageID == 0 && displayOff == 0) RefreshFooter();
 
   const auto currentState = grinderProfilePreview.state();
   const int selected = grinderProfilePreview.selectedProfile();
@@ -4981,6 +5018,36 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
   }
 
 
+    // B4b.2: separate raw-right-key hold-to-top-up. No legacy Save event
+    // can start a top-up; the gate requires a completed, under-target cycle.
+    const auto topupState = grinderCycleGate.state();
+    const bool topupHmiContext = pageID == 0 && displayOff == 0 &&
+        scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && !isShotArmedOrRunningNow() &&
+        !webWizardActive && !loadCellInitializing && !grinderTargetSyncPending &&
+        grinderProfilePreview.selectedProfile() == selectedST;
+    const bool topupAllowed = topupHmiContext &&
+        (topupState == GrinderController::State::ManualTopup ||
+         grinderCycleGate.canRequestManualTopup(millis()));
+    const auto holdEvent = grinderTopupHoldButton.update(
+        digitalRead(buttonRight) == LOW, topupAllowed, millis());
+    if (holdEvent == GrinderTopupHoldButton::Event::Press) {
+      const bool started = grinderCycleGate.requestManualTopupPress(millis());
+      Serial.printf("[GBW B4b.2] Right hold topup start=%d (SSR OFF)\n", started ? 1 : 0);
+      refreshGrinderPreparationOnHmi();
+    } else if (holdEvent == GrinderTopupHoldButton::Event::Release) {
+      const bool stopped = grinderCycleGate.requestManualTopupRelease(millis());
+      Serial.printf("[GBW B4b.2] Right raw release stop=%d (SSR OFF)\n", stopped ? 1 : 0);
+      refreshGrinderPreparationOnHmi();
+    } else if (holdEvent == GrinderTopupHoldButton::Event::Interrupted) {
+      // The HX711 target cap may already have stopped a still-held top-up.
+      // Do not turn that normal Settling state into a spurious Fault.
+      if (grinderCycleGate.state() == GrinderController::State::ManualTopup) {
+        const bool aborted = grinderCycleGate.requestSafetyAbort();
+        Serial.printf("[GBW B4b.2] Topup context lost fault=%d (SSR OFF)\n", aborted ? 1 : 0);
+      }
+      refreshGrinderPreparationOnHmi();
+    }
+
     byte buttonStatebuttonMiddle = digitalRead (buttonMiddle);
     if (buttonStatebuttonMiddle != oldButtonStatebuttonMiddle) 
     {
@@ -5067,6 +5134,7 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
   {  
     lastActionAgainstDisplayOff = millis();
   if (pageID == 0 && (grinderCycleGate.state() == GrinderController::State::Grinding ||
+                       grinderCycleGate.state() == GrinderController::State::ManualTopup ||
                        grinderCycleGate.state() == GrinderController::State::Settling))
   {
     // Discard rotation while simulated grinding; only short click cancels.
@@ -5829,6 +5897,7 @@ void setup()
   
   pinMode(buttonMiddle, INPUT_PULLUP);
   pinMode(buttonRight, INPUT_PULLUP);
+  grinderTopupHoldButton.reset(digitalRead(buttonRight) == LOW, millis());
   // Der SSR-Ausgang wurde bereits zu Beginn von setup() auf AUS gesetzt.
 
   syncSiebtraegerMenuItems();

@@ -14,6 +14,7 @@ public:
 
   struct Config {
     uint32_t maxRunMs = 30000;       // provisional, tune before motor tests
+    uint32_t maxTopupMs = 3000;     // B4b.2: hold-to-run has a separate hard cap
     uint32_t maxSampleAgeMs = 1000;  // no new HX711 sample -> stop
     uint32_t settleMs = 450;         // original grinder's measurement delay
     float manualThresholdG = 0.5f;  // near target -> hold-to-top-up
