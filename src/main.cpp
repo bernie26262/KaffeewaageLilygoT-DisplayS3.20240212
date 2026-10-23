@@ -48,6 +48,7 @@
 #include "grinder_weight_stability.h"
 #include "grinder_profile_detector.h"
 #include "grinder_cycle_gate.h"
+#include "grinder_output_guard.h"
 #include "grinder_web_safety.h"
 #include "grinder_encoder_button.h"
 #include "grinder_topup_hold_button.h"
@@ -198,6 +199,9 @@ static GrinderProfileDetector::Config grinderPreviewConfig()
 static GrinderProfileDetector grinderProfilePreview(grinderPreviewConfig());
 // B4a.3b: purely logical controller. No relay/GPIO connection or motor run.
 static GrinderCycleGate grinderCycleGate(grinderProfilePreview);
+// B4c.1: diagnostic output veto. It has NO connection to grinder_relay.cpp,
+// and even a positive permitted() result can never energize GPIO16.
+static GrinderOutputGuard grinderOutputGuard;
 // WebSocket callbacks run on the AsyncWebServer task. Only loop() may
 // mutate GrinderCycleGate. Publish a single consistent, atomic snapshot
 // for WebUI command admission and queue a one-way abort request.
@@ -5993,6 +5997,46 @@ void loop(void)
   // millis() is read again: detector-owned tare may be blocking.
   grinderCycleGate.tick(millis());
   publishGrinderWebSafetySnapshot();
+  // B4c.1: dry-run of the future SSR output gate. GPIO16 remains HIGH.
+  // Keep the veto independent of the existing GrinderCycleGate, so a future
+  // actuator path must pass BOTH checks. No LOW write is added in this phase.
+  const bool otaMotorInhibit = coffeeOtaMotorInhibitRequested();
+  const bool grinderOutputContextValid =
+      pageID == 0 && displayOff == 0 &&
+      scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE &&
+      !webWizardActive && !loadCellInitializing &&
+      !isShotArmedOrRunningNow() && !grinderTargetSyncPending &&
+      grinderProfilePreview.selectedProfile() == selectedST &&
+      grinderProfilePreview.readyToGrind();
+  GrinderOutputGuard::Inputs outputInputs;
+  outputInputs.logicRequest = grinderCycleGate.logicRunning();
+  outputInputs.manualTopup =
+      grinderCycleGate.state() == GrinderController::State::ManualTopup;
+  outputInputs.contextValid = grinderOutputContextValid;
+  outputInputs.sensorFresh = grinderWeightStability.hasFreshSample(millis());
+  outputInputs.webAbortPending =
+      grinderWebAbortRequested.load(std::memory_order_acquire);
+  outputInputs.otaOrRebootPending = otaMotorInhibit;
+  grinderOutputGuard.observe(outputInputs, millis());
+  if (grinderOutputGuard.faultLatched() && grinderCycleGate.logicRunning()) {
+    grinderCycleGate.requestSafetyAbort();
+    publishGrinderWebSafetySnapshot();
+  }
+  if (grinderCycleGate.state() == GrinderController::State::Idle &&
+      grinderProfilePreview.state() == GrinderProfileDetector::State::WaitVessel) {
+    grinderOutputGuard.clearAfterUnprepared(true, true, otaMotorInhibit);
+  }
+  static bool previousOutputCandidate = false;
+  static GrinderOutputGuard::Reason previousOutputReason =
+      GrinderOutputGuard::Reason::NoRequest;
+  if (grinderOutputGuard.permitted() != previousOutputCandidate ||
+      grinderOutputGuard.reason() != previousOutputReason) {
+    previousOutputCandidate = grinderOutputGuard.permitted();
+    previousOutputReason = grinderOutputGuard.reason();
+    Serial.printf("[GBW B4c.1] wouldPermit=%d inhibit=%u (GPIO16 HIGH, SSR OFF)\n",
+                  previousOutputCandidate ? 1 : 0,
+                  static_cast<unsigned>(previousOutputReason));
+  }
   static GrinderController::State lastGrinderSimulationState = GrinderController::State::Idle;
   if (grinderCycleGate.state() != lastGrinderSimulationState) {
     lastGrinderSimulationState = grinderCycleGate.state();

@@ -3,8 +3,10 @@
 
 #include <Arduino.h>
 #include <Update.h>
+#include <atomic>
 
 static bool otaRebootRequested = false;
+static std::atomic<bool> otaMotorInhibitRequested{false};
 static unsigned long otaRebootRequestMs = 0;
 static bool otaUploadRejected = false;
 static bool otaUploadCompletedSuccessfully = false;
@@ -447,6 +449,10 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
       return;
     }
 
+    // The AsyncWebServer callback runs outside the main loop. Latch this
+    // BEFORE beginning an accepted upload; the loop will abort the logical
+    // grinder request on its next iteration. B4c.1 never energizes an SSR.
+    otaMotorInhibitRequested.store(true, std::memory_order_release);
     coffeeBleScaleStopForOta();
 
     Serial.print("Firmware update started: ");
@@ -484,8 +490,13 @@ void coffeeOtaBegin(AsyncWebServer& server) {
 }
 
 void coffeeOtaRequestReboot() {
+  otaMotorInhibitRequested.store(true, std::memory_order_release);
   otaRebootRequested = true;
   otaRebootRequestMs = millis();
+}
+
+bool coffeeOtaMotorInhibitRequested() {
+  return otaMotorInhibitRequested.load(std::memory_order_acquire);
 }
 
 void coffeeOtaLoop() {
