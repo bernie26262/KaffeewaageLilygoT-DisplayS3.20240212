@@ -2344,9 +2344,9 @@ static bool handleCoffeeWebCommand(const char* cmd)
       webState, (snapshot & 0x100UL) != 0, cmdEquals(cmd, CMD_SAVE_DOSE));
   if (webPolicy != GrinderWebCommandPolicy::Allow) {
     if (webPolicy == GrinderWebCommandPolicy::AbortAndReject) {
-      // Immediately force GPIO16 HIGH; loop() alone owns the fault state.
-      grinderRelayForceOff();
+      // Queue the fault and latch physical OFF before returning to WebUI.
       grinderWebAbortRequested.store(true, std::memory_order_release);
+      grinderRelayForceOff();
       Serial.println("[GBW B4a.4] WebUI command rejected: safety abort queued (SSR OFF)");
     } else {
       Serial.println("[GBW B4a.4] WebUI simulated dose save rejected (SSR OFF)");
@@ -5957,8 +5957,9 @@ void setup()
 
 void loop(void)
 { 
-  // Physical OFF before potentially slow WiFi, OTA and HMI work.
-  grinderRelayForceOff();
+  // B4c.2b: keep the previous output decision during normal loop work.
+  // Forcing HIGH at every iteration would pulse an eventual real SSR.
+  // Async aborts/OTA still latch HIGH immediately in the output driver.
   coffeeWebLoop();
   coffeeWifiLoop();
   coffeeOtaLoop();
@@ -6027,9 +6028,12 @@ void loop(void)
   }
   if (grinderCycleGate.state() == GrinderController::State::Idle &&
       grinderProfilePreview.state() == GrinderProfileDetector::State::WaitVessel) {
-    grinderOutputGuard.clearAfterUnprepared(true, true, otaMotorInhibit);
+    if (!grinderWebAbortRequested.load(std::memory_order_acquire) &&
+        grinderOutputGuard.clearAfterUnprepared(true, true, otaMotorInhibit)) {
+      grinderRelayRearmAfterUnprepared();
+    }
   }
-  grinderRelayApplyGuard(grinderOutputGuard); // OFF-only in B4c.2a.
+  grinderRelayApplyGuard(grinderOutputGuard); // OFF-only unless explicit bench build.
   static bool previousOutputCandidate = false;
   static GrinderOutputGuard::Reason previousOutputReason =
       GrinderOutputGuard::Reason::NoRequest;

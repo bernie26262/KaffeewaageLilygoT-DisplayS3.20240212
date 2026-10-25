@@ -6,9 +6,9 @@
 #include <Update.h>
 #include <atomic>
 
-static bool otaRebootRequested = false;
+static std::atomic<bool> otaRebootRequested{false};
 static std::atomic<bool> otaMotorInhibitRequested{false};
-static unsigned long otaRebootRequestMs = 0;
+static std::atomic<uint32_t> otaRebootRequestMs{0};
 static bool otaUploadRejected = false;
 static bool otaUploadCompletedSuccessfully = false;
 static String otaUploadRejectReason;
@@ -451,7 +451,7 @@ static void handleFirmwareUpload(AsyncWebServerRequest *request, const String& f
     }
 
     // Force physical HIGH/OFF immediately in this AsyncWebServer callback.
-    grinderRelayForceOff();
+    grinderRelayForceOffUntilRestart();
     otaMotorInhibitRequested.store(true, std::memory_order_release);
     coffeeBleScaleStopForOta();
 
@@ -490,10 +490,10 @@ void coffeeOtaBegin(AsyncWebServer& server) {
 }
 
 void coffeeOtaRequestReboot() {
-  grinderRelayForceOff();
+  grinderRelayForceOffUntilRestart();
   otaMotorInhibitRequested.store(true, std::memory_order_release);
-  otaRebootRequested = true;
-  otaRebootRequestMs = millis();
+  otaRebootRequestMs.store(millis(), std::memory_order_relaxed);
+  otaRebootRequested.store(true, std::memory_order_release);
 }
 
 bool coffeeOtaMotorInhibitRequested() {
@@ -501,7 +501,8 @@ bool coffeeOtaMotorInhibitRequested() {
 }
 
 void coffeeOtaLoop() {
-  if (otaRebootRequested && (millis() - otaRebootRequestMs > 1000)) {
+  if (otaRebootRequested.load(std::memory_order_acquire) &&
+      (millis() - otaRebootRequestMs.load(std::memory_order_relaxed) > 1000)) {
     Serial.println("Restarting ESP32 after OTA request...");
     ESP.restart();
   }

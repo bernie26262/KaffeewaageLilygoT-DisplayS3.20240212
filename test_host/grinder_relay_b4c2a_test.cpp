@@ -72,6 +72,12 @@ int main() {
   assert(topupGuard.permitted());
   grinderRelayApplyGuard(topupGuard);
 
-  assert(eventCount == 8);
+  grinderRelayRearmAfterUnprepared();
+  grinderRelayApplyGuard(topupGuard); // Still OFF in production mode.
+  grinderRelayForceOffUntilRestart();
+  grinderRelayRearmAfterUnprepared(); // Must not clear the OTA/reboot latch.
+  grinderRelayApplyGuard(topupGuard);
+
+  assert(eventCount == 13);
   std::puts("grinder_relay_b4c2a_test: PASS (GPIO16 never LOW)");
 }
