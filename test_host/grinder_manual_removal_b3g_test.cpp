@@ -13,7 +13,48 @@ static void prepareProfile(Detector& d) {
   assert(d.selectManualProfile(0));
 }
 
+static void testBootLoadedRemoval(bool autodetect) {
+  Detector d;
+  assert(d.setProfile(0, {449.6f, 100.1f, 8.5f}));
+  assert(d.setAutoDetect(autodetect));
+  if (!autodetect) assert(d.selectManualProfile(0));
+
+  // LoadCell.start(2000, true) tares the vessel already present at boot.
+  // The detector has never entered a Ready state.
+  d.onWeightSample(0.0f, true, 100);
+  assert(d.state() == State::WaitVessel && !d.readyToGrind());
+  // Small negative drift is not a vessel removal.
+  d.onWeightSample(-29.0f, true, 150);
+  assert(d.state() == State::WaitVessel);
+  assert(d.takeTareRequest() == Tare::None);
+  // A transient drop that recovers must not request any tare.
+  d.onWeightSample(-549.3f, false, 200);
+  assert(d.state() == State::CheckingRemoval && !d.readyToGrind());
+  d.onWeightSample(0.0f, true, 400);
+  assert(d.state() == State::WaitVessel);
+  assert(d.takeTareRequest() == Tare::None);
+
+  // A confirmed lift after boot must request exactly one removal tare,
+  // including when Autodetect is OFF.
+  d.onWeightSample(-549.3f, false, 500);
+  assert(d.state() == State::CheckingRemoval);
+  d.onWeightSample(-549.3f, true, 2100);
+  assert(d.takeTareRequest() == Tare::AfterRemoval);
+  assert(d.takeTareRequest() == Tare::None);
+  d.onTareResult(true, 2150);
+  assert(d.state() == State::WaitPostTare && !d.readyToGrind());
+  // The fresh post-tare zero, not the previously cached sample, finishes.
+  d.onWeightSample(-549.3f, false, 2175);
+  assert(d.state() == State::WaitPostTare);
+  d.onWeightSample(0.02f, true, 2300);
+  assert(d.state() == State::WaitVessel && !d.readyToGrind());
+  d.onWeightSample(0.0f, true, 2400);
+  assert(d.takeTareRequest() == Tare::None);
+}
+
 int main() {
+  testBootLoadedRemoval(true);
+  testBootLoadedRemoval(false);
   {
     Detector d;
     prepareProfile(d);

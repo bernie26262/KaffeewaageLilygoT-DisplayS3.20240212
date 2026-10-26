@@ -233,15 +233,18 @@ void GrinderProfileDetector::onWeightSample(float grams, bool stable, uint32_t n
     return;
   }
 
-  if (readyToGrind()) {
-    // After tare, removing a heavy vessel produces a strongly negative weight.
-    // Revoke ready status immediately; restore only if it bounces back.
-    if (grams < -config_.liftThresholdG)
-    {
+  if (readyToGrind() || state_ == State::WaitVessel) {
+    // HX711 also tares during boot. If a vessel was already on the scale,
+    // its removal yields a negative weight while still in WaitVessel.
+    // Re-zero that confirmed removal even without profile readiness and
+    // independently of Autodetect; never grant readiness as a side effect.
+    if (grams < -config_.liftThresholdG) {
       preRemovalState_ = state_;
       beginCandidate(State::CheckingRemoval, grams, nowMs);
+      return;
     }
-    return;
+    // A prepared vessel must not fall through into placement detection.
+    if (readyToGrind()) return;
   }
   if (state_ == State::CheckingRemoval) {
     if (grams >= -config_.emptyThresholdG) {
