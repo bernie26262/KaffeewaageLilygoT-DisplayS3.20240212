@@ -82,26 +82,62 @@ int main() {
     assert(g.canRequestManualTopup(3101)); // allow multiple deliberate holds
     assert(g.requestManualTopupPress(3102));
     assert(g.state() == C::State::ManualTopup);
-    feed(d,g,8.46f,true,3103); // weight cap even if button stays down
+    feed(d,g,8.46f,true,3103); // manual hold may cross target
+    assert(g.state() == C::State::ManualTopup && g.logicRunning());
+    assert(g.requestManualTopupRelease(3104));
     assert(g.state() == C::State::Settling && !g.logicRunning());
-    assert(!g.requestManualTopupRelease(3104));
     feed(d,g,8.46f,true,3470);
     g.tick(3600);
     assert(g.state() == C::State::Complete);
-    assert(!g.canRequestManualTopup(3601)); // overdose cannot rearm
-    assert(!g.requestManualTopupPress(3601));
+    assert(g.canRequestManualTopup(3601)); // explicit hold even above target
+    assert(g.requestManualTopupPress(3601));
+    assert(g.state() == C::State::ManualTopup);
+    assert(g.requestManualTopupRelease(3602));
   }
-  // Separate 3s bound on a held topup, without touching normal 30s limit.
+  // Separate 3s bound is a NORMAL stop, with re-press only after raw release.
+  // It does not affect the 30s normal-grinding safety limit.
   {
     D d; G g(d); prepare(d,g,100);
     finishUnderTarget(d,g,2100);
-    assert(g.requestManualTopupPress(2601));
+    B b; b.reset(false, 2500);
+    assert(b.update(true, true, 2601) == E::None);
+    assert(b.update(true, true, 2626) == E::Press);
+    assert(g.requestManualTopupPress(2626));
     // Fresh samples but still held with no weight change.
     for (uint32_t ms=2800; ms<5601; ms+=200) feed(d,g,8.2f,true,ms);
-    g.tick(5601);
-    assert(g.state() == C::State::Fault && !g.logicRunning());
-    assert(g.stopReason() == C::StopReason::RuntimeExceeded);
-    assert(!g.requestManualTopupPress(5602));
+    assert(g.state() == C::State::ManualTopup);
+    g.tick(5626); // exactly 3s from activation
+    assert(g.state() == C::State::Settling && !g.logicRunning());
+    assert(g.stopReason() == C::StopReason::ManualTimeLimit);
+    assert(!g.requestManualTopupPress(5627));
+    assert(b.update(true, false, 5627) == E::Interrupted);
+    feed(d,g,8.60f,true,5800);
+    feed(d,g,8.60f,true,6080);
+    assert(g.state() == C::State::Complete);
+    assert(g.canRequestManualTopup(6081)); // also beyond target
+    assert(b.update(true, true, 6081) == E::None); // still held: no restart
+    assert(b.update(false, true, 6082) == E::None);
+    assert(b.update(true, true, 6100) == E::None);
+    assert(b.update(true, true, 6125) == E::Press);
+    assert(g.requestManualTopupPress(6125));
+    assert(g.state() == C::State::ManualTopup && g.logicRunning());
+    assert(b.update(false, true, 6200) == E::Release);
+    assert(g.requestManualTopupRelease(6200));
+    assert(g.stopReason() == C::StopReason::ManualReleased);
+    assert(!g.logicRunning());
+  }
+  // Even a large stable deficit after a normally completed dose allows an
+  // EXPLICIT top-up, but must never restart the automatic Grinding state.
+  {
+    D d; G g(d); prepare(d,g,100);
+    finishUnderTarget(d,g,2100);
+    feed(d,g,3.5f,true,2601); // 5.0g below target: former 0.5g gate denied
+    assert(g.canRequestManualTopup(2602));
+    assert(g.requestManualTopupPress(2602));
+    assert(g.state() == C::State::ManualTopup && g.logicRunning());
+    assert(!g.requestStart(2603));
+    assert(g.requestManualTopupRelease(2604));
+    assert(!g.logicRunning());
   }
   // Not available from ordinary Idle, incomplete, manually canceled cycle.
   {

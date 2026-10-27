@@ -90,12 +90,8 @@ void GrinderCycleGate::onWeightSample(float grams, bool stable, uint32_t nowMs) 
     return;
   }
   controller_.onWeightSample(grams, nowMs);
-  // Manual top-up is a hold action, but even a held button may not continue
-  // requesting motor operation after the desired weight is reached.
-  if (controller_.state() == GrinderController::State::ManualTopup &&
-      grams >= runningTargetG_ - 0.05f) {
-    controller_.onButtonRelease(nowMs);
-  }
+  // A deliberate manual top-up may exceed the target. Release, the dedicated
+  // three-second limit, or a genuine safety fault ends this request.
 }
 
 void GrinderCycleGate::tick(uint32_t nowMs) {
@@ -135,22 +131,23 @@ bool GrinderCycleGate::canRequestManualTopup(uint32_t nowMs) const {
       std::fabs(runningTargetG_ - detector_.selectedTargetG()) > 0.001f ||
       !sampleValid_ || !sampleStable_ ||
       nowMs - lastSampleMs_ > config_.maxStartSampleAgeMs) return false;
-  // Require a confirmed normal completion (or an earlier released top-up),
-  // and a SMALL positive deficit. No restart from cancel, fault or overdose.
+  // After a normally completed dose (or previous top-up) the user may
+  // deliberately top up irrespective of the final dose weight. Never restart
+  // from cancellation, fault, lost preparation or confirmed vessel removal.
   const auto reason = controller_.stopReason();
   if (reason != GrinderController::StopReason::TargetReached &&
-      reason != GrinderController::StopReason::ManualReleased) return false;
-  const float deficitG = runningTargetG_ - sampleG_;
-  return deficitG >= 0.10f && deficitG <= 0.50f;
+      reason != GrinderController::StopReason::ManualReleased &&
+      reason != GrinderController::StopReason::ManualTimeLimit) return false;
+  return sampleG_ >= config_.minActiveWeightG;
 }
 
 bool GrinderCycleGate::requestManualTopupPress(uint32_t nowMs) {
   observePreparation();
   if (!canRequestManualTopup(nowMs)) return false;
-  // B1 will ONLY enter ManualTopup inside this 0.5 g window. Full Grinding
-  // is deliberately unreachable from this consumed-cycle action.
-  controller_.onButtonPress(nowMs);
-  return controller_.state() == GrinderController::State::ManualTopup;
+  // An explicit top-up MUST NOT fall back to normal Grinding when weight is
+  // well below target. The B1 generic button would do exactly that.
+  return controller_.onManualTopupPress(nowMs) &&
+         controller_.state() == GrinderController::State::ManualTopup;
 }
 
 bool GrinderCycleGate::requestManualTopupRelease(uint32_t nowMs) {

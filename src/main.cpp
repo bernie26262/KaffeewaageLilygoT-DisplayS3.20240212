@@ -5023,8 +5023,8 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
   }
 
 
-    // B4b.2: separate raw-right-key hold-to-top-up. No legacy Save event
-    // can start a top-up; the gate requires a completed, under-target cycle.
+    // Separate raw-right-key hold-to-top-up. A completed cycle is required;
+    // even above target, only a new explicit press may start another 3s dose.
     const auto topupState = grinderCycleGate.state();
     const bool topupHmiContext = pageID == 0 && displayOff == 0 &&
         scaleUiMode == SCALE_UI_MODE_SINGLE_DOSE && !isShotArmedOrRunningNow() &&
@@ -5044,7 +5044,7 @@ void rotaryMenu() { //This handles the bulk of the menu functions without needin
       Serial.printf("[GBW B4b.2] Right raw release stop=%d (SSR OFF)\n", stopped ? 1 : 0);
       refreshGrinderPreparationOnHmi();
     } else if (holdEvent == GrinderTopupHoldButton::Event::Interrupted) {
-      // The HX711 target cap may already have stopped a still-held top-up.
+      // The normal 3-second limit may have stopped a still-held top-up.
       // Do not turn that normal Settling state into a spurious Fault.
       if (grinderCycleGate.state() == GrinderController::State::ManualTopup) {
         const bool aborted = grinderCycleGate.requestSafetyAbort();

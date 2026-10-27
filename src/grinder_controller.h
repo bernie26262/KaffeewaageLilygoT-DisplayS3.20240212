@@ -9,7 +9,8 @@ public:
   enum class State : uint8_t { Idle, Grinding, ManualTopup, Settling, Complete, Fault };
   enum class StopReason : uint8_t {
     None, TargetReached, UserCancelled, ManualReleased,
-    EmergencyStop, InvalidWeight, StaleWeight, RuntimeExceeded
+    EmergencyStop, InvalidWeight, StaleWeight, RuntimeExceeded,
+    ManualTimeLimit
   };
 
   struct Config {
@@ -29,6 +30,8 @@ public:
   bool setLatencyG(float latencyG); // valid range: 0..2 g; not while active
   void onWeightSample(float grams, uint32_t nowMs);
   void onButtonPress(uint32_t nowMs);
+  // Explicit manual top-up from a completed cycle; never falls back to Grinding.
+  bool onManualTopupPress(uint32_t nowMs);
   void onButtonRelease(uint32_t nowMs);
   void tick(uint32_t nowMs);
   void emergencyStop();             // latches Fault, never starts the relay

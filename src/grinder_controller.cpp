@@ -63,7 +63,10 @@ void GrinderController::onWeightSample(float grams, uint32_t nowMs) {
   // a late sample must not hide a sensor stall or a run-time overrun.
   if (active() && nowMs - runStartMs_ >=
       (state_ == State::ManualTopup ? config_.maxTopupMs : config_.maxRunMs)) {
-    fault(StopReason::RuntimeExceeded);
+    if (state_ == State::ManualTopup)
+      stop(StopReason::ManualTimeLimit, nowMs);
+    else
+      fault(StopReason::RuntimeExceeded);
     return;
   }
   // A delayed sample must not disguise a sensor outage, including while
@@ -101,6 +104,18 @@ void GrinderController::onButtonPress(uint32_t nowMs) {
   learnLatency_ = false;
 }
 
+bool GrinderController::onManualTopupPress(uint32_t nowMs) {
+  // Only an already completed cycle may be topped up. The gate additionally
+  // checks preparation, sample stability, profile and prior stop reason.
+  if (state_ != State::Complete || !(targetG_ >= 5.0f) ||
+      !freshWeight(nowMs)) return false;
+  state_ = State::ManualTopup;
+  stopReason_ = StopReason::None;
+  runStartMs_ = nowMs;
+  learnLatency_ = false;
+  return true;
+}
+
 void GrinderController::onButtonRelease(uint32_t nowMs) {
   // This must always stop a manual top-up, irrespective of measured weight.
   if (state_ == State::ManualTopup) stop(StopReason::ManualReleased, nowMs);
@@ -110,7 +125,10 @@ void GrinderController::tick(uint32_t nowMs) {
   if (active()) {
     if (nowMs - runStartMs_ >=
         (state_ == State::ManualTopup ? config_.maxTopupMs : config_.maxRunMs)) {
-      fault(StopReason::RuntimeExceeded);
+      if (state_ == State::ManualTopup)
+        stop(StopReason::ManualTimeLimit, nowMs);
+      else
+        fault(StopReason::RuntimeExceeded);
       return;
     }
     if (!freshWeight(nowMs)) {
