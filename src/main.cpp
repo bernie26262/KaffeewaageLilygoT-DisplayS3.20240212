@@ -2354,6 +2354,14 @@ static bool handleCoffeeWebCommand(const char* cmd)
     return false;
   }
 
+  // B4d.1: Remote motor start / top-up is categorically forbidden.
+  // Only the local TFT encoder and right button may request a cycle.
+  // The router below continues to reject all otherwise unknown commands.
+  if (grinderWebIsMotorStartCommand(cmd)) {
+    Serial.println("[GBW B4d.1] WebUI motor start rejected");
+    return false;
+  }
+
   if (webCommandBlockedByRunningShot(cmd)) {
     return false;
   }

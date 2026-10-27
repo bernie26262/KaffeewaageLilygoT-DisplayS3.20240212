@@ -26,6 +26,22 @@ static C stoppedController() {
 }
 
 int main() {
+  // B4d.1: No WebSocket motor-start spelling may be accepted by the
+  // remote-command gate, including suffixed/replayed variants.
+  for (const char* command : {"grind_start", "grinder_start", "gbw_start",
+                              "start_grind", "start_grinder", "start_gbw",
+                              "grind_topup", "grinder_topup", "gbw_topup",
+                              "motor_on", "grinder_on", "gbw_on",
+                              "gbw_start_1", "grinder_topup_start"}) {
+    assert(grinderWebIsMotorStartCommand(command));
+  }
+  for (const char* command : {"tare", "save_dose", "mode_settings",
+                              "gbw_measure_begin_0", "set_selected_siebtraeger_weight_8.4",
+                              "grind_status", "grinder_startled"}) {
+    assert(!grinderWebIsMotorStartCommand(command));
+  }
+  assert(!grinderWebIsMotorStartCommand(nullptr));
+
   // Previously tick() could mark a stopped run Complete despite >1s of
   // missing HX711 samples. It must now latch a stale-sample fault.
   {

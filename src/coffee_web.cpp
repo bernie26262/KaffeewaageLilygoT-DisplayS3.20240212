@@ -100,6 +100,8 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(<!doctype html>
         <button id="save" class="compact" disabled>Save Dose</button>
       </div>
 
+      <div class="small">Mahlstart und Nachmahlen nur direkt am TFT. WebUI-Eingriffe während des Mahlens lösen einen Sicherheitsabbruch aus.</div>
+
 
       <div class="scale-select-row small">
         <span class="label">Siebträger</span>
