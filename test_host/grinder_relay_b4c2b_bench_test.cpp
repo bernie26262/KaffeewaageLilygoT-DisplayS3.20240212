@@ -18,6 +18,7 @@ uint8_t lastValue = LOW;
 unsigned lowWrites = 0;
 unsigned highWrites = 0;
 unsigned outputModes = 0;
+uint32_t fakeMillis = 0;
 
 void expectOff() { assert(lastValue == HIGH); }
 void expectOn() { assert(lastValue == LOW); }
@@ -30,6 +31,8 @@ GrinderOutputGuard::Inputs ready() {
   return input;
 }
 }  // namespace
+
+uint32_t millis() { return fakeMillis; }
 
 void digitalWrite(uint8_t pin, uint8_t value) {
   assert(pin == PIN_GRINDER_SSR);
@@ -90,5 +93,25 @@ int main() {
 
   assert(lowWrites == 3);
   assert(highWrites > lowWrites);
-  std::puts("grinder_relay_b4c2b_bench_test: PASS (bench LOW only with permit)");
+
+  // B4c.6: a separate supervisor service must be able to force HIGH even
+  // without another main-loop observation. A stale guard cannot rearm LOW.
+  grinderRelayWatchdogPoll(749);
+  expectOn();
+  fakeMillis = 600;
+  grinderRelayApplyGuard(guard); // A live main loop refreshes the heartbeat.
+  grinderRelayWatchdogPoll(750);
+  expectOn();
+  grinderRelayWatchdogPoll(1349);
+  expectOn();
+  grinderRelayWatchdogPoll(1350);
+  expectOff();
+  assert(grinderRelayWatchdogTripped());
+  grinderRelayApplyGuard(guard);
+  expectOff();
+
+  grinderRelayInitOff(); // Simulate hardware reset: output remains OFF.
+  expectOff();
+  assert(!grinderRelayWatchdogTripped());
+  std::puts("grinder_relay_b4c2b_bench_test: PASS (guard + heartbeat watchdog)");
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 class GrinderOutputGuard;
 
 // B4c.2b: all writes to active-LOW GPIO16 belong to this module.
@@ -23,3 +25,10 @@ void grinderRelayRearmAfterUnprepared();
 // Apply the independent guard, never an unchecked motor request. Only
 // dedicated bench builds can actually emit LOW.
 void grinderRelayApplyGuard(const GrinderOutputGuard& guard);
+
+// B4c.6 bench-only supervisor: a second FreeRTOS task checks that the
+// main loop keeps refreshing an active LOW output. Missing heartbeats
+// force HIGH and latch an abort. This remains a SOFTWARE safeguard, not
+// an independent mains disconnect or a release for production AC loads.
+void grinderRelayWatchdogPoll(uint32_t nowMs);
+bool grinderRelayWatchdogTripped();

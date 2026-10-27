@@ -9,3 +9,4 @@ static constexpr uint8_t OUTPUT = 1;
 
 void digitalWrite(uint8_t pin, uint8_t level);
 void pinMode(uint8_t pin, uint8_t mode);
+uint32_t millis();
